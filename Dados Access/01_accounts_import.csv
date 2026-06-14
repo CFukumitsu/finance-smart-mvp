@@ -1,0 +1,9 @@
+﻿id,name,type,closing_day,due_day,limit_amount,current_balance,active
+ab0a4e7d-332c-5b6c-8661-b3c803d77347,Contas PJ,Conta,,,0,0,true
+6f173e4b-5f49-5601-bd75-e7e30a563c96,Personnalite Black,Cartão,9,14,0,0,true
+8b354032-20b0-5ae8-8866-959fc2824a6d,Cheque PJ,Conta,,,0,0,true
+f4ed4d2b-57ff-5532-8056-f4b9c09137cf,Santander - 8487,Cartão,24,1,0,0,true
+5d52afe6-4001-54ea-b307-1bac2e1db6c6,Samsung,Cartão,24,1,0,0,true
+b9e6f67e-29a9-5746-aaf0-968723c3bb76,Itaú,Conta,,,0,0,true
+f9c9688b-7582-57bb-9780-7213a7ab4505,Cheque PF,Conta,,,0,0,true
+d6ea72ea-be3e-5d90-9703-d1671e512bf7,Porto Seguro - 1127,Cartão,2,14,0,0,true

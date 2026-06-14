@@ -1,0 +1,17 @@
+{
+  "accounts": 8,
+  "categories": 74,
+  "original_tipogasto": 72,
+  "extra_categories_created": 2,
+  "competences": 125,
+  "transactions": 15248,
+  "errors": 0,
+  "date_min": "2018-01-01",
+  "date_max": "2028-05-07",
+  "operations": {
+    "D": 13897,
+    "C": 1351
+  },
+  "future_transactions_pending": 239,
+  "category_mixed_count": 36
+}

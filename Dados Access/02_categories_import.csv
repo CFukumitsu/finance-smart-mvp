@@ -1,0 +1,75 @@
+﻿id,name,type,monthly_limit,monthly_goal,active
+fc46d55e-da60-5c85-bf68-daa7de0e8f99,Sem categoria sem vínculo,Receita,0,0,true
+ce8c8e21-65a1-5aa7-8fb0-4f20ae98f760,Sem categoria,Despesa,0,0,true
+35f39113-9ab1-503b-9b06-c191c8394e6e,Isabella,Despesa,0,0,true
+b2f9cd0f-cd89-5974-884f-10497e05861c,Rango Extra,Despesa,0,0,true
+3d24e207-2ae6-5689-ae2b-0d6a856c9171,Telefone,Despesa,0,0,true
+f3e57edf-0e8f-5aef-b6c1-21155c907fb6,Taxas,Despesa,0,0,true
+9cf94f02-4b68-5fdb-aa70-f63630cd3bfc,Despesas Casa,Despesa,0,0,true
+06ffc9fe-e245-585a-bdd4-1f84b63111f0,Superfluos,Despesa,0,0,true
+708be53d-003a-5e88-9f7a-3873c3ade870,Carol,Despesa,0,0,false
+a5fe8c90-e1a3-5288-9fee-90c2670ad4c2,Impostos,Despesa,0,0,true
+47588b31-6300-5caf-945c-14404bc67e61,Saúde,Despesa,0,0,true
+3a698f23-b5a2-5323-b9dc-f82cc67d3003,Almoço Trampo,Despesa,0,0,false
+3b849d7f-d5f3-55c0-b6e1-8bfb63e02f37,Diversão,Despesa,0,0,true
+9084ea7e-5ab5-5ea4-b8dc-5b5d7a666e3d,Carro dia-a-dia,Despesa,0,0,true
+0be220c4-ef76-5984-b1cb-c67c54727eba,Carro Extra,Despesa,0,0,true
+bb431d16-7647-53c4-ba05-36cea76f0588,Viagem,Despesa,0,0,true
+b6352ae1-79ac-5ec3-8f1c-38392e1002ad,Outros,Despesa,0,0,true
+6a41ef81-6f1a-5ca4-9487-40bec029bf6c,Presente,Despesa,0,0,true
+587dcd2d-255f-559a-8da4-9b3241e27eb4,Faxineira,Despesa,0,0,true
+796f9c5a-4466-57f5-8e65-b7dd43b62550,Supermercado,Despesa,0,0,true
+7d28ba14-d571-52b3-b202-0e2ea2690aac,Luz,Despesa,0,0,false
+395210f9-cac7-5973-84bd-8eeff1c3733e,Gael,Despesa,0,0,true
+23f6854c-b99d-5a48-b870-bcd64073330b,Combustível,Despesa,0,0,true
+b4846dc6-6244-55c9-802f-f98164099320,Condução,Despesa,0,0,true
+ba01b2ed-bb46-5257-ae74-155f4193bc2d,Roupas,Despesa,0,0,true
+aef5b7f0-cffe-5d0a-b5e0-bb0659ab3d38,Poupança,Receita,0,0,true
+13d175a2-6ea5-59d1-a080-415174284798,Utensílio Doméstico,Despesa,0,0,true
+69271e05-be43-5e4a-8532-c0bfd6d169ab,Pai,Despesa,0,0,false
+219943d5-0ab2-56da-ab6f-79586577b00e,Rodrigo,Despesa,0,0,true
+48123e4d-ed86-59db-a665-dda16cc33141,Festa,Despesa,0,0,true
+b8690f89-237a-552b-8fb1-94c2f98f33bb,Multa,Despesa,0,0,true
+7a0612eb-0544-5e1c-bb52-5c5678b2b6b3,Feira,Despesa,0,0,true
+7ae266d1-bc8a-591e-88e0-0c22528b7e2f,Estac. Trampo,Despesa,0,0,true
+75c91983-fc87-5d87-ac1c-e80220dd8927,Estética,Despesa,0,0,true
+e44e6c35-dc8f-5410-ad7b-bafc54670f02,Poker,Despesa,0,0,true
+e3a22c3d-3638-5bff-9303-d78878a9f2e2,Mudança,Despesa,0,0,false
+57db6d71-945f-506e-a94b-9f0317a6c555,Compra Coletiva,Despesa,0,0,false
+225350cb-5867-5a88-8ed0-ffb3b05297fc,Estudo,Despesa,0,0,true
+264d0afc-3bca-59ee-bce8-c16ac51d7d65,MBA,Despesa,0,0,false
+c1f7952f-b22e-5325-838a-b77f72d45730,Crianças,Despesa,0,0,true
+b72773c0-4d29-505d-81f5-3034dadc46d9,Mãe,Despesa,0,0,true
+cdc3b086-bf8f-5e74-9e17-dbe91d3f9d7c,Gramado,Despesa,0,0,false
+44845fdc-7609-5756-a995-8c98936781c8,Namoro,Despesa,0,0,true
+98cadd9b-a4cd-519b-baa4-3e9f421b8f27,Luz,Despesa,0,0,true
+a87e3f3d-c20d-5242-b231-0e7be3ec307e,Água,Despesa,0,0,false
+96b3e1bf-00d1-5a5f-a779-211539fc7628,Carne,Despesa,0,0,true
+2f93b210-3ea6-530f-be81-74390ff813e6,Babi,Despesa,0,0,true
+91ceda1f-541b-5ebd-9947-7971d754fa4f,Caixa 2,Receita,0,0,false
+b0ef0d33-2eac-52d6-9bef-ae9cd7f0d8cc,WMW,Despesa,0,0,false
+6c8fb56c-c294-5f41-99ff-0a626001597d,Apartamento,Despesa,0,0,true
+f1e9746b-747d-53a5-9ebc-cd147db2d62a,Reforma,Despesa,0,0,true
+a2cff82b-cc79-5d54-b55a-9350fd3cd13b,Álbum Copa 2018,Despesa,0,0,false
+ce0a1cd1-4faa-5762-99da-b2ca7da89540,G2,Despesa,0,0,false
+0b7a2d88-d383-5e5a-9bb6-b196b5b59790,Investimento,Despesa,0,0,true
+8000fb91-355d-508d-b645-3fada194cfd9,WBS,Despesa,0,0,true
+ddc854a5-9c92-5bf8-b4f0-aa10ecf9a99c,Morro de SP,Despesa,0,0,false
+d9f9ac69-5808-5797-9073-3120ff29590c,Loteria,Despesa,0,0,true
+caddef9f-da34-5bed-9139-c22a7f4a4c28,Compass,Despesa,0,0,false
+f0caac6a-d1ec-5c7d-a56d-8e70e1ef0a5a,Enzo,Despesa,0,0,true
+1feecbbd-4ffe-5368-969d-0f88ec16d686,Chile,Despesa,0,0,false
+6d2700e5-388f-51c7-baf9-f2bc5208ed08,Casamento,Despesa,0,0,false
+8e2f6b55-7df6-5ab0-b5c7-739f419b01c0,Punta Cana,Despesa,0,0,true
+e00cbd56-da14-5549-bdab-98743072267b,Cancun,Despesa,0,0,true
+4652d544-c376-5909-932a-0b1dc05e2d73,RIR 2024,Despesa,0,0,true
+ae5116ef-f837-5263-969b-c6d2830bfe01,Futebol,Despesa,0,0,true
+f05e101c-5ef2-5525-a8b2-37aa60b9c49a,PSOP,Despesa,0,0,false
+e5b90e39-fb72-53fd-b090-f90b46b6be64,Goiânia,Despesa,0,0,true
+d6d031ea-5415-5c87-9568-94a751733b89,Herança Babi,Despesa,0,0,true
+7c02edba-d7ec-531b-b03b-80a4ddcc4090,Creta,Despesa,0,0,true
+30b4e461-609e-54b7-b72d-bc6272d6e6cf,Tio Renato,Despesa,0,0,true
+08c9a376-b4bc-5ede-b0e9-f73e4069578c,Aracaju - 2025,Despesa,0,0,true
+5a3c1915-0fef-5d80-b655-38c381eccd56,Cagada do Carlinhos,Despesa,0,0,false
+ea0c9d79-80a3-589c-a075-99dcfff84283,Fiel Torcedor,Despesa,0,0,true
+c79ddb77-8161-5f04-b5c4-7df893a80141,Corinthians,Despesa,0,0,true
