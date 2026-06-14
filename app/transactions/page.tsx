@@ -137,7 +137,7 @@ function TransactionsPageContent() {
     if (filters?.competenceId) {
       query = query.eq("competence_id", filters.competenceId);
     }
-    
+
     if (filters?.accountId) {
       query = query.eq("account_id", filters.accountId);
     }
@@ -171,18 +171,18 @@ function TransactionsPageContent() {
         Despesa: 2,
         Transferência: 3,
       };
-    
+
       const typeDiff =
         (typeOrder[a.type] ?? 999) -
         (typeOrder[b.type] ?? 999);
-    
+
       if (typeDiff !== 0) {
         return typeDiff;
       }
-    
+
       return new Date(a.due_date).getTime() - new Date(b.due_date).getTime();
     });
-    
+
     setTransactions(sortedTransactions);
     setIsLoading(false);
   }
@@ -339,9 +339,9 @@ function TransactionsPageContent() {
 
       const { error } = editingTransactionId
         ? await supabase
-            .from("transactions")
-            .update(payload)
-            .eq("id", editingTransactionId)
+          .from("transactions")
+          .update(payload)
+          .eq("id", editingTransactionId)
         : await supabase.from("transactions").insert(payload);
 
       if (error) {
@@ -431,7 +431,7 @@ function TransactionsPageContent() {
         </div>
 
         <div className="space-y-3 rounded-2xl border border-white/10 bg-slate-950/60 p-4">
-        <div className="grid gap-3 md:grid-cols-5">
+          <div className="grid gap-3 md:grid-cols-5">
             <input
               value={searchTerm}
               onChange={(event) => setSearchTerm(event.target.value)}
@@ -524,8 +524,8 @@ function TransactionsPageContent() {
           </div>
         </div>
 
-        <div className="overflow-hidden rounded-2xl border border-white/10 bg-slate-950/60">
-          <table className="w-full text-left text-sm">
+        <div className="w-full overflow-x-auto rounded-2xl border border-white/10 bg-slate-950/60">
+          <table className="min-w-[1200px] w-full text-left text-sm">
             <thead className="bg-white/5 text-slate-300">
               <tr>
                 <th className="px-5 py-4">Data</th>
@@ -558,7 +558,7 @@ function TransactionsPageContent() {
                         transaction.due_date + "T00:00:00"
                       ).toLocaleDateString("pt-BR")}
                     </td>
-                    
+
                     <td className="px-5 py-4 text-white">
                       {transaction.description}
                     </td>

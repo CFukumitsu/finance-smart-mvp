@@ -253,9 +253,8 @@ export default function DashboardPage() {
               Ver todos
             </Link>
           </div>
-
-          <div className="w-full overflow-x-auto">
-            <table className="w-full min-w-[800px]">
+          <div className="w-full overflow-x-auto rounded-2xl border border-white/10">
+          <table className="min-w-[900px] w-full">
               <thead className="bg-white/5 text-slate-300">
                 <tr>
                   <th className="px-5 py-4">Descrição</th>
