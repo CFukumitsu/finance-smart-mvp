@@ -21,7 +21,7 @@ export async function getRecurringTransactions() {
 export async function createRecurringTransaction(
   formData: RecurringTransactionFormData
 ) {
-  const lock = await ensureCompetenceIsOpen(formData.competence_id);
+  const lock = await ensureCompetenceIsOpen(formData.endCompetenceId);
 
   if (!lock.allowed) {
     return {

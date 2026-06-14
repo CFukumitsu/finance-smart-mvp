@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import AppShell from "../components/layout/AppShell";
 import { supabase } from "@/src/lib/supabase";
@@ -42,7 +42,7 @@ type Transaction = {
   competence: { name: string } | null;
 };
 
-export default function TransactionsPage() {
+function TransactionsPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
@@ -778,5 +778,13 @@ export default function TransactionsPage() {
         </div>
       )}
     </AppShell>
+  );
+}
+
+export default function TransactionsPage() {
+  return (
+    <Suspense fallback={<div className="p-6 text-white">Carregando...</div>}>
+      <TransactionsPageContent />
+    </Suspense>
   );
 }
