@@ -89,7 +89,7 @@ export default function DashboardPage() {
       await updateOverduePaymentStatusesOncePerDay();
       await loadDashboardData();
     }
-  
+
     initDashboard();
   }, []);
 
@@ -148,7 +148,7 @@ export default function DashboardPage() {
           </Link>
         </div>
 
-        <div className="grid gap-4 md:grid-cols-4">
+        <div className="grid gap-4 md:grid-cols-1 md:grid-cols-2 xl:grid-cols-4">
           <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-5">
             <p className="text-sm text-slate-400">Receitas</p>
             <h2 className="mt-2 text-2xl font-bold text-emerald-400">
@@ -178,7 +178,7 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        <div className="grid gap-6 lg:grid-cols-3">
+        <div className="grid gap-6 lg:grid-cols-1 md:grid-cols-2 xl:grid-cols-4">
           <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-6 lg:col-span-2">
             <h2 className="text-lg font-semibold text-white">
               Resumo financeiro
@@ -254,58 +254,60 @@ export default function DashboardPage() {
             </Link>
           </div>
 
-          <table className="w-full text-left text-sm">
-            <thead className="bg-white/5 text-slate-300">
-              <tr>
-                <th className="px-5 py-4">Descrição</th>
-                <th className="px-5 py-4">Tipo</th>
-                <th className="px-5 py-4">Valor</th>
-                <th className="px-5 py-4">Data</th>
-                <th className="px-5 py-4">Status</th>
-              </tr>
-            </thead>
-
-            <tbody className="divide-y divide-white/10">
-              {isLoading && (
+          <div className="w-full overflow-x-auto">
+            <table className="w-full min-w-[800px]">
+              <thead className="bg-white/5 text-slate-300">
                 <tr>
-                  <td colSpan={5} className="px-5 py-8 text-center text-slate-400">
-                    Carregando dashboard...
-                  </td>
+                  <th className="px-5 py-4">Descrição</th>
+                  <th className="px-5 py-4">Tipo</th>
+                  <th className="px-5 py-4">Valor</th>
+                  <th className="px-5 py-4">Data</th>
+                  <th className="px-5 py-4">Status</th>
                 </tr>
-              )}
+              </thead>
 
-              {!isLoading &&
-                latestTransactions.map((transaction) => (
-                  <tr key={transaction.id} className="hover:bg-white/[0.03]">
-                    <td className="px-5 py-4 text-white">
-                      {transaction.description}
-                    </td>
-                    <td className="px-5 py-4 text-slate-300">
-                      {transaction.type}
-                    </td>
-                    <td className="px-5 py-4 text-slate-300">
-                      {formatCurrency(Number(transaction.value))}
-                    </td>
-                    <td className="px-5 py-4 text-slate-300">
-                      {new Date(transaction.due_date + "T00:00:00").toLocaleDateString(
-                        "pt-BR"
-                      )}
-                    </td>
-                    <td className="px-5 py-4 text-slate-300">
-                      {transaction.status ?? "-"}
+              <tbody className="divide-y divide-white/10">
+                {isLoading && (
+                  <tr>
+                    <td colSpan={5} className="px-5 py-8 text-center text-slate-400">
+                      Carregando dashboard...
                     </td>
                   </tr>
-                ))}
+                )}
 
-              {!isLoading && latestTransactions.length === 0 && (
-                <tr>
-                  <td colSpan={5} className="px-5 py-8 text-center text-slate-400">
-                    Nenhum lançamento encontrado para a competência atual.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
+                {!isLoading &&
+                  latestTransactions.map((transaction) => (
+                    <tr key={transaction.id} className="hover:bg-white/[0.03]">
+                      <td className="px-5 py-4 text-white">
+                        {transaction.description}
+                      </td>
+                      <td className="px-5 py-4 text-slate-300">
+                        {transaction.type}
+                      </td>
+                      <td className="px-5 py-4 text-slate-300">
+                        {formatCurrency(Number(transaction.value))}
+                      </td>
+                      <td className="px-5 py-4 text-slate-300">
+                        {new Date(transaction.due_date + "T00:00:00").toLocaleDateString(
+                          "pt-BR"
+                        )}
+                      </td>
+                      <td className="px-5 py-4 text-slate-300">
+                        {transaction.status ?? "-"}
+                      </td>
+                    </tr>
+                  ))}
+
+                {!isLoading && latestTransactions.length === 0 && (
+                  <tr>
+                    <td colSpan={5} className="px-5 py-8 text-center text-slate-400">
+                      Nenhum lançamento encontrado para a competência atual.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
       </div>
     </AppShell>

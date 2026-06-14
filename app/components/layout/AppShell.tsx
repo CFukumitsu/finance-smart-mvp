@@ -2,7 +2,7 @@ import FinanceSidebar from "./financeSidebar";
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
   return (
-    <main className="min-h-screen bg-[#050816] text-white">
+    <main className="min-w-0 flex-1 overflow-x-hidden">
       <div className="flex min-h-screen">
         <FinanceSidebar />
 
