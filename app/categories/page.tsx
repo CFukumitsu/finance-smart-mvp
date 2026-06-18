@@ -27,16 +27,31 @@ export default function CategoriesPage() {
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [editingCategoryId, setEditingCategoryId] = useState<string | null>(null);
   const [form, setForm] = useState(initialForm);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [statusFilter, setStatusFilter] = useState("Ativas");
 
   async function loadCategories() {
     setIsLoading(true);
 
-    const { data, error } = await supabase
+    let query = supabase
       .from("categories")
-      .select("id, name, type, monthly_limit, monthly_goal, active")
-      .order("active", { ascending: false })
-      .order("type", { ascending: true })
-      .order("name", { ascending: true });
+      .select("id, name, type, monthly_limit, monthly_goal, active");
+
+    if (statusFilter === "Ativas") {
+      query = query.eq("active", true);
+    }
+
+    if (statusFilter === "Inativas") {
+      query = query.eq("active", false);
+    }
+
+    if (searchTerm.trim()) {
+      query = query.ilike("name", `%${searchTerm.trim()}%`);
+    }
+
+    const { data, error } = await query.order("name", {
+      ascending: true,
+    });
 
     if (error) {
       console.error("Erro ao carregar categorias:", error);
@@ -51,7 +66,7 @@ export default function CategoriesPage() {
 
   useEffect(() => {
     loadCategories();
-  }, []);
+  }, [searchTerm, statusFilter]);
 
   function resetForm() {
     setEditingCategoryId(null);
@@ -94,6 +109,8 @@ export default function CategoriesPage() {
       active: form.active,
       updated_at: new Date().toISOString(),
     };
+
+    console.log("Payload categoria:", payload);
 
     const { error } = editingCategoryId
       ? await supabase.from("categories").update(payload).eq("id", editingCategoryId)
@@ -177,6 +194,25 @@ export default function CategoriesPage() {
           </button>
         </div>
 
+        <div className="flex flex-col gap-3 rounded-2xl border border-white/10 bg-slate-950/60 p-4 md:flex-row">
+          <input
+            value={searchTerm}
+            onChange={(event) => setSearchTerm(event.target.value)}
+            placeholder="Buscar categoria..."
+            className="flex-1 rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-white outline-none"
+          />
+
+          <select
+            value={statusFilter}
+            onChange={(event) => setStatusFilter(event.target.value)}
+            className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-white outline-none"
+          >
+            <option value="Ativas">Ativas</option>
+            <option value="Inativas">Inativas</option>
+            <option value="Todas">Todas</option>
+          </select>
+        </div>
+
         <div className="overflow-hidden rounded-2xl border border-white/10 bg-slate-950/60">
           <table className="w-full text-left text-sm">
             <thead className="bg-white/5 text-slate-300">
@@ -220,11 +256,10 @@ export default function CategoriesPage() {
                     </td>
                     <td className="px-5 py-4">
                       <span
-                        className={`rounded-full px-3 py-1 text-xs font-bold ${
-                          category.active
-                            ? "bg-emerald-500/10 text-emerald-300"
-                            : "bg-slate-500/10 text-slate-400"
-                        }`}
+                        className={`rounded-full px-3 py-1 text-xs font-bold ${category.active
+                          ? "bg-emerald-500/10 text-emerald-300"
+                          : "bg-slate-500/10 text-slate-400"
+                          }`}
                       >
                         {category.active ? "Ativa" : "Inativa"}
                       </span>
@@ -235,21 +270,21 @@ export default function CategoriesPage() {
                           onClick={() => openEditDrawer(category)}
                           className="rounded-lg px-3 py-2 text-sm text-blue-400 hover:bg-blue-500/10 hover:text-blue-300"
                         >
-                          Editar
+                          ✏️
                         </button>
 
                         <button
                           onClick={() => toggleActive(category)}
                           className="rounded-lg px-3 py-2 text-sm text-amber-400 hover:bg-amber-500/10 hover:text-amber-300"
                         >
-                          {category.active ? "Inativar" : "Ativar"}
+                          {category.active ? "🚫" : "✅"}
                         </button>
 
                         <button
                           onClick={() => deleteCategory(category)}
                           className="rounded-lg px-3 py-2 text-sm text-red-400 hover:bg-red-500/10 hover:text-red-300"
                         >
-                          Excluir
+                          🗑️
                         </button>
                       </div>
                     </td>

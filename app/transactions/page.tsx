@@ -10,6 +10,11 @@ import { ensureCompetenceIsOpen } from "@/src/utils/competenceLock";
 type Account = {
   id: string;
   name: string;
+  type: "Conta" | "Cartão";
+  closing_day: number | null;
+  due_day: number | null;
+  limit_amount: number | null;
+  current_balance: number | null;
 };
 
 type Category = {
@@ -194,7 +199,7 @@ function TransactionsPageContent() {
       await Promise.all([
         supabase
           .from("accounts")
-          .select("id, name")
+          .select("id, name, type, closing_day, due_day, limit_amount, current_balance")
           .eq("active", true)
           .order("type", { ascending: true })
           .order("name", { ascending: true }),
@@ -408,6 +413,59 @@ function TransactionsPageContent() {
     });
   }
 
+  const today = new Date().toISOString().split("T")[0];
+
+  const selectedAccount = accounts.find(
+    (account) => account.id === accountFilter
+  );
+
+  const currentTransactions = transactions.filter(
+    (transaction) => transaction.due_date <= today
+  );
+
+  const futureTransactions = transactions.filter(
+    (transaction) => transaction.due_date > today
+  );
+
+  function calculateBalance(list: Transaction[]) {
+    return list.reduce((sum, transaction) => {
+      if (transaction.type === "Receita") {
+        return sum + Number(transaction.value);
+      }
+
+      if (transaction.type === "Despesa") {
+        return sum - Number(transaction.value);
+      }
+
+      return sum;
+    }, 0);
+  }
+
+  const currentBalance = calculateBalance(currentTransactions);
+  const estimatedBalance = calculateBalance(transactions);
+  const futureBalance = calculateBalance(futureTransactions);
+
+  const totalIncome = transactions
+    .filter((transaction) => transaction.type === "Receita")
+    .reduce((sum, transaction) => sum + Number(transaction.value), 0);
+
+  const totalExpense = transactions
+    .filter((transaction) => transaction.type === "Despesa")
+    .reduce((sum, transaction) => sum + Number(transaction.value), 0);
+
+  const totalTransfers = transactions
+    .filter((transaction) => transaction.type === "Transferência")
+    .reduce((sum, transaction) => sum + Number(transaction.value), 0);
+
+  const periodResult = totalIncome - totalExpense;
+
+  const cardLimit = Number(selectedAccount?.limit_amount ?? 0);
+
+  const cardAvailableLimit =
+    selectedAccount?.type === "Cartão"
+      ? cardLimit - totalExpense
+      : 0;
+
   return (
     <AppShell>
       <div className="space-y-6">
@@ -522,6 +580,127 @@ function TransactionsPageContent() {
               Limpar filtros
             </button>
           </div>
+        </div>
+
+        <div className="grid gap-4 md:grid-cols-4">
+          {!selectedAccount && (
+            <>
+              <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-5">
+                <p className="text-sm text-slate-400">Receitas</p>
+                <p className="mt-2 text-2xl font-bold text-emerald-300">
+                  {formatCurrency(totalIncome)}
+                </p>
+              </div>
+
+              <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-5">
+                <p className="text-sm text-slate-400">Despesas</p>
+                <p className="mt-2 text-2xl font-bold text-red-300">
+                  {formatCurrency(totalExpense)}
+                </p>
+              </div>
+
+              <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-5">
+                <p className="text-sm text-slate-400">Resultado</p>
+                <p
+                  className={`mt-2 text-2xl font-bold ${
+                    periodResult >= 0 ? "text-emerald-300" : "text-red-300"
+                  }`}
+                >
+                  {formatCurrency(periodResult)}
+                </p>
+              </div>
+
+              <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-5">
+                <p className="text-sm text-slate-400">Transferências</p>
+                <p className="mt-2 text-2xl font-bold text-blue-300">
+                  {formatCurrency(totalTransfers)}
+                </p>
+              </div>
+            </>
+          )}
+
+{selectedAccount?.type === "Conta" && (
+            <>
+              <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-5">
+                <p className="text-sm text-slate-400">Conta selecionada</p>
+                <p className="mt-2 text-xl font-bold text-white">
+                  {selectedAccount.name}
+                </p>
+              </div>
+
+              <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-5">
+                <p className="text-sm text-slate-400">Saldo atual</p>
+                <p
+                  className={`mt-2 text-2xl font-bold ${
+                    currentBalance >= 0 ? "text-emerald-300" : "text-red-300"
+                  }`}
+                >
+                  {formatCurrency(currentBalance)}
+                </p>
+              </div>
+
+              <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-5">
+                <p className="text-sm text-slate-400">Saldo estimado</p>
+                <p
+                  className={`mt-2 text-2xl font-bold ${
+                    estimatedBalance >= 0 ? "text-blue-300" : "text-red-300"
+                  }`}
+                >
+                  {formatCurrency(estimatedBalance)}
+                </p>
+              </div>
+
+              <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-5">
+                <p className="text-sm text-slate-400">Futuro</p>
+                <p
+                  className={`mt-2 text-2xl font-bold ${
+                    futureBalance >= 0 ? "text-emerald-300" : "text-red-300"
+                  }`}
+                >
+                  {formatCurrency(futureBalance)}
+                </p>
+              </div>
+            </>
+          )}
+
+          {selectedAccount?.type === "Cartão" && (
+            <>
+              <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-5">
+                <p className="text-sm text-slate-400">Cartão selecionado</p>
+                <p className="mt-2 text-xl font-bold text-white">
+                  {selectedAccount.name}
+                </p>
+              </div>
+
+              <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-5">
+                <p className="text-sm text-slate-400">Total da fatura</p>
+                <p className="mt-2 text-2xl font-bold text-red-300">
+                  {formatCurrency(totalExpense)}
+                </p>
+              </div>
+
+              <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-5">
+                <p className="text-sm text-slate-400">Limite disponível</p>
+                <p className="mt-2 text-2xl font-bold text-emerald-300">
+                  {formatCurrency(cardAvailableLimit)}
+                </p>
+              </div>
+
+              <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-5">
+                <p className="text-sm text-slate-400">Fechamento / Vencimento</p>
+                <p className="mt-2 text-xl font-bold text-blue-300">
+                  {selectedAccount.closing_day
+                    ? `Fecha dia ${selectedAccount.closing_day}`
+                    : "Fechamento não informado"}
+                </p>
+                <p className="mt-1 text-sm text-slate-400">
+                  {selectedAccount.due_day
+                    ? `Vence dia ${selectedAccount.due_day}`
+                    : "Vencimento não informado"}
+                </p>
+              </div>
+            </>
+          )}
         </div>
 
         <div className="w-full overflow-x-auto rounded-2xl border border-white/10 bg-slate-950/60">
