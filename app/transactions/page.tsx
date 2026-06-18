@@ -35,6 +35,7 @@ type Transaction = {
   id: string;
   description: string;
   due_date: string;
+  created_at: string | null;
   type: string;
   mode: string | null;
   value: number;
@@ -66,6 +67,9 @@ function TransactionsPageContent() {
   const [statusFilter, setStatusFilter] = useState("");
   const [competenceFilter, setCompetenceFilter] = useState("");
   const [accountFilter, setAccountFilter] = useState("");
+  const [listMode, setListMode] = useState<"competence" | "latest">("competence");
+  const [isCompetencePickerOpen, setIsCompetencePickerOpen] = useState(false);
+  const [pickerYear, setPickerYear] = useState(new Date().getFullYear());
 
   const [form, setForm] = useState({
     description: "",
@@ -117,6 +121,7 @@ function TransactionsPageContent() {
     type?: string;
     status?: string;
     search?: string;
+    listMode?: "competence" | "latest";
   }) {
     setIsLoading(true);
 
@@ -126,6 +131,7 @@ function TransactionsPageContent() {
         id,
         description,
         due_date,
+        created_at,
         type,
         mode,
         value,
@@ -136,8 +142,13 @@ function TransactionsPageContent() {
         account:accounts(name),
         category:categories(name),
         competence:competences(name)
-      `)
-      .order("due_date", { ascending: false });
+            `);
+
+    if (filters?.listMode === "latest") {
+      query = query.order("created_at", { ascending: false }).limit(10);
+    } else {
+      query = query.order("due_date", { ascending: false });
+    }
 
     if (filters?.competenceId) {
       query = query.eq("competence_id", filters.competenceId);
@@ -170,25 +181,30 @@ function TransactionsPageContent() {
 
     const rawTransactions = (data ?? []) as unknown as Transaction[];
 
-    const sortedTransactions = [...rawTransactions].sort((a, b) => {
-      const typeOrder: Record<string, number> = {
-        Receita: 1,
-        Despesa: 2,
-        Transferência: 3,
-      };
+    if (filters?.listMode === "latest") {
+      setTransactions(rawTransactions);
+    } else {
+      const sortedTransactions = [...rawTransactions].sort((a, b) => {
+        const typeOrder: Record<string, number> = {
+          Receita: 1,
+          Despesa: 2,
+          Transferência: 3,
+        };
+    
+        const typeDiff =
+          (typeOrder[a.type] ?? 999) -
+          (typeOrder[b.type] ?? 999);
+    
+        if (typeDiff !== 0) {
+          return typeDiff;
+        }
+    
+        return new Date(a.due_date).getTime() - new Date(b.due_date).getTime();
+      });
+    
+      setTransactions(sortedTransactions);
+    }
 
-      const typeDiff =
-        (typeOrder[a.type] ?? 999) -
-        (typeOrder[b.type] ?? 999);
-
-      if (typeDiff !== 0) {
-        return typeDiff;
-      }
-
-      return new Date(a.due_date).getTime() - new Date(b.due_date).getTime();
-    });
-
-    setTransactions(sortedTransactions);
     setIsLoading(false);
   }
 
@@ -240,6 +256,7 @@ function TransactionsPageContent() {
         type: "",
         status: "",
         search: "",
+        listMode: "competence",
       });
     }
 
@@ -263,8 +280,9 @@ function TransactionsPageContent() {
       type: typeFilter,
       status: statusFilter,
       search: searchTerm,
+      listMode,
     });
-  }, [competenceFilter, accountFilter, typeFilter, statusFilter]);
+  }, [competenceFilter, accountFilter, typeFilter, statusFilter, listMode]);
 
   function resetForm() {
     const defaultCompetenceId =
@@ -361,6 +379,7 @@ function TransactionsPageContent() {
         type: typeFilter,
         status: statusFilter,
         search: searchTerm,
+        listMode,
       });
     } catch (error) {
       console.error("Erro ao salvar lançamento:", error);
@@ -394,6 +413,7 @@ function TransactionsPageContent() {
         type: typeFilter,
         status: statusFilter,
         search: searchTerm,
+        listMode,
       });
     } catch (error) {
       console.error("Erro ao excluir lançamento:", error);
@@ -403,6 +423,27 @@ function TransactionsPageContent() {
           ? error.message
           : "Erro ao excluir lançamento."
       );
+    }
+  }
+
+  const selectedCompetence = competences.find(
+    (item) => item.id === competenceFilter
+  );
+
+  const monthLabels = [
+    "jan", "fev", "mar", "abr",
+    "mai", "jun", "jul", "ago",
+    "set", "out", "nov", "dez",
+  ];
+
+  function selectCompetenceByMonth(year: number, month: number) {
+    const foundCompetence = competences.find(
+      (item) => item.year === year && item.month === month
+    );
+
+    if (foundCompetence) {
+      setCompetenceFilter(foundCompetence.id);
+      setIsCompetencePickerOpen(false);
     }
   }
 
@@ -488,98 +529,170 @@ function TransactionsPageContent() {
           </button>
         </div>
 
-        <div className="space-y-3 rounded-2xl border border-white/10 bg-slate-950/60 p-4">
-          <div className="grid gap-3 md:grid-cols-5">
-            <input
-              value={searchTerm}
-              onChange={(event) => setSearchTerm(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") {
-                  loadTransactions({
-                    competenceId: competenceFilter,
-                    accountId: accountFilter,
-                    type: typeFilter,
-                    status: statusFilter,
-                    search: searchTerm,
-                  });
-                }
-              }}
-              placeholder="Buscar por descrição..."
-              className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-white outline-none"
-            />
-            <select
-              value={accountFilter}
-              onChange={(event) => setAccountFilter(event.target.value)}
-              className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-white outline-none"
-            >
-              <option value="">Todas as contas</option>
-              {accounts.map((account) => (
-                <option key={account.id} value={account.id}>
-                  {account.name}
-                </option>
-              ))}
-            </select>
+        <div className="grid gap-3 md:grid-cols-6">
+          <div className="relative">
+            <div className="flex h-full items-center justify-between rounded-xl border border-white/10 bg-slate-900 px-4 py-3">
+              <button
+                onClick={() => {
+                  const currentIndex = competences.findIndex(
+                    (item) => item.id === competenceFilter
+                  );
 
-            <select
-              value={typeFilter}
-              onChange={(event) => setTypeFilter(event.target.value)}
-              className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-white outline-none"
-            >
-              <option value="">Todos os tipos</option>
-              <option value="Despesa">Despesa</option>
-              <option value="Receita">Receita</option>
-              <option value="Transferência">Transferência</option>
-            </select>
+                  if (currentIndex >= 0 && currentIndex < competences.length - 1) {
+                    setCompetenceFilter(competences[currentIndex + 1].id);
+                  }
+                }}
+                className="rounded-lg px-2 text-lg text-slate-400 hover:bg-white/10 hover:text-white"
+                title="Competência anterior"
+              >
+                ‹
+              </button>
 
-            <select
-              value={statusFilter}
-              onChange={(event) => setStatusFilter(event.target.value)}
-              className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-white outline-none"
-            >
-              <option value="">Todos os status</option>
-              <option value="Pendente">Pendente</option>
-              <option value="Pago">Pago</option>
-              <option value="Recebido">Recebido</option>
-            </select>
+              <button
+                onClick={() => {
+                  setPickerYear(selectedCompetence?.year ?? new Date().getFullYear());
+                  setIsCompetencePickerOpen(!isCompetencePickerOpen);
+                }}
+                className="px-3 text-sm font-bold text-blue-300 hover:text-blue-200"
+              >
+                {selectedCompetence
+                  ? `${monthLabels[selectedCompetence.month - 1]} ${selectedCompetence.year}`
+                  : "Competência"}
+              </button>
 
-            <select
-              value={competenceFilter}
-              onChange={(event) => setCompetenceFilter(event.target.value)}
-              className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-white outline-none"
-            >
-              <option value="">Todas as competências</option>
-              {competences.map((competence) => (
-                <option key={competence.id} value={competence.id}>
-                  {competence.name}
-                </option>
-              ))}
-            </select>
+              <button
+                onClick={() => {
+                  const currentIndex = competences.findIndex(
+                    (item) => item.id === competenceFilter
+                  );
+
+                  if (currentIndex > 0) {
+                    setCompetenceFilter(competences[currentIndex - 1].id);
+                  }
+                }}
+                className="rounded-lg px-2 text-lg text-slate-400 hover:bg-white/10 hover:text-white"
+                title="Próxima competência"
+              >
+                ›
+              </button>
+            </div>
+
+            {isCompetencePickerOpen && (
+              <div className="absolute left-0 top-14 z-40 w-80 rounded-2xl border border-white/10 bg-slate-950 p-4 shadow-2xl">
+                <div className="mb-4 flex items-center justify-between">
+                  <button
+                    onClick={() => setPickerYear(pickerYear - 1)}
+                    className="rounded-lg px-3 py-2 text-slate-400 hover:bg-white/10 hover:text-white"
+                  >
+                    ‹
+                  </button>
+
+                  <p className="text-lg font-bold text-white">{pickerYear}</p>
+
+                  <button
+                    onClick={() => setPickerYear(pickerYear + 1)}
+                    className="rounded-lg px-3 py-2 text-slate-400 hover:bg-white/10 hover:text-white"
+                  >
+                    ›
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-4 gap-2">
+                  {monthLabels.map((month, index) => {
+                    const monthNumber = index + 1;
+                    const competenceExists = competences.some(
+                      (item) => item.year === pickerYear && item.month === monthNumber
+                    );
+
+                    const isSelected =
+                      selectedCompetence?.year === pickerYear &&
+                      selectedCompetence?.month === monthNumber;
+
+                    return (
+                      <button
+                        key={month}
+                        disabled={!competenceExists}
+                        onClick={() => selectCompetenceByMonth(pickerYear, monthNumber)}
+                        className={`rounded-xl px-3 py-4 text-sm font-semibold ${isSelected
+                          ? "bg-blue-600 text-white"
+                          : competenceExists
+                            ? "text-slate-200 hover:bg-white/10"
+                            : "cursor-not-allowed text-slate-600"
+                          }`}
+                      >
+                        {month}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
           </div>
 
-          <div className="flex items-center justify-between text-xs text-slate-400">
-            <span>{transactions.length} lançamento(s) encontrado(s)</span>
+          <select
+            value={listMode}
+            onChange={(event) =>
+              setListMode(event.target.value as "competence" | "latest")
+            }
+            className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-white outline-none"
+          >
+            <option value="competence">Por data do lançamento</option>
+            <option value="latest">Últimos 10 cadastrados</option>
+          </select>
 
-            <button
-              onClick={() => {
-                setSearchTerm("");
-                setTypeFilter("");
-                setStatusFilter("");
-                setCompetenceFilter("");
-                setAccountFilter("");
-
+          <input
+            value={searchTerm}
+            onChange={(event) => setSearchTerm(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
                 loadTransactions({
-                  competenceId: "",
-                  accountId: "",
-                  type: "",
-                  status: "",
-                  search: "",
+                  competenceId: competenceFilter,
+                  accountId: accountFilter,
+                  type: typeFilter,
+                  status: statusFilter,
+                  search: searchTerm,
+                  listMode,
                 });
-              }}
-              className="text-blue-400 hover:text-blue-300"
-            >
-              Limpar filtros
-            </button>
-          </div>
+              }
+            }}
+            placeholder="Buscar por descrição..."
+            className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-white outline-none"
+          />
+
+          <select
+            value={accountFilter}
+            onChange={(event) => setAccountFilter(event.target.value)}
+            className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-white outline-none"
+          >
+            <option value="">Todas as contas</option>
+            {accounts.map((account) => (
+              <option key={account.id} value={account.id}>
+                {account.name}
+              </option>
+            ))}
+          </select>
+
+          <select
+            value={typeFilter}
+            onChange={(event) => setTypeFilter(event.target.value)}
+            className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-white outline-none"
+          >
+            <option value="">Todos os tipos</option>
+            <option value="Despesa">Despesa</option>
+            <option value="Receita">Receita</option>
+            <option value="Transferência">Transferência</option>
+          </select>
+
+          <select
+            value={statusFilter}
+            onChange={(event) => setStatusFilter(event.target.value)}
+            className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-white outline-none"
+          >
+            <option value="">Todos os status</option>
+            <option value="Pendente">Pendente</option>
+            <option value="Pago">Pago</option>
+            <option value="Recebido">Recebido</option>
+          </select>
         </div>
 
         <div className="grid gap-4 md:grid-cols-4">
@@ -602,9 +715,8 @@ function TransactionsPageContent() {
               <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-5">
                 <p className="text-sm text-slate-400">Resultado</p>
                 <p
-                  className={`mt-2 text-2xl font-bold ${
-                    periodResult >= 0 ? "text-emerald-300" : "text-red-300"
-                  }`}
+                  className={`mt-2 text-2xl font-bold ${periodResult >= 0 ? "text-emerald-300" : "text-red-300"
+                    }`}
                 >
                   {formatCurrency(periodResult)}
                 </p>
@@ -619,7 +731,7 @@ function TransactionsPageContent() {
             </>
           )}
 
-{selectedAccount?.type === "Conta" && (
+          {selectedAccount?.type === "Conta" && (
             <>
               <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-5">
                 <p className="text-sm text-slate-400">Conta selecionada</p>
@@ -631,9 +743,8 @@ function TransactionsPageContent() {
               <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-5">
                 <p className="text-sm text-slate-400">Saldo atual</p>
                 <p
-                  className={`mt-2 text-2xl font-bold ${
-                    currentBalance >= 0 ? "text-emerald-300" : "text-red-300"
-                  }`}
+                  className={`mt-2 text-2xl font-bold ${currentBalance >= 0 ? "text-emerald-300" : "text-red-300"
+                    }`}
                 >
                   {formatCurrency(currentBalance)}
                 </p>
@@ -642,9 +753,8 @@ function TransactionsPageContent() {
               <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-5">
                 <p className="text-sm text-slate-400">Saldo estimado</p>
                 <p
-                  className={`mt-2 text-2xl font-bold ${
-                    estimatedBalance >= 0 ? "text-blue-300" : "text-red-300"
-                  }`}
+                  className={`mt-2 text-2xl font-bold ${estimatedBalance >= 0 ? "text-blue-300" : "text-red-300"
+                    }`}
                 >
                   {formatCurrency(estimatedBalance)}
                 </p>
@@ -653,9 +763,8 @@ function TransactionsPageContent() {
               <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-5">
                 <p className="text-sm text-slate-400">Futuro</p>
                 <p
-                  className={`mt-2 text-2xl font-bold ${
-                    futureBalance >= 0 ? "text-emerald-300" : "text-red-300"
-                  }`}
+                  className={`mt-2 text-2xl font-bold ${futureBalance >= 0 ? "text-emerald-300" : "text-red-300"
+                    }`}
                 >
                   {formatCurrency(futureBalance)}
                 </p>
@@ -775,16 +884,18 @@ function TransactionsPageContent() {
                         <div className="flex justify-end gap-2">
                           <button
                             onClick={() => openEditDrawer(transaction)}
-                            className="rounded-lg px-3 py-2 text-sm text-blue-400 hover:bg-blue-500/10 hover:text-blue-300"
+                            title="Editar"
+                            className="rounded-lg p-2 text-blue-400 hover:bg-blue-500/10 hover:text-blue-300"
                           >
-                            Editar
+                            ✏️
                           </button>
 
                           <button
                             onClick={() => handleDeleteTransaction(transaction.id)}
-                            className="rounded-lg px-3 py-2 text-sm text-red-400 hover:bg-red-500/10 hover:text-red-300"
+                            title="Excluir"
+                            className="rounded-lg p-2 text-red-400 hover:bg-red-500/10 hover:text-red-300"
                           >
-                            Excluir
+                            🗑️
                           </button>
                         </div>
                       )}
