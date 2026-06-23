@@ -3,14 +3,26 @@
 import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import {
+  LayoutDashboard,
+  ListChecks,
+  WalletCards,
+  Tags,
+  Repeat,
+  LockKeyhole,
+  Upload,
+  Settings,
+} from "lucide-react";
 
 const menuItems = [
-  { label: "Dashboard", icon: "▣", href: "/" },
-  { label: "Lançamentos", icon: "▦", href: "/transactions" },
-  { label: "Contas e Cartões", icon: "◎", href: "/accounts" },
-  { label: "Categorias", icon: "▤", href: "/categories" },
-  { label: "Recorrências", icon: "⟳", href: "/recurrences" },
-  { label: "Fechamentos", icon: "◫", href: "/closings" },
+  { label: "Dashboard", icon: LayoutDashboard, href: "/" },
+  { label: "Lançamentos", icon: ListChecks, href: "/transactions" },
+  { label: "Contas e Cartões", icon: WalletCards, href: "/accounts" },
+  { label: "Categorias", icon: Tags, href: "/categories" },
+  { label: "Recorrências", icon: Repeat, href: "/recurrences" },
+  { label: "Fechamentos", icon: LockKeyhole, href: "/closings" },
+  { label: "Importar Access", icon: Upload, href: "/import" },
+  { label: "Configurações", icon: Settings, href: "/settings" },
 ];
 
 type FinanceSidebarProps = {
@@ -32,14 +44,15 @@ export default function FinanceSidebar({
     <aside
       onMouseEnter={() => setIsHovering(true)}
       onMouseLeave={() => setIsHovering(false)}
-      className={`h-screen shrink-0 border-r border-white/10 bg-slate-950/95 px-3 py-5 shadow-2xl shadow-black/30 transition-all duration-300 ${
+      className={`h-screen shrink-0 border-r border-white/10 bg-slate-950/95 px-3 py-5 shadow-2xl shadow-black/30 transition ${
         isExpanded ? "w-72" : "w-20"
       }`}
     >
       <div className="flex h-full flex-col">
         <div className="mb-8 flex items-center justify-between gap-3">
           <div className="flex items-center gap-3">
-            <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-amber-400 font-black text-slate-950">
+            <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-cyan-500/15 border border-cyan-500/30
+            text-cyan-400 font-black">
               FS
             </div>
 
@@ -70,6 +83,7 @@ export default function FinanceSidebar({
           {menuItems.map((item) => {
             const isActive =
               item.href === "/" ? pathname === "/" : pathname.startsWith(item.href);
+              const Icon = item.icon;
 
             return (
               <Link
@@ -78,14 +92,15 @@ export default function FinanceSidebar({
                 onClick={onNavigate}
                 className={`flex w-full items-center gap-3 rounded-2xl px-4 py-3 text-left text-sm font-semibold transition ${
                   isActive
-                    ? "bg-amber-400 text-slate-950 shadow-lg shadow-amber-500/20"
-                    : "text-slate-400 hover:bg-white/5 hover:text-white"
+                    ? "bg-cyan-500/10 text-cyan-300"
+                    : ":text-slate-400 hover:bg-cyan-500/5 hover:text-cyan-200"
                 }`}
               >
-                <span className="text-lg">{item.icon}</span>
+                <Icon size={19} strokeWidth={2.3} />
                 {isExpanded && <span>{item.label}</span>}
               </Link>
             );
+            
           })}
         </nav>
       </div>

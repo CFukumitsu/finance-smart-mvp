@@ -3,6 +3,11 @@
 import { useEffect, useState } from "react";
 import AppShell from "../components/layout/AppShell";
 import { supabase } from "@/src/lib/supabase";
+import {
+  Pencil,
+  CircleOff,
+  Trash2,
+} from "lucide-react";
 
 type Category = {
   id: string;
@@ -178,7 +183,7 @@ export default function CategoriesPage() {
   return (
     <AppShell>
       <div className="space-y-6">
-      <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <div>
             <h1 className="text-3xl font-bold text-white">Categorias</h1>
             <p className="mt-1 text-sm text-slate-400">
@@ -214,7 +219,7 @@ export default function CategoriesPage() {
         </div>
 
         <div className="overflow-hidden rounded-2xl border border-white/10 bg-slate-950/60">
-        <table className="min-w-[950px] w-full text-left text-sm">
+          <table className="min-w-[950px] w-full text-left text-sm">
             <thead className="bg-white/5 text-slate-300">
               <tr>
                 <th className="px-5 py-4">Nome</th>
@@ -267,24 +272,60 @@ export default function CategoriesPage() {
                     <td className="px-5 py-4 text-right">
                       <div className="flex justify-end gap-2">
                         <button
+                          title="Editar"
                           onClick={() => openEditDrawer(category)}
-                          className="rounded-lg px-3 py-2 text-sm text-blue-400 hover:bg-blue-500/10 hover:text-blue-300"
+                          className="
+        flex h-10 w-10 items-center justify-center
+        rounded-xl
+        border border-amber-500/20
+        bg-amber-500/10
+        text-amber-400
+        transition-all duration-200
+        hover:scale-105
+        hover:border-amber-400/40
+        hover:bg-amber-500/20
+        hover:text-amber-300
+      "
                         >
-                          ✏️
+                          <Pencil size={18} />
                         </button>
 
                         <button
+                          title={category.active ? "Inativar" : "Ativar"}
                           onClick={() => toggleActive(category)}
-                          className="rounded-lg px-3 py-2 text-sm text-amber-400 hover:bg-amber-500/10 hover:text-amber-300"
+                          className="
+        flex h-10 w-10 items-center justify-center
+        rounded-xl
+        border border-slate-500/20
+        bg-slate-500/10
+        text-slate-300
+        transition-all duration-200
+        hover:scale-105
+        hover:border-slate-400/40
+        hover:bg-slate-500/20
+        hover:text-white
+      "
                         >
-                          {category.active ? "🚫" : "✅"}
+                          <CircleOff size={18} />
                         </button>
 
                         <button
+                          title="Excluir"
                           onClick={() => deleteCategory(category)}
-                          className="rounded-lg px-3 py-2 text-sm text-red-400 hover:bg-red-500/10 hover:text-red-300"
+                          className="
+        flex h-10 w-10 items-center justify-center
+        rounded-xl
+        border border-red-500/20
+        bg-red-500/10
+        text-red-400
+        transition-all duration-200
+        hover:scale-105
+        hover:border-red-400/40
+        hover:bg-red-500/20
+        hover:text-red-300
+      "
                         >
-                          🗑️
+                          <Trash2 size={18} />
                         </button>
                       </div>
                     </td>
