@@ -21,13 +21,17 @@ export async function getRecurringTransactions() {
 export async function createRecurringTransaction(
   formData: RecurringTransactionFormData
 ) {
-  const lock = await ensureCompetenceIsOpen(formData.endCompetenceId);
-
-  if (!lock.allowed) {
-    return {
-      success: false,
-      message: lock.message,
-    };
+  if (formData.endCompetenceId) {
+    const lock = await ensureCompetenceIsOpen(
+      formData.endCompetenceId
+    );
+  
+    if (!lock.allowed) {
+      return {
+        success: false,
+        message: lock.message,
+      };
+    }
   }
   const { error } = await supabase.from("recurring_transactions").insert({
     description: formData.description,

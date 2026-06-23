@@ -178,7 +178,7 @@ export default function CategoriesPage() {
   return (
     <AppShell>
       <div className="space-y-6">
-        <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <div>
             <h1 className="text-3xl font-bold text-white">Categorias</h1>
             <p className="mt-1 text-sm text-slate-400">
@@ -214,7 +214,7 @@ export default function CategoriesPage() {
         </div>
 
         <div className="overflow-hidden rounded-2xl border border-white/10 bg-slate-950/60">
-          <table className="w-full text-left text-sm">
+        <table className="min-w-[950px] w-full text-left text-sm">
             <thead className="bg-white/5 text-slate-300">
               <tr>
                 <th className="px-5 py-4">Nome</th>

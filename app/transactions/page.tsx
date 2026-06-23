@@ -61,13 +61,14 @@ function TransactionsPageContent() {
   const [categories, setCategories] = useState<Category[]>([]);
   const [competences, setCompetences] = useState<Competence[]>([]);
   const [closedCompetenceIds, setClosedCompetenceIds] = useState<string[]>([]);
+  const [descriptionSuggestions, setDescriptionSuggestions] = useState<string[]>([]);
 
   const [searchTerm, setSearchTerm] = useState("");
   const [typeFilter, setTypeFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [competenceFilter, setCompetenceFilter] = useState("");
   const [accountFilter, setAccountFilter] = useState("");
-  const [listMode, setListMode] = useState<"competence" | "latest">("competence");
+  const [listMode, setListMode] = useState<"competence" | "latest">("latest");
   const [isCompetencePickerOpen, setIsCompetencePickerOpen] = useState(false);
   const [pickerYear, setPickerYear] = useState(new Date().getFullYear());
 
@@ -77,8 +78,10 @@ function TransactionsPageContent() {
     due_date: new Date().toISOString().split("T")[0],
     type: "Despesa",
     mode: "unico",
-    status: "Pendente",
+    status: "Pago",
+    installments: "2",
     account_id: "",
+    card_payment_account_id: "",
     category_id: "",
     competence_id: "",
   });
@@ -115,6 +118,78 @@ function TransactionsPageContent() {
     return closedCompetenceIds.includes(transaction.competence_id);
   }
 
+  function onlyDigits(value: string) {
+    return value.replace(/\D/g, "");
+  }
+
+  function formatCurrencyInput(value: string) {
+    const digits = onlyDigits(value);
+
+    if (!digits) {
+      return "";
+    }
+
+    const numericValue = Number(digits) / 100;
+
+    return numericValue.toLocaleString("pt-BR", {
+      style: "currency",
+      currency: "BRL",
+    });
+  }
+
+  function parseCurrencyInput(value: string) {
+    const digits = onlyDigits(value);
+
+    if (!digits) {
+      return 0;
+    }
+
+    return Number(digits) / 100;
+  }
+
+  function addMonths(date: string, months: number) {
+    const result = new Date(date + "T00:00:00");
+    result.setMonth(result.getMonth() + months);
+    return result.toISOString().split("T")[0];
+  }
+
+  function getCompetenceIdByDate(date: string) {
+    const transactionDate = new Date(date + "T00:00:00");
+    const month = transactionDate.getMonth() + 1;
+    const year = transactionDate.getFullYear();
+
+    return (
+      competences.find(
+        (competence) => competence.month === month && competence.year === year
+      )?.id ?? form.competence_id
+    );
+  }
+
+  async function loadDescriptionSuggestions() {
+    const { data, error } = await supabase
+      .from("transactions")
+      .select("description, created_at")
+      .eq("type", "Despesa")
+      .order("created_at", { ascending: false })
+      .limit(300);
+
+    if (error) {
+      console.error("Erro ao carregar sugestões de despesas:", error);
+      setDescriptionSuggestions([]);
+      return;
+    }
+
+    const uniqueSuggestions = Array.from(
+      new Set(
+        (data ?? [])
+          .map((item) => item.description?.trim())
+          .filter(Boolean)
+      )
+    ).slice(0, 80) as string[];
+
+    setDescriptionSuggestions(uniqueSuggestions);
+  }
+
   async function loadTransactions(filters?: {
     competenceId?: string;
     accountId?: string;
@@ -139,18 +214,21 @@ function TransactionsPageContent() {
         account_id,
         category_id,
         competence_id,
-        account:accounts(name),
-        category:categories(name),
-        competence:competences(name)
-            `);
+        account:accounts!transactions_account_id_fkey(name),
+        category:categories!transactions_category_id_fkey(name),
+        competence:competences!transactions_competence_id_fkey(name)
+        `);
 
     if (filters?.listMode === "latest") {
-      query = query.order("created_at", { ascending: false }).limit(10);
+      query = query
+        .order("created_at", { ascending: false })
+        .order("due_date", { ascending: false })
+        .limit(20);
     } else {
       query = query.order("due_date", { ascending: false });
     }
 
-    if (filters?.competenceId) {
+    if (filters?.competenceId && filters?.listMode !== "latest") {
       query = query.eq("competence_id", filters.competenceId);
     }
 
@@ -190,18 +268,18 @@ function TransactionsPageContent() {
           Despesa: 2,
           Transferência: 3,
         };
-    
+
         const typeDiff =
           (typeOrder[a.type] ?? 999) -
           (typeOrder[b.type] ?? 999);
-    
+
         if (typeDiff !== 0) {
           return typeDiff;
         }
-    
+
         return new Date(a.due_date).getTime() - new Date(b.due_date).getTime();
       });
-    
+
       setTransactions(sortedTransactions);
     }
 
@@ -217,7 +295,6 @@ function TransactionsPageContent() {
           .from("accounts")
           .select("id, name, type, closing_day, due_day, limit_amount, current_balance")
           .eq("active", true)
-          .order("type", { ascending: true })
           .order("name", { ascending: true }),
         supabase
           .from("categories")
@@ -236,6 +313,7 @@ function TransactionsPageContent() {
     if (categoriesResponse.data) setCategories(categoriesResponse.data);
 
     await loadClosedCompetences();
+    await loadDescriptionSuggestions();
 
     if (competencesResponse.data) {
       setCompetences(competencesResponse.data);
@@ -256,7 +334,7 @@ function TransactionsPageContent() {
         type: "",
         status: "",
         search: "",
-        listMode: "competence",
+        listMode: "latest",
       });
     }
 
@@ -274,6 +352,8 @@ function TransactionsPageContent() {
   }, [searchParams]);
 
   useEffect(() => {
+    if (!competenceFilter) return;
+
     loadTransactions({
       competenceId: competenceFilter,
       accountId: accountFilter,
@@ -296,8 +376,10 @@ function TransactionsPageContent() {
       due_date: new Date().toISOString().split("T")[0],
       type: "Despesa",
       mode: "unico",
-      status: "Pendente",
+      status: "Pago",
+      installments: "2",
       account_id: "",
+      card_payment_account_id: "",
       category_id: "",
       competence_id: defaultCompetenceId,
     });
@@ -314,12 +396,14 @@ function TransactionsPageContent() {
 
     setForm({
       description: transaction.description ?? "",
-      value: String(transaction.value ?? ""),
+      value: formatCurrencyInput(String(transaction.value ?? "")),
       due_date: transaction.due_date ?? new Date().toISOString().split("T")[0],
       type: transaction.type ?? "Despesa",
       mode: transaction.mode ?? "unico",
-      status: transaction.status ?? "Pendente",
+      status: transaction.status ?? "Pago",
+      installments: "2",
       account_id: transaction.account_id ?? "",
+      card_payment_account_id: (transaction as any).card_payment_account_id ?? "",
       category_id: transaction.category_id ?? "",
       competence_id: transaction.competence_id ?? "",
     });
@@ -328,50 +412,80 @@ function TransactionsPageContent() {
   }
 
   async function saveTransaction() {
+    const numericValue = parseCurrencyInput(form.value);
+    const installmentCount = Number(form.installments);
+
     if (
       !form.description ||
-      !form.value ||
+      numericValue <= 0 ||
       !form.due_date ||
       !form.account_id ||
-      !form.category_id ||
+      (form.type !== "Pagamento de Fatura" && !form.category_id) ||
       !form.competence_id
     ) {
       alert("Preencha todos os campos obrigatórios.");
       return;
     }
 
+    if (form.mode === "parcelado" && (!installmentCount || installmentCount < 2)) {
+      alert("Informe uma quantidade de parcelas maior que 1.");
+      return;
+    }
+
     try {
-      const lock = await ensureCompetenceIsOpen(form.competence_id);
+      const transactionsToSave = form.mode === "parcelado" && !editingTransactionId
+        ? Array.from({ length: installmentCount }, (_, index) => {
+          const dueDate = addMonths(form.due_date, index);
+          const competenceId = getCompetenceIdByDate(dueDate);
 
-      if (!lock.allowed) {
-        alert(lock.message);
-        return;
+          return {
+            description: `${form.description} ${index + 1}/${installmentCount}`,
+            value: Number((numericValue / installmentCount).toFixed(2)),
+            due_date: dueDate,
+            type: form.type,
+            mode: form.mode,
+            status: form.status,
+            account_id: form.account_id,
+            category_id: form.category_id,
+            competence_id: competenceId,
+            parcel_number: index + 1,
+            total_parcels: installmentCount,
+          };
+        })
+        : [{
+          description: form.description,
+          value: numericValue,
+          due_date: form.due_date,
+          type: form.type,
+          mode: form.mode,
+          status: form.status,
+          account_id: form.account_id,
+          category_id: form.category_id,
+          competence_id: form.competence_id,
+        }];
+
+      for (const transaction of transactionsToSave) {
+        const lock = await ensureCompetenceIsOpen(transaction.competence_id);
+
+        if (!lock.allowed) {
+          alert(lock.message);
+          return;
+        }
       }
-
-      const payload = {
-        description: form.description,
-        value: Number(form.value),
-        due_date: form.due_date,
-        type: form.type,
-        mode: form.mode,
-        status: form.status,
-        account_id: form.account_id,
-        category_id: form.category_id,
-        competence_id: form.competence_id,
-      };
 
       const { error } = editingTransactionId
         ? await supabase
           .from("transactions")
-          .update(payload)
+          .update(transactionsToSave[0])
           .eq("id", editingTransactionId)
-        : await supabase.from("transactions").insert(payload);
+        : await supabase.from("transactions").insert(transactionsToSave);
 
       if (error) {
         throw new Error(error.message);
       }
 
       closeDrawer();
+      await loadDescriptionSuggestions();
 
       await loadTransactions({
         competenceId: competenceFilter,
@@ -637,7 +751,7 @@ function TransactionsPageContent() {
             className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-white outline-none"
           >
             <option value="competence">Por data do lançamento</option>
-            <option value="latest">Últimos 10 cadastrados</option>
+            <option value="latest">Últimos 20 cadastrados</option>
           </select>
 
           <input
@@ -681,6 +795,7 @@ function TransactionsPageContent() {
             <option value="Despesa">Despesa</option>
             <option value="Receita">Receita</option>
             <option value="Transferência">Transferência</option>
+            <option value="Pagamento de Fatura">Pagamento de Fatura</option>
           </select>
 
           <select
@@ -935,27 +1050,7 @@ function TransactionsPageContent() {
                 Fechar
               </button>
             </div>
-
             <div className="space-y-4">
-              <input
-                value={form.description}
-                onChange={(event) =>
-                  setForm({ ...form, description: event.target.value })
-                }
-                placeholder="Descrição"
-                className="w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none"
-              />
-
-              <input
-                value={form.value}
-                onChange={(event) =>
-                  setForm({ ...form, value: event.target.value })
-                }
-                placeholder="Valor"
-                type="number"
-                className="w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none"
-              />
-
               <input
                 value={form.due_date}
                 onChange={(event) =>
@@ -965,29 +1060,31 @@ function TransactionsPageContent() {
                 className="w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none"
               />
 
-              <select
-                value={form.type}
+              <input
+                value={form.description}
                 onChange={(event) =>
-                  setForm({ ...form, type: event.target.value })
+                  setForm({ ...form, description: event.target.value })
                 }
+                placeholder="Descrição"
+                list="transaction-description-suggestions"
                 className="w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none"
-              >
-                <option value="Receita">Receita</option>
-                <option value="Despesa">Despesa</option>
-                <option value="Transferência">Transferência</option>
-              </select>
+              />
 
-              <select
-                value={form.mode}
+              <datalist id="transaction-description-suggestions">
+                {descriptionSuggestions.map((description) => (
+                  <option key={description} value={description} />
+                ))}
+              </datalist>
+
+              <input
+                value={form.value}
                 onChange={(event) =>
-                  setForm({ ...form, mode: event.target.value })
+                  setForm({ ...form, value: formatCurrencyInput(event.target.value) })
                 }
+                placeholder="Valor"
+                inputMode="numeric"
                 className="w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none"
-              >
-                <option value="unico">Único</option>
-                <option value="recorrente">Recorrente</option>
-                <option value="parcelado">Parcelado</option>
-              </select>
+              />
 
               <select
                 value={form.account_id}
@@ -1004,20 +1101,82 @@ function TransactionsPageContent() {
                 ))}
               </select>
 
+              {form.type === "Pagamento de Fatura" && (
+                <select
+                  value={(form as any).card_payment_account_id}
+                  onChange={(event) =>
+                    setForm({
+                      ...form,
+                      card_payment_account_id: event.target.value,
+                    })
+                  }
+                  className="w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none"
+                >
+                  <option value="">Conta utilizada no pagamento</option>
+
+                  {accounts
+                    .filter((account) => account.type === "Conta")
+                    .map((account) => (
+                      <option key={account.id} value={account.id}>
+                        {account.name}
+                      </option>
+                    ))}
+                </select>
+              )}
+
               <select
-                value={form.category_id}
+                value={form.type}
                 onChange={(event) =>
-                  setForm({ ...form, category_id: event.target.value })
+                  setForm({ ...form, type: event.target.value })
                 }
                 className="w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none"
               >
-                <option value="">Categoria</option>
-                {categories.map((category) => (
-                  <option key={category.id} value={category.id}>
-                    {category.name}
-                  </option>
-                ))}
+                <option value="Receita">Receita</option>
+                <option value="Despesa">Despesa</option>
+                <option value="Transferência">Transferência</option>
+                <option value="Pagamento de Fatura">Pagamento de Fatura</option>
               </select>
+
+              <select
+                value={form.mode}
+                onChange={(event) =>
+                  setForm({ ...form, mode: event.target.value })
+                }
+                className="w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none"
+              >
+                <option value="unico">Único</option>
+                <option value="recorrente">Recorrente</option>
+                <option value="parcelado">Parcelado</option>
+              </select>
+
+              {form.mode === "parcelado" && !editingTransactionId && (
+                <input
+                  value={form.installments}
+                  onChange={(event) =>
+                    setForm({ ...form, installments: event.target.value })
+                  }
+                  placeholder="Quantidade de parcelas"
+                  type="number"
+                  min="2"
+                  className="w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none"
+                />
+              )}
+              {form.type !== "Pagamento de Fatura" && (
+                <select
+                  value={form.category_id}
+                  onChange={(event) =>
+                    setForm({ ...form, category_id: event.target.value })
+                  }
+                  className="w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none"
+                >
+                  <option value="">Categoria</option>
+                  {categories.map((category) => (
+                    <option key={category.id} value={category.id}>
+                      {category.name}
+                    </option>
+                  ))}
+                </select>
+              )}
 
               <select
                 value={form.competence_id}
@@ -1064,6 +1223,7 @@ function TransactionsPageContent() {
                 </button>
               </div>
             </div>
+
           </div>
         </div>
       )}

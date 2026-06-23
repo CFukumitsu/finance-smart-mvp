@@ -66,9 +66,9 @@ export default function DashboardPage() {
         type,
         value,
         status,
-        account:accounts(name),
-        category:categories(name),
-        competence:competences(name)
+        account:accounts!transactions_account_id_fkey(name),
+        category:categories!transactions_category_id_fkey(name),
+        competence:competences!transactions_competence_id_fkey(name)
       `)
       .eq("competence_id", competenceData.id)
       .order("due_date", { ascending: false });
@@ -254,7 +254,7 @@ export default function DashboardPage() {
             </Link>
           </div>
           <div className="w-full overflow-x-auto rounded-2xl border border-white/10">
-          <table className="min-w-[900px] w-full">
+            <table className="min-w-[900px] w-full">
               <thead className="bg-white/5 text-slate-300">
                 <tr>
                   <th className="px-5 py-4">Descrição</th>

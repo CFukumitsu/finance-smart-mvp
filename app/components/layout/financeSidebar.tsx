@@ -11,8 +11,6 @@ const menuItems = [
   { label: "Categorias", icon: "▤", href: "/categories" },
   { label: "Recorrências", icon: "⟳", href: "/recurrences" },
   { label: "Fechamentos", icon: "◫", href: "/closings" },
-  { label: "Importar Access", icon: "⇪", href: "/import" },
-  { label: "Configurações", icon: "⚙", href: "/settings" },
 ];
 
 type FinanceSidebarProps = {
@@ -90,22 +88,6 @@ export default function FinanceSidebar({
             );
           })}
         </nav>
-
-        <div className="mt-auto rounded-3xl border border-white/10 bg-white/[0.04] p-4">
-          {isExpanded ? (
-            <>
-              <p className="text-xs uppercase tracking-[0.2em] text-slate-500">
-                Status
-              </p>
-              <p className="mt-2 text-sm font-bold text-white">Sprint 7</p>
-              <p className="mt-1 text-xs text-slate-400">
-                Fechamentos mensais.
-              </p>
-            </>
-          ) : (
-            <p className="text-center text-xs font-black text-amber-300">S7</p>
-          )}
-        </div>
       </div>
     </aside>
   );

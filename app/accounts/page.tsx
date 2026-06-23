@@ -163,7 +163,7 @@ export default function AccountsPage() {
   return (
     <AppShell>
       <div className="space-y-6">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <div>
             <h1 className="text-3xl font-bold text-white">Contas e Cartões</h1>
             <p className="mt-1 text-sm text-slate-400">
@@ -179,8 +179,8 @@ export default function AccountsPage() {
           </button>
         </div>
 
-        <div className="overflow-hidden rounded-2xl border border-white/10 bg-slate-950/60">
-          <table className="w-full text-left text-sm">
+        <div className="w-full overflow-x-auto rounded-2xl border border-white/10 bg-slate-950/60">
+          <table className="min-w-[1100px] w-full text-left text-sm">
             <thead className="bg-white/5 text-slate-300">
               <tr>
                 <th className="px-5 py-4">Nome</th>
@@ -222,11 +222,10 @@ export default function AccountsPage() {
                     </td>
                     <td className="px-5 py-4">
                       <span
-                        className={`rounded-full px-3 py-1 text-xs font-bold ${
-                          account.active
-                            ? "bg-emerald-500/10 text-emerald-300"
-                            : "bg-slate-500/10 text-slate-400"
-                        }`}
+                        className={`rounded-full px-3 py-1 text-xs font-bold ${account.active
+                          ? "bg-emerald-500/10 text-emerald-300"
+                          : "bg-slate-500/10 text-slate-400"
+                          }`}
                       >
                         {account.active ? "Ativa" : "Inativa"}
                       </span>

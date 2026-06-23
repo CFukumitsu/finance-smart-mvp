@@ -69,6 +69,25 @@ export default function RecurrencesPageContent() {
         setAccounts((accountsResult.data ?? []) as SelectOption[]);
         setCategories((categoriesResult.data ?? []) as SelectOption[]);
         setCompetences((competencesResult.data ?? []) as SelectOption[]);
+
+        const competenceList = (competencesResult.data ?? []) as SelectOption[];
+
+        const currentDate = new Date();
+        const currentYearMonth = `${currentDate.getFullYear()}-${String(
+            currentDate.getMonth() + 1
+        ).padStart(2, "0")}`;
+
+        const currentCompetence = competenceList.find((item) =>
+            item.name.includes(currentYearMonth)
+        );
+
+        if (currentCompetence) {
+            setSelectedCompetenceId(currentCompetence.id);
+            setFormData((current) => ({
+                ...current,
+                startCompetenceId: currentCompetence.id,
+            }));
+        }
     }
 
     useEffect(() => {
@@ -78,7 +97,12 @@ export default function RecurrencesPageContent() {
 
     function openCreateDrawer() {
         setEditingItem(null);
-        setFormData(emptyForm);
+
+        setFormData({
+            ...emptyForm,
+            startCompetenceId: selectedCompetenceId,
+        });
+
         setIsDrawerOpen(true);
     }
 
@@ -114,11 +138,16 @@ export default function RecurrencesPageContent() {
     async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
         event.preventDefault();
 
+        const normalizedFormData: RecurringTransactionFormData = {
+            ...formData,
+            endCompetenceId: formData.endCompetenceId || "",
+        };
+
         try {
             if (editingItem) {
-                await updateRecurringTransaction(editingItem.id, formData);
+                await updateRecurringTransaction(editingItem.id, normalizedFormData);
             } else {
-                await createRecurringTransaction(formData);
+                await createRecurringTransaction(normalizedFormData);
             }
 
             await loadRecurrences();
@@ -202,7 +231,7 @@ export default function RecurrencesPageContent() {
                         <select
                             value={selectedCompetenceId}
                             onChange={(e) => setSelectedCompetenceId(e.target.value)}
-                            className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-white"
+                            className="flex-1 rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-white"
                         >
                             <option value="">
                                 Selecione uma competência
