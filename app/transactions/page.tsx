@@ -46,6 +46,8 @@ type Transaction = {
   account: { name: string } | null;
   category: { name: string } | null;
   competence: { name: string } | null;
+  origin_account_id?: string | null;
+  destination_account_id?: string | null;
 };
 
 function TransactionsPageContent() {
@@ -82,6 +84,8 @@ function TransactionsPageContent() {
     installments: "2",
     account_id: "",
     card_payment_account_id: "",
+    origin_account_id: "",
+    destination_account_id: "",
     category_id: "",
     competence_id: "",
   });
@@ -120,6 +124,13 @@ function TransactionsPageContent() {
 
   function onlyDigits(value: string) {
     return value.replace(/\D/g, "");
+  }
+
+  function formatCurrencyFromNumber(value: number) {
+    return Number(value).toLocaleString("pt-BR", {
+      style: "currency",
+      currency: "BRL",
+    });
   }
 
   function formatCurrencyInput(value: string) {
@@ -214,10 +225,12 @@ function TransactionsPageContent() {
         account_id,
         category_id,
         competence_id,
+        origin_account_id,
+        destination_account_id,
         account:accounts!transactions_account_id_fkey(name),
         category:categories!transactions_category_id_fkey(name),
         competence:competences!transactions_competence_id_fkey(name)
-        `);
+      `)
 
     if (filters?.listMode === "latest") {
       query = query
@@ -263,15 +276,35 @@ function TransactionsPageContent() {
       setTransactions(rawTransactions);
     } else {
       const sortedTransactions = [...rawTransactions].sort((a, b) => {
-        const typeOrder: Record<string, number> = {
-          Receita: 1,
-          Despesa: 2,
-          Transferência: 3,
-        };
+        function getSortOrder(transaction: Transaction) {
+          if (transaction.type === "Receita") {
+            return 1;
+          }
 
-        const typeDiff =
-          (typeOrder[a.type] ?? 999) -
-          (typeOrder[b.type] ?? 999);
+          if (
+            transaction.type === "Transferência" &&
+            filters?.accountId &&
+            transaction.destination_account_id === filters.accountId
+          ) {
+            return 1;
+          }
+
+          if (transaction.type === "Despesa") {
+            return 2;
+          }
+
+          if (
+            transaction.type === "Transferência" &&
+            filters?.accountId &&
+            transaction.origin_account_id === filters.accountId
+          ) {
+            return 2;
+          }
+
+          return 3;
+        }
+
+        const typeDiff = getSortOrder(a) - getSortOrder(b);
 
         if (typeDiff !== 0) {
           return typeDiff;
@@ -380,8 +413,10 @@ function TransactionsPageContent() {
       installments: "2",
       account_id: "",
       card_payment_account_id: "",
+      origin_account_id: "",
+      destination_account_id: "",
       category_id: "",
-      competence_id: defaultCompetenceId,
+      competence_id: getCompetenceIdByDate(new Date().toISOString().split("T")[0]),
     });
   }
 
@@ -396,7 +431,7 @@ function TransactionsPageContent() {
 
     setForm({
       description: transaction.description ?? "",
-      value: formatCurrencyInput(String(transaction.value ?? "")),
+      value: formatCurrencyFromNumber(Number(transaction.value ?? 0)),
       due_date: transaction.due_date ?? new Date().toISOString().split("T")[0],
       type: transaction.type ?? "Despesa",
       mode: transaction.mode ?? "unico",
@@ -404,6 +439,8 @@ function TransactionsPageContent() {
       installments: "2",
       account_id: transaction.account_id ?? "",
       card_payment_account_id: (transaction as any).card_payment_account_id ?? "",
+      origin_account_id: transaction.origin_account_id ?? "",
+      destination_account_id: transaction.destination_account_id ?? "",
       category_id: transaction.category_id ?? "",
       competence_id: transaction.competence_id ?? "",
     });
@@ -419,9 +456,22 @@ function TransactionsPageContent() {
       !form.description ||
       numericValue <= 0 ||
       !form.due_date ||
-      !form.account_id ||
-      (form.type !== "Pagamento de Fatura" && !form.category_id) ||
-      !form.competence_id
+      !form.competence_id ||
+      (
+        form.type === "Transferência" &&
+        (!form.account_id ||
+          !form.destination_account_id ||
+          form.account_id === form.destination_account_id)
+      ) ||
+      (
+        form.type !== "Transferência" &&
+        !form.account_id
+      ) ||
+      (
+        form.type !== "Transferência" &&
+        form.type !== "Pagamento de Fatura" &&
+        !form.category_id
+      )
     ) {
       alert("Preencha todos os campos obrigatórios.");
       return;
@@ -433,6 +483,76 @@ function TransactionsPageContent() {
     }
 
     try {
+      if (form.type === "Transferência" && !editingTransactionId) {
+        const originAccount = accounts.find(
+          (account) => account.id === form.account_id
+        );
+
+        const destinationAccount = accounts.find(
+          (account) => account.id === form.destination_account_id
+        );
+
+        const transferTransactions = [
+          {
+            description: form.description || `Transferência para ${destinationAccount?.name ?? "conta destino"}`,
+            value: numericValue,
+            due_date: form.due_date,
+            type: "Transferência",
+            mode: "unico",
+            status: "Pago",
+            account_id: form.account_id,
+            category_id: null,
+            competence_id: form.competence_id,
+            origin_account_id: form.origin_account_id,
+            destination_account_id: form.destination_account_id,
+          },
+          {
+            description: form.description || `Transferência recebida de ${originAccount?.name ?? "conta origem"}`,
+            value: numericValue,
+            due_date: form.due_date,
+            type: "Transferência",
+            mode: "unico",
+            status: "Recebido",
+            account_id: form.destination_account_id,
+            category_id: null,
+            competence_id: form.competence_id,
+            origin_account_id: form.account_id,
+            destination_account_id: form.destination_account_id,
+          },
+        ];
+
+        for (const transaction of transferTransactions) {
+          const lock = await ensureCompetenceIsOpen(transaction.competence_id);
+
+          if (!lock.allowed) {
+            alert(lock.message);
+            return;
+          }
+        }
+
+        const { error } = await supabase
+          .from("transactions")
+          .insert(transferTransactions);
+
+        if (error) {
+          throw new Error(error.message);
+        }
+
+        closeDrawer();
+        await loadDescriptionSuggestions();
+
+        await loadTransactions({
+          competenceId: competenceFilter,
+          accountId: accountFilter,
+          type: typeFilter,
+          status: statusFilter,
+          search: searchTerm,
+          listMode,
+        });
+
+        return;
+      }
+
       const transactionsToSave = form.mode === "parcelado" && !editingTransactionId
         ? Array.from({ length: installmentCount }, (_, index) => {
           const dueDate = addMonths(form.due_date, index);
@@ -568,6 +688,11 @@ function TransactionsPageContent() {
     });
   }
 
+  console.log(
+    "IDS",
+    transactions.map((t) => t.id)
+  );
+
   const today = new Date().toISOString().split("T")[0];
 
   const selectedAccount = accounts.find(
@@ -589,6 +714,18 @@ function TransactionsPageContent() {
       }
 
       if (transaction.type === "Despesa") {
+        return sum - Number(transaction.value);
+      }
+
+      if (transaction.type === "Transferência" && selectedAccount) {
+        if (transaction.origin_account_id === selectedAccount.id) {
+          return sum - Number(transaction.value);
+        }
+
+        if (transaction.destination_account_id === selectedAccount.id) {
+          return sum + Number(transaction.value);
+        }
+
         return sum - Number(transaction.value);
       }
 
@@ -953,8 +1090,8 @@ function TransactionsPageContent() {
               )}
 
               {!isLoading &&
-                transactions.map((transaction) => (
-                  <tr key={transaction.id} className="hover:bg-white/[0.03]">
+                transactions.map((transaction, index) => (
+                  <tr key={`${transaction.id}-${index}`} className="hover:bg-white/[0.03]">
 
                     <td className="px-5 py-4 text-slate-300">
                       {new Date(
@@ -1137,6 +1274,47 @@ function TransactionsPageContent() {
                 <option value="Pagamento de Fatura">Pagamento de Fatura</option>
               </select>
 
+              {form.type === "Transferência" && (
+                <div className="space-y-3">
+                  <div className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3">
+                    <p className="text-xs uppercase tracking-wider text-slate-500">
+                      Transferindo de
+                    </p>
+
+                    <p className="mt-1 font-semibold text-white">
+                      {accounts.find(
+                        (account) => account.id === form.account_id
+                      )?.name ?? "Selecione uma conta"}
+                    </p>
+                  </div>
+
+                  <select
+                    value={form.destination_account_id}
+                    onChange={(event) =>
+                      setForm({
+                        ...form,
+                        destination_account_id: event.target.value,
+                      })
+                    }
+                    className="w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none"
+                  >
+                    <option value="">Conta destino</option>
+
+                    {accounts
+                      .filter(
+                        (account) =>
+                          account.type === "Conta" &&
+                          account.id !== form.account_id
+                      )
+                      .map((account) => (
+                        <option key={account.id} value={account.id}>
+                          {account.name}
+                        </option>
+                      ))}
+                  </select>
+                </div>
+              )}
+
               <select
                 value={form.mode}
                 onChange={(event) =>
@@ -1161,7 +1339,7 @@ function TransactionsPageContent() {
                   className="w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none"
                 />
               )}
-              {form.type !== "Pagamento de Fatura" && (
+              {form.type !== "Pagamento de Fatura" && form.type !== "Transferência" && (
                 <select
                   value={form.category_id}
                   onChange={(event) =>
