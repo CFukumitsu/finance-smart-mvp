@@ -12,6 +12,7 @@ import {
   LockKeyhole,
   Upload,
   Settings,
+  Landmark,
 } from "lucide-react";
 
 const menuItems = [
@@ -21,6 +22,7 @@ const menuItems = [
   { label: "Categorias", icon: Tags, href: "/categories" },
   { label: "Recorrências", icon: Repeat, href: "/recurrences" },
   { label: "Fechamentos", icon: LockKeyhole, href: "/closings" },
+  { label: "Conciliação", icon: Landmark, href: "/reconciliation" },
   { label: "Importar Access", icon: Upload, href: "/import" },
   { label: "Configurações", icon: Settings, href: "/settings" },
 ];

@@ -459,6 +459,7 @@ function TransactionsPageContent() {
       !form.competence_id ||
       (
         form.type === "Transferência" &&
+        !editingTransactionId &&
         (!form.account_id ||
           !form.destination_account_id ||
           form.account_id === form.destination_account_id)
@@ -503,7 +504,7 @@ function TransactionsPageContent() {
             account_id: form.account_id,
             category_id: null,
             competence_id: form.competence_id,
-            origin_account_id: form.origin_account_id,
+            origin_account_id: form.account_id,
             destination_account_id: form.destination_account_id,
           },
           {
@@ -566,8 +567,19 @@ function TransactionsPageContent() {
             mode: form.mode,
             status: form.status,
             account_id: form.account_id,
-            category_id: form.category_id,
+            category_id:
+              form.type === "Transferência" || form.type === "Pagamento de Fatura"
+                ? null
+                : form.category_id,
             competence_id: competenceId,
+            origin_account_id:
+              form.type === "Transferência"
+                ? form.origin_account_id || form.account_id
+                : null,
+            destination_account_id:
+              form.type === "Transferência"
+                ? form.destination_account_id || null
+                : null,
             parcel_number: index + 1,
             total_parcels: installmentCount,
           };
@@ -579,9 +591,20 @@ function TransactionsPageContent() {
           type: form.type,
           mode: form.mode,
           status: form.status,
-          account_id: form.account_id,
-          category_id: form.category_id,
-          competence_id: form.competence_id,
+          account_id: form.account_id || null,
+          category_id:
+            form.type === "Transferência" || form.type === "Pagamento de Fatura"
+              ? null
+              : form.category_id || null,
+              competence_id: form.competence_id,
+          origin_account_id:
+            form.type === "Transferência"
+              ? form.origin_account_id || form.account_id || null
+              : null,
+          destination_account_id:
+            form.type === "Transferência"
+              ? form.destination_account_id || null
+              : null,
         }];
 
       for (const transaction of transactionsToSave) {
@@ -1064,9 +1087,9 @@ function TransactionsPageContent() {
           )}
         </div>
 
-        <div className="w-full overflow-x-auto rounded-2xl border border-white/10 bg-slate-950/60">
+        <div className="max-h-[calc(100vh-360px)] w-full overflow-auto rounded-2xl border border-white/10 bg-slate-950/60">
           <table className="min-w-[1200px] w-full text-left text-sm">
-            <thead className="bg-white/5 text-slate-300">
+            <thead className="sticky top-0 z-10 bg-slate-900 text-slate-300">
               <tr>
                 <th className="px-5 py-4">Data</th>
                 <th className="px-5 py-4">Descrição</th>
@@ -1276,18 +1299,6 @@ function TransactionsPageContent() {
 
               {form.type === "Transferência" && (
                 <div className="space-y-3">
-                  <div className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3">
-                    <p className="text-xs uppercase tracking-wider text-slate-500">
-                      Transferindo de
-                    </p>
-
-                    <p className="mt-1 font-semibold text-white">
-                      {accounts.find(
-                        (account) => account.id === form.account_id
-                      )?.name ?? "Selecione uma conta"}
-                    </p>
-                  </div>
-
                   <select
                     value={form.destination_account_id}
                     onChange={(event) =>
