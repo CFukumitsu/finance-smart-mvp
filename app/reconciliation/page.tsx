@@ -26,6 +26,16 @@ type Transaction = {
   description: string;
   due_date: string;
   value: number;
+  type?: string;
+  status?: string;
+  category_id?: string;
+};
+
+type Category = {
+  id: string;
+  name: string;
+  type: string | null;
+  active?: boolean | null;
 };
 
 type DetectedLayout = {
@@ -166,9 +176,28 @@ export default function ReconciliationPage() {
   );
   const [items, setItems] = useState<ImportedItem[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [categories, setCategories] = useState<Category[]>([]);
   const [showOnlyUnmatched, setShowOnlyUnmatched] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [itemToReconcile, setItemToReconcile] = useState<ImportedItem | null>(null);
+  const [itemToCreateTransaction, setItemToCreateTransaction] =
+    useState<ImportedItem | null>(null);
+  const [itemToEditTransaction, setItemToEditTransaction] =
+    useState<ImportedItem | null>(null);
+
+  const [editForm, setEditForm] = useState({
+    description: "",
+    value: "",
+    due_date: "",
+  });
+  const [createForm, setCreateForm] = useState({
+    description: "",
+    value: "",
+    due_date: "",
+    type: "Despesa",
+    status: "Pago",
+    category_id: "",
+  });
 
   const selectedAccount = useMemo(
     () => accounts.find((account) => account.id === selectedAccountId),
@@ -272,14 +301,30 @@ export default function ReconciliationPage() {
       setSelectedCompetenceId(getCurrentCompetenceId(competenceList));
     }
 
+    async function loadCategories() {
+      const { data, error } = await supabase
+        .from("categories")
+        .select("id, name, type, active")
+        .eq("active", true)
+        .order("name", { ascending: true });
+
+      if (error) {
+        alert("Erro ao carregar categorias.");
+        return;
+      }
+
+      setCategories((data ?? []) as Category[]);
+    }
+
     loadAccounts();
     loadCompetences();
+    loadCategories();
   }, []);
 
   async function loadTransactions(accountId: string, competenceId: string) {
     const { data, error } = await supabase
       .from("transactions")
-      .select("id, description, due_date, value")
+      .select("id, description, due_date, value, type, status, category_id")
       .eq("account_id", accountId)
       .eq("competence_id", competenceId);
 
@@ -381,45 +426,164 @@ export default function ReconciliationPage() {
     }
   }
 
-  async function createTransactionFromImportedItem(item: ImportedItem) {
-    if (!selectedAccountId) {
-      alert("Selecione uma conta/cartão.");
-      return;
-    }
+  function openCreateTransactionDrawer(item: ImportedItem) {
+    setItemToCreateTransaction(item);
 
-    const { error } = await supabase.from("transactions").insert({
+    setCreateForm({
       description: item.description,
-      value: item.value,
+      value: String(item.value),
       due_date: item.date,
       type: "Despesa",
-      mode: "unico",
       status: "Pago",
-      account_id: selectedAccountId,
-      category_id: null,
-      competence_id: selectedCompetenceId,
+      category_id: "",
     });
+  }
 
-    if (error) {
-      alert(
-        "Ainda não dá para criar automaticamente porque falta definir a competência/categoria. Vamos ligar isso na próxima etapa."
-      );
+  async function createTransactionFromImportedItem() {
+    if (!itemToCreateTransaction) return;
+
+    if (!selectedAccountId || !selectedCompetenceId) {
+      alert("Selecione conta/cartão e competência.");
       return;
     }
 
-    const { data: createdTransaction } = await supabase
-      .from("transactions")
-      .select("id, description, due_date, value")
-      .eq("description", item.description)
-      .eq("value", item.value)
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .single();
-
-    if (createdTransaction) {
-      await manuallyReconcile(item, createdTransaction.id);
+    if (
+      !createForm.description ||
+      !createForm.value ||
+      !createForm.due_date ||
+      !createForm.category_id
+    ) {
+      alert("Preencha todos os campos obrigatórios.");
+      return;
     }
 
-    alert("Lançamento criado e conciliado.");
+    const payload = {
+      description: createForm.description,
+      value: Number(createForm.value),
+      due_date: createForm.due_date,
+      type: createForm.type,
+      mode: "unico",
+      status: createForm.status,
+      account_id: selectedAccountId,
+      category_id: createForm.category_id,
+      competence_id: selectedCompetenceId,
+    };
+
+    const { data: createdTransaction, error } = await supabase
+      .from("transactions")
+      .insert(payload)
+      .select("id, description, due_date, value")
+      .single();
+
+    if (error || !createdTransaction) {
+      console.error("Erro ao criar lançamento:", error);
+      alert("Erro ao criar lançamento.");
+      return;
+    }
+
+    const newTransaction = createdTransaction as Transaction;
+
+    setTransactions((previousTransactions) => [
+      ...previousTransactions,
+      newTransaction,
+    ]);
+
+    const { error: reconciliationError } = await supabase
+      .from("transaction_reconciliations")
+      .upsert(
+        {
+          account_id: selectedAccountId,
+          competence_id: selectedCompetenceId,
+          import_key: itemToCreateTransaction.importKey,
+          statement_date: itemToCreateTransaction.date,
+          statement_description: itemToCreateTransaction.description,
+          statement_value: itemToCreateTransaction.value,
+          transaction_id: newTransaction.id,
+        },
+        {
+          onConflict: "account_id,competence_id,import_key,transaction_id",
+        }
+      );
+
+    if (reconciliationError) {
+      console.error("Erro ao gravar conciliação:", reconciliationError);
+      alert("Lançamento criado, mas erro ao gravar conciliação.");
+      return;
+    }
+
+    setItems((previousItems) =>
+      previousItems.map((currentItem) =>
+        currentItem.importKey === itemToCreateTransaction.importKey
+          ? {
+            ...currentItem,
+            matched: true,
+            matchedTransactionId: newTransaction.id,
+            matchedTransaction: newTransaction,
+          }
+          : currentItem
+      )
+    );
+
+    setItemToCreateTransaction(null);
+  }
+
+  function openEditTransactionDrawer(item: ImportedItem) {
+    if (!item.matchedTransaction) {
+      alert("Nenhum lançamento vinculado para corrigir.");
+      return;
+    }
+
+    setItemToEditTransaction(item);
+
+    setEditForm({
+      description: item.matchedTransaction.description,
+      value: String(item.matchedTransaction.value),
+      due_date: item.matchedTransaction.due_date,
+    });
+  }
+
+  async function updateTransactionFromReconciliation() {
+    if (!itemToEditTransaction?.matchedTransaction) return;
+
+    const transactionId = itemToEditTransaction.matchedTransaction.id;
+
+    const { data: updatedTransaction, error } = await supabase
+      .from("transactions")
+      .update({
+        description: editForm.description,
+        value: Number(editForm.value),
+        due_date: editForm.due_date,
+      })
+      .eq("id", transactionId)
+      .select("id, description, due_date, value, type, status, category_id")
+      .single();
+
+    if (error || !updatedTransaction) {
+      console.error("Erro ao corrigir lançamento:", error);
+      alert("Erro ao corrigir lançamento.");
+      return;
+    }
+
+    const newTransaction = updatedTransaction as Transaction;
+
+    setTransactions((previousTransactions) =>
+      previousTransactions.map((transaction) =>
+        transaction.id === transactionId ? newTransaction : transaction
+      )
+    );
+
+    setItems((previousItems) =>
+      previousItems.map((currentItem) =>
+        currentItem.matchedTransactionId === transactionId
+          ? {
+            ...currentItem,
+            matchedTransaction: newTransaction,
+          }
+          : currentItem
+      )
+    );
+
+    setItemToEditTransaction(null);
   }
 
   function getCandidateTransactions(item: ImportedItem) {
@@ -732,11 +896,27 @@ export default function ReconciliationPage() {
 
                   <td className="px-5 py-4 text-right">
                     {!item.matched ? (
+                      <>
+                        <button
+                          onClick={() => setItemToReconcile(item)}
+                          className="rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white hover:bg-blue-500"
+                        >
+                          Conciliar
+                        </button>
+
+                        <button
+                          onClick={() => openCreateTransactionDrawer(item)}
+                          className="ml-2 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-500"
+                        >
+                          Criar
+                        </button>
+                      </>
+                    ) : !isFullyReconciled(item) ? (
                       <button
-                        onClick={() => setItemToReconcile(item)}
-                        className="rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white hover:bg-blue-500"
+                        onClick={() => openEditTransactionDrawer(item)}
+                        className="rounded-lg bg-amber-600 px-3 py-2 text-xs font-semibold text-white hover:bg-amber-500"
                       >
-                        Conciliar
+                        Corrigir
                       </button>
                     ) : (
                       <span className="text-xs text-slate-500">—</span>
@@ -796,7 +976,7 @@ export default function ReconciliationPage() {
               />
               <div className="mb-4 flex justify-end">
                 <button
-                  onClick={() => createTransactionFromImportedItem(itemToReconcile)}
+                  onClick={() => openCreateTransactionDrawer(itemToReconcile)}
                   className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-500"
                 >
                   Criar lançamento
@@ -860,6 +1040,161 @@ export default function ReconciliationPage() {
                   )}
                 </tbody>
               </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {itemToEditTransaction && (
+        <div className="fixed inset-0 z-50 flex justify-end bg-black/70">
+          <div className="h-full w-full max-w-xl overflow-y-auto border-l border-white/10 bg-slate-950 p-6 shadow-2xl">
+            <div className="mb-6 flex items-start justify-between gap-4">
+              <div>
+                <h2 className="text-2xl font-bold text-white">
+                  Corrigir lançamento
+                </h2>
+                <p className="mt-1 text-sm text-slate-400">
+                  Ajuste o lançamento vinculado à fatura.
+                </p>
+              </div>
+
+              <button
+                onClick={() => setItemToEditTransaction(null)}
+                className="rounded-lg px-3 py-2 text-slate-400 hover:bg-white/10 hover:text-white"
+              >
+                Fechar
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <input
+                value={editForm.description}
+                onChange={(event) =>
+                  setEditForm({ ...editForm, description: event.target.value })
+                }
+                className="w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none"
+              />
+
+              <input
+                type="number"
+                value={editForm.value}
+                onChange={(event) =>
+                  setEditForm({ ...editForm, value: event.target.value })
+                }
+                className="w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none"
+              />
+
+              <input
+                type="date"
+                value={editForm.due_date}
+                onChange={(event) =>
+                  setEditForm({ ...editForm, due_date: event.target.value })
+                }
+                className="w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none"
+              />
+
+              <button
+                onClick={updateTransactionFromReconciliation}
+                className="w-full rounded-xl bg-amber-600 px-4 py-3 font-bold text-white hover:bg-amber-500"
+              >
+                Salvar correção
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {itemToCreateTransaction && (
+        <div className="fixed inset-0 z-50 flex justify-end bg-black/70">
+          <div className="h-full w-full max-w-xl overflow-y-auto border-l border-white/10 bg-slate-950 p-6 shadow-2xl">
+            <div className="mb-6 flex items-start justify-between gap-4">
+              <div>
+                <h2 className="text-2xl font-bold text-white">
+                  Criar lançamento
+                </h2>
+                <p className="mt-1 text-sm text-slate-400">
+                  A partir da conciliação da fatura.
+                </p>
+              </div>
+
+              <button
+                onClick={() => setItemToCreateTransaction(null)}
+                className="rounded-lg px-3 py-2 text-slate-400 hover:bg-white/10 hover:text-white"
+              >
+                Fechar
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <input
+                value={createForm.description}
+                onChange={(event) =>
+                  setCreateForm({ ...createForm, description: event.target.value })
+                }
+                placeholder="Descrição"
+                className="w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none"
+              />
+
+              <input
+                type="number"
+                value={createForm.value}
+                onChange={(event) =>
+                  setCreateForm({ ...createForm, value: event.target.value })
+                }
+                placeholder="Valor"
+                className="w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none"
+              />
+
+              <input
+                type="date"
+                value={createForm.due_date}
+                onChange={(event) =>
+                  setCreateForm({ ...createForm, due_date: event.target.value })
+                }
+                className="w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none"
+              />
+
+              <select
+                value={createForm.type}
+                onChange={(event) => {
+                  const nextType = event.target.value;
+
+                  setCreateForm({
+                    ...createForm,
+                    type: nextType,
+                    status: nextType === "Receita" ? "Recebido" : "Pago",
+                    category_id: "",
+                  });
+                }}
+                className="w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none"
+              >
+                <option value="Despesa">Despesa</option>
+                <option value="Receita">Receita</option>
+              </select>
+
+              <select
+                value={createForm.category_id}
+                onChange={(event) =>
+                  setCreateForm({ ...createForm, category_id: event.target.value })
+                }
+                className="w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none"
+              >
+                <option value="">Selecione a categoria</option>
+                {categories
+                  .filter((category) => category.type === createForm.type)
+                  .map((category) => (
+                    <option key={category.id} value={category.id}>
+                      {category.name}
+                    </option>
+                  ))}
+              </select>
+
+              <button
+                onClick={createTransactionFromImportedItem}
+                className="w-full rounded-xl bg-emerald-600 px-4 py-3 font-bold text-white hover:bg-emerald-500"
+              >
+                Criar e conciliar
+              </button>
             </div>
           </div>
         </div>
