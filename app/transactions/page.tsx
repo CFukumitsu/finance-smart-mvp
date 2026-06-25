@@ -596,7 +596,7 @@ function TransactionsPageContent() {
             form.type === "Transferência" || form.type === "Pagamento de Fatura"
               ? null
               : form.category_id || null,
-              competence_id: form.competence_id,
+          competence_id: form.competence_id,
           origin_account_id:
             form.type === "Transferência"
               ? form.origin_account_id || form.account_id || null
@@ -768,6 +768,8 @@ function TransactionsPageContent() {
     .filter((transaction) => transaction.type === "Despesa")
     .reduce((sum, transaction) => sum + Number(transaction.value), 0);
 
+  const totalCardInvoice = totalExpense - totalIncome;
+
   const totalTransfers = transactions
     .filter((transaction) => transaction.type === "Transferência")
     .reduce((sum, transaction) => sum + Number(transaction.value), 0);
@@ -778,7 +780,7 @@ function TransactionsPageContent() {
 
   const cardAvailableLimit =
     selectedAccount?.type === "Cartão"
-      ? cardLimit - totalExpense
+      ? cardLimit - totalCardInvoice
       : 0;
 
   return (
@@ -983,7 +985,7 @@ function TransactionsPageContent() {
               <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-5">
                 <p className="text-sm text-slate-400">Despesas</p>
                 <p className="mt-2 text-2xl font-bold text-red-300">
-                  {formatCurrency(totalExpense)}
+                  {formatCurrency(totalCardInvoice)}
                 </p>
               </div>
 
@@ -1059,7 +1061,7 @@ function TransactionsPageContent() {
               <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-5">
                 <p className="text-sm text-slate-400">Total da fatura</p>
                 <p className="mt-2 text-2xl font-bold text-red-300">
-                  {formatCurrency(totalExpense)}
+                  {formatCurrency(totalCardInvoice)}
                 </p>
               </div>
 

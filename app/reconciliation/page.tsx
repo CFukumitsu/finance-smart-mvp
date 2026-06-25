@@ -137,7 +137,7 @@ function extractItems(rows: unknown[][], layout: DetectedLayout) {
       value: parseValue(row[layout.valueColumnIndex]),
       matched: false,
     }))
-    .filter((item) => item.date && item.description && item.value > 0);
+    .filter((item) => item.date && item.description && item.value !== 0);
 }
 
 function getDaysDifference(dateA: string, dateB: string) {
@@ -177,7 +177,8 @@ export default function ReconciliationPage() {
   const [items, setItems] = useState<ImportedItem[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
-  const [showOnlyUnmatched, setShowOnlyUnmatched] = useState(false);
+  const [showOnlyUnmatched, setShowOnlyUnmatched] = useState(true);
+  const [viewMode, setViewMode] = useState<"all" | "difference">("all");
   const [isProcessing, setIsProcessing] = useState(false);
   const [itemToReconcile, setItemToReconcile] = useState<ImportedItem | null>(null);
   const [itemToCreateTransaction, setItemToCreateTransaction] =
@@ -204,6 +205,12 @@ export default function ReconciliationPage() {
     [accounts, selectedAccountId]
   );
 
+  function getSignedTransactionValue(transaction: Transaction) {
+    return transaction.type === "Receita"
+      ? Number(transaction.value) * -1
+      : Number(transaction.value);
+  }
+
   function getFinanceGroupDifference(item: ImportedItem) {
     if (!item.matchedTransactionId || !item.matchedTransaction) {
       return null;
@@ -216,7 +223,7 @@ export default function ReconciliationPage() {
       )
       .reduce((sum, currentItem) => sum + Number(currentItem.value), 0);
 
-    const financeTotal = Number(item.matchedTransaction.value);
+    const financeTotal = getSignedTransactionValue(item.matchedTransaction);
 
     return statementTotal - financeTotal;
   }
@@ -237,14 +244,70 @@ export default function ReconciliationPage() {
 
   const totalImported = items.reduce((sum, item) => sum + item.value, 0);
   const totalMatched = matchedItems.reduce((sum, item) => sum + item.value, 0);
+
   const unmatchedItems = unresolvedItems;
-  const totalUnmatched = unmatchedItems.reduce((sum, item) => sum + item.value, 0);
-  const totalFinanceMatched = matchedItems.reduce(
-    (sum, item) => sum + Number(item.matchedTransaction?.value ?? 0),
+  const totalUnmatched = unmatchedItems.reduce(
+    (sum, item) => sum + item.value,
     0
   );
 
-  const totalDifference = totalMatched - totalFinanceMatched;
+  const reconciledTransactionIds = Array.from(
+    new Set(
+      items
+        .filter((item) => isFullyReconciled(item))
+        .map((item) => item.matchedTransactionId)
+        .filter(Boolean)
+    )
+  );
+
+  const financeOnlyTransactions = transactions
+    .filter((transaction) => !reconciledTransactionIds.includes(transaction.id))
+    .map((transaction) => ({
+      ...transaction,
+      signedValue:
+        transaction.type === "Receita"
+          ? Number(transaction.value) * -1
+          : Number(transaction.value),
+    }));
+
+  const totalFinanceOnly = financeOnlyTransactions.reduce(
+    (sum, transaction) => sum + Number(transaction.signedValue),
+    0
+  );
+
+  const reconciliationGroups = transactions.map((transaction) => {
+    const linkedItems = items.filter(
+      (item) => item.matchedTransactionId === transaction.id
+    );
+
+    const statementTotal = linkedItems.reduce(
+      (sum, item) => sum + Number(item.value),
+      0
+    );
+
+    const financeValue =
+      transaction.type === "Receita"
+        ? Number(transaction.value) * -1
+        : Number(transaction.value);
+
+    return {
+      ...transaction,
+      statementTotal,
+      financeValue,
+      difference: statementTotal - financeValue,
+      hasStatementMatch: linkedItems.length > 0,
+    };
+  });
+
+  const totalFinanceMatched = reconciliationGroups
+    .filter((transaction) => transaction.hasStatementMatch)
+    .reduce((sum, transaction) => sum + transaction.financeValue, 0);
+
+  const totalDifference = totalUnmatched - totalFinanceOnly;
+
+  const financeDifferenceTransactions = reconciliationGroups.filter(
+    (transaction) => Math.abs(transaction.difference) >= 0.01
+  );
 
   function getCurrentCompetenceId(list: { id: string; month: number; year: number }[]) {
     const today = new Date();
@@ -413,7 +476,7 @@ export default function ReconciliationPage() {
       setDetectedLayout(layout);
       setTransactions(accountTransactions);
       setItems(reconciledItems);
-      setShowOnlyUnmatched(false);
+      setShowOnlyUnmatched(true);
     } catch (error) {
       console.error("Erro ao processar fatura:", error);
       alert(
@@ -431,10 +494,10 @@ export default function ReconciliationPage() {
 
     setCreateForm({
       description: item.description,
-      value: String(item.value),
+      value: String(Math.abs(item.value)),
       due_date: item.date,
-      type: "Despesa",
-      status: "Pago",
+      type: item.value < 0 ? "Receita" : "Despesa",
+      status: item.value < 0 ? "Recebido" : "Pago",
       category_id: "",
     });
   }
@@ -472,7 +535,7 @@ export default function ReconciliationPage() {
     const { data: createdTransaction, error } = await supabase
       .from("transactions")
       .insert(payload)
-      .select("id, description, due_date, value")
+      .select("id, description, due_date, value, type, status, category_id")
       .single();
 
     if (error || !createdTransaction) {
@@ -741,7 +804,7 @@ export default function ReconciliationPage() {
         </div>
 
         {detectedLayout && (
-          <div className="grid gap-4 md:grid-cols-5">
+          <div className="grid gap-4 md:grid-cols-6">
             <div className="rounded-2xl border border-emerald-400/20 bg-emerald-400/10 p-5">
               <p className="text-sm text-emerald-200">Layout</p>
               <p className="mt-2 text-xl font-bold text-white">Detectado</p>
@@ -786,8 +849,22 @@ export default function ReconciliationPage() {
                 {formatCurrency(totalUnmatched)}
               </p>
             </div>
-            <div
-              className={`rounded-2xl border p-5 ${Math.abs(totalDifference) < 0.01
+            <div className="rounded-2xl border border-blue-400/20 bg-blue-400/10 p-5">
+              <p className="text-sm text-blue-200">Só no Finance</p>
+              <p className="mt-2 text-xl font-bold text-blue-300">
+                {financeOnlyTransactions.length}
+              </p>
+              <p className="mt-1 text-xs text-blue-200">
+                {formatCurrency(totalFinanceOnly)}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setViewMode("difference");
+                setShowOnlyUnmatched(false);
+              }}
+              className={`rounded-2xl border p-5 text-left transition hover:scale-[1.01] hover:bg-white/5 ${Math.abs(totalDifference) < 0.01
                 ? "border-emerald-400/20 bg-emerald-400/10"
                 : "border-red-400/20 bg-red-400/10"
                 }`}
@@ -805,7 +882,7 @@ export default function ReconciliationPage() {
               >
                 {formatCurrency(totalDifference)}
               </p>
-            </div>
+            </button>
           </div>
         )}
 
@@ -817,17 +894,29 @@ export default function ReconciliationPage() {
                 {transactions.length} lançamentos no Finance Smart
               </p>
               <p className="text-sm text-slate-400">
-                Comparação por valor exato e data com tolerância de até 3 dias.
+                {viewMode === "difference"
+                  ? "Exibindo apenas lançamentos com diferença entre fatura e Finance."
+                  : "Comparação por valor exato e data com tolerância de até 3 dias."}
               </p>
             </div>
 
             <button
-              onClick={() => setShowOnlyUnmatched(!showOnlyUnmatched)}
+              onClick={() => {
+                if (viewMode === "difference") {
+                  setViewMode("all");
+                  setShowOnlyUnmatched(false);
+                  return;
+                }
+
+                setShowOnlyUnmatched(!showOnlyUnmatched);
+              }}
               className="rounded-xl border border-white/10 px-4 py-2 text-sm font-semibold text-white hover:bg-white/10"
             >
-              {showOnlyUnmatched
+              {viewMode === "difference"
                 ? "Mostrar todos"
-                : "Mostrar só pendentes"}
+                : showOnlyUnmatched
+                  ? "Mostrar todos"
+                  : "Mostrar só pendentes"}
             </button>
           </div>
         )}
@@ -848,82 +937,120 @@ export default function ReconciliationPage() {
             </thead>
 
             <tbody className="divide-y divide-white/10">
-              {visibleItems.map((item, index) => (
-                <tr key={`${item.date}-${item.description}-${index}`}>
-                  <td className="px-5 py-4">
-                    {isFullyReconciled(item) ? (
-                      <span className="rounded-full bg-emerald-500/10 px-3 py-1 text-xs font-bold text-emerald-300">
-                        Conciliado
+              {viewMode === "difference" ? (
+                financeDifferenceTransactions.map((transaction) => (
+                  <tr key={transaction.id}>
+                    <td className="px-5 py-4">
+                      <span className="rounded-full bg-red-500/10 px-3 py-1 text-xs font-bold text-red-300">
+                        Diferença
                       </span>
-                    ) : item.matched ? (
-                      <span className="rounded-full bg-blue-500/10 px-3 py-1 text-xs font-bold text-blue-300">
-                        Parcial
-                      </span>
-                    ) : (
-                      <span className="rounded-full bg-amber-500/10 px-3 py-1 text-xs font-bold text-amber-300">
-                        Pendente
-                      </span>
-                    )}
-                  </td>
+                    </td>
 
-                  <td className="px-5 py-4 text-slate-300">
-                    {new Date(item.date + "T00:00:00").toLocaleDateString(
-                      "pt-BR"
-                    )}
-                  </td>
+                    <td className="px-5 py-4 text-slate-300">
+                      {new Date(transaction.due_date + "T00:00:00").toLocaleDateString("pt-BR")}
+                    </td>
 
-                  <td className="px-5 py-4 text-white">{item.description}</td>
+                    <td className="px-5 py-4 text-slate-500">Não encontrado na fatura</td>
 
-                  <td className="px-5 py-4 text-right text-slate-300">
-                    {formatCurrency(item.value)}
-                  </td>
+                    <td className="px-5 py-4 text-right text-slate-500">
+                      {formatCurrency(transaction.statementTotal)}
+                    </td>
 
-                  <td className="px-5 py-4 text-slate-300">
-                    {item.matchedTransaction?.description ?? "-"}
-                  </td>
+                    <td className="px-5 py-4 text-white">
+                      {transaction.description}
+                    </td>
 
-                  <td className="px-5 py-4 text-right text-slate-300">
-                    {item.matchedTransaction
-                      ? formatCurrency(Number(item.matchedTransaction.value))
-                      : "-"}
-                  </td>
+                    <td className="px-5 py-4 text-right text-slate-300">
+                      {formatCurrency(transaction.financeValue)}
+                    </td>
 
-                  <td className="px-5 py-4 text-right text-slate-300">
-                    {item.matchedTransaction
-                      ? formatCurrency(getFinanceGroupDifference(item) ?? 0)
-                      : "-"}
-                  </td>
+                    <td className="px-5 py-4 text-right text-red-300">
+                      {formatCurrency(transaction.difference)}
+                    </td>
 
-                  <td className="px-5 py-4 text-right">
-                    {!item.matched ? (
-                      <>
-                        <button
-                          onClick={() => setItemToReconcile(item)}
-                          className="rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white hover:bg-blue-500"
-                        >
-                          Conciliar
-                        </button>
-
-                        <button
-                          onClick={() => openCreateTransactionDrawer(item)}
-                          className="ml-2 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-500"
-                        >
-                          Criar
-                        </button>
-                      </>
-                    ) : !isFullyReconciled(item) ? (
-                      <button
-                        onClick={() => openEditTransactionDrawer(item)}
-                        className="rounded-lg bg-amber-600 px-3 py-2 text-xs font-semibold text-white hover:bg-amber-500"
-                      >
-                        Corrigir
-                      </button>
-                    ) : (
+                    <td className="px-5 py-4 text-right">
                       <span className="text-xs text-slate-500">—</span>
-                    )}
-                  </td>
-                </tr>
-              ))}
+                    </td>
+                  </tr>
+                ))
+              ) : (
+                visibleItems.map((item, index) => (
+                  <tr key={`${item.date}-${item.description}-${index}`}>
+                    <td className="px-5 py-4">
+                      {isFullyReconciled(item) ? (
+                        <span className="rounded-full bg-emerald-500/10 px-3 py-1 text-xs font-bold text-emerald-300">
+                          Conciliado
+                        </span>
+                      ) : item.matched ? (
+                        <span className="rounded-full bg-blue-500/10 px-3 py-1 text-xs font-bold text-blue-300">
+                          Parcial
+                        </span>
+                      ) : (
+                        <span className="rounded-full bg-amber-500/10 px-3 py-1 text-xs font-bold text-amber-300">
+                          Pendente
+                        </span>
+                      )}
+                    </td>
+
+                    <td className="px-5 py-4 text-slate-300">
+                      {new Date(item.date + "T00:00:00").toLocaleDateString(
+                        "pt-BR"
+                      )}
+                    </td>
+
+                    <td className="px-5 py-4 text-white">{item.description}</td>
+
+                    <td className="px-5 py-4 text-right text-slate-300">
+                      {formatCurrency(item.value)}
+                    </td>
+
+                    <td className="px-5 py-4 text-slate-300">
+                      {item.matchedTransaction?.description ?? "-"}
+                    </td>
+
+                    <td className="px-5 py-4 text-right text-slate-300">
+                      {item.matchedTransaction
+                        ? formatCurrency(Number(item.matchedTransaction.value))
+                        : "-"}
+                    </td>
+
+                    <td className="px-5 py-4 text-right text-slate-300">
+                      {item.matchedTransaction
+                        ? formatCurrency(getFinanceGroupDifference(item) ?? 0)
+                        : "-"}
+                    </td>
+
+                    <td className="px-5 py-4 text-right">
+                      {!item.matched ? (
+                        <>
+                          <button
+                            onClick={() => setItemToReconcile(item)}
+                            className="rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white hover:bg-blue-500"
+                          >
+                            Conciliar
+                          </button>
+
+                          <button
+                            onClick={() => openCreateTransactionDrawer(item)}
+                            className="ml-2 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-500"
+                          >
+                            Criar
+                          </button>
+                        </>
+                      ) : !isFullyReconciled(item) ? (
+                        <button
+                          onClick={() => openEditTransactionDrawer(item)}
+                          className="rounded-lg bg-amber-600 px-3 py-2 text-xs font-semibold text-white hover:bg-amber-500"
+                        >
+                          Corrigir
+                        </button>
+                      ) : (
+                        <span className="text-xs text-slate-500">—</span>
+                      )}
+                    </td>
+                  </tr>
+                ))
+              )}
 
               {isProcessing && (
                 <tr>
@@ -944,261 +1071,311 @@ export default function ReconciliationPage() {
           </table>
         </div>
       </div>
-      {itemToReconcile && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-6">
-          <div className="w-full max-w-4xl rounded-2xl border border-white/10 bg-slate-950 p-6 shadow-2xl">
-            <div className="mb-5 flex items-start justify-between gap-4">
-              <div>
-                <h2 className="text-2xl font-bold text-white">
-                  Conciliar lançamento
-                </h2>
 
-                <p className="mt-1 text-sm text-slate-400">
-                  Fatura: {new Date(itemToReconcile.date + "T00:00:00").toLocaleDateString("pt-BR")} ·{" "}
-                  {itemToReconcile.description} · {formatCurrency(itemToReconcile.value)}
-                </p>
-              </div>
+      {
+        financeOnlyTransactions.length > 0 && (
+          <div className="rounded-2xl border border-blue-400/20 bg-slate-950/60 p-5">
+            <h2 className="mb-4 text-lg font-bold text-white">
+              Lançamentos no Finance que não apareceram na fatura
+            </h2>
 
-              <button
-                onClick={() => setItemToReconcile(null)}
-                className="rounded-lg px-3 py-2 text-slate-400 hover:bg-white/10 hover:text-white"
-              >
-                Fechar
-              </button>
-            </div>
-
-            <div className="max-h-[60vh] overflow-auto rounded-xl border border-white/10">
-              <input
-                value={candidateSearch}
-                onChange={(event) => setCandidateSearch(event.target.value)}
-                placeholder="Filtrar lançamentos por descrição..."
-                className="mb-4 w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none"
-              />
-              <div className="mb-4 flex justify-end">
-                <button
-                  onClick={() => openCreateTransactionDrawer(itemToReconcile)}
-                  className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-500"
-                >
-                  Criar lançamento
-                </button>
-              </div>
-              <table className="w-full text-left text-sm">
-                <thead className="sticky top-0 bg-slate-900 text-slate-300">
+            <div className="overflow-auto">
+              <table className="min-w-[800px] w-full text-left text-sm">
+                <thead className="bg-slate-900 text-slate-300">
                   <tr>
                     <th className="px-4 py-3">Data</th>
-                    <th className="px-4 py-3">Descrição no Finance Smart</th>
+                    <th className="px-4 py-3">Descrição</th>
                     <th className="px-4 py-3 text-right">Valor</th>
-                    <th className="px-4 py-3 text-right">Diferença</th>
-                    <th className="px-4 py-3 text-right">Ação</th>
+                    <th className="px-4 py-3">Status</th>
                   </tr>
                 </thead>
 
                 <tbody className="divide-y divide-white/10">
-                  {getCandidateTransactions(itemToReconcile)
-                    .filter((transaction) =>
-                      transaction.description
-                        .toLowerCase()
-                        .includes(candidateSearch.toLowerCase())
-                    )
-                    .map((transaction) => (
-                      <tr key={transaction.id} className="hover:bg-white/[0.03]">
-                        <td className="px-4 py-3 text-slate-300">
-                          {new Date(transaction.due_date + "T00:00:00").toLocaleDateString("pt-BR")}
-                        </td>
+                  {financeOnlyTransactions.map((transaction) => (
+                    <tr key={transaction.id}>
+                      <td className="px-4 py-3 text-slate-300">
+                        {new Date(transaction.due_date + "T00:00:00").toLocaleDateString("pt-BR")}
+                      </td>
 
-                        <td className="px-4 py-3 text-white">
-                          {transaction.description}
-                        </td>
+                      <td className="px-4 py-3 text-white">
+                        {transaction.description}
+                      </td>
 
-                        <td className="px-4 py-3 text-right text-slate-300">
-                          {formatCurrency(transaction.remainingFinanceValue ?? transaction.value)}
-                        </td>
+                      <td className="px-4 py-3 text-right text-slate-300">
+                        {formatCurrency(Number(transaction.signedValue))}
+                      </td>
 
-                        <td className="px-4 py-3 text-right text-slate-400">
-                          {transaction.daysDifference} dia(s) · {formatCurrency(transaction.valueDifference)}
-                        </td>
-
-                        <td className="px-4 py-3 text-right">
-                          <button
-                            onClick={() =>
-                              manuallyReconcile(itemToReconcile, transaction.id)
-                            }
-                            className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-500"
-                          >
-                            Usar este
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-
-                  {getCandidateTransactions(itemToReconcile).length === 0 && (
-                    <tr>
-                      <td colSpan={5} className="px-4 py-8 text-center text-slate-400">
-                        Nenhum lançamento encontrado para este cartão.
+                      <td className="px-4 py-3 text-blue-300">
+                        Ainda não encontrado na fatura
                       </td>
                     </tr>
-                  )}
+                  ))}
                 </tbody>
               </table>
             </div>
           </div>
-        </div>
-      )}
+        )
+      }
 
-      {itemToEditTransaction && (
-        <div className="fixed inset-0 z-50 flex justify-end bg-black/70">
-          <div className="h-full w-full max-w-xl overflow-y-auto border-l border-white/10 bg-slate-950 p-6 shadow-2xl">
-            <div className="mb-6 flex items-start justify-between gap-4">
-              <div>
-                <h2 className="text-2xl font-bold text-white">
-                  Corrigir lançamento
-                </h2>
-                <p className="mt-1 text-sm text-slate-400">
-                  Ajuste o lançamento vinculado à fatura.
-                </p>
+      {
+        itemToReconcile && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-6">
+            <div className="w-full max-w-4xl rounded-2xl border border-white/10 bg-slate-950 p-6 shadow-2xl">
+              <div className="mb-5 flex items-start justify-between gap-4">
+                <div>
+                  <h2 className="text-2xl font-bold text-white">
+                    Conciliar lançamento
+                  </h2>
+
+                  <p className="mt-1 text-sm text-slate-400">
+                    Fatura: {new Date(itemToReconcile.date + "T00:00:00").toLocaleDateString("pt-BR")} ·{" "}
+                    {itemToReconcile.description} · {formatCurrency(itemToReconcile.value)}
+                  </p>
+                </div>
+
+                <button
+                  onClick={() => setItemToReconcile(null)}
+                  className="rounded-lg px-3 py-2 text-slate-400 hover:bg-white/10 hover:text-white"
+                >
+                  Fechar
+                </button>
               </div>
 
-              <button
-                onClick={() => setItemToEditTransaction(null)}
-                className="rounded-lg px-3 py-2 text-slate-400 hover:bg-white/10 hover:text-white"
-              >
-                Fechar
-              </button>
-            </div>
+              <div className="max-h-[60vh] overflow-auto rounded-xl border border-white/10">
+                <input
+                  value={candidateSearch}
+                  onChange={(event) => setCandidateSearch(event.target.value)}
+                  placeholder="Filtrar lançamentos por descrição..."
+                  className="mb-4 w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none"
+                />
+                <div className="mb-4 flex justify-end">
+                  <button
+                    onClick={() => openCreateTransactionDrawer(itemToReconcile)}
+                    className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-500"
+                  >
+                    Criar lançamento
+                  </button>
+                </div>
+                <table className="w-full text-left text-sm">
+                  <thead className="sticky top-0 bg-slate-900 text-slate-300">
+                    <tr>
+                      <th className="px-4 py-3">Data</th>
+                      <th className="px-4 py-3">Descrição no Finance Smart</th>
+                      <th className="px-4 py-3 text-right">Valor</th>
+                      <th className="px-4 py-3 text-right">Diferença</th>
+                      <th className="px-4 py-3 text-right">Ação</th>
+                    </tr>
+                  </thead>
 
-            <div className="space-y-4">
-              <input
-                value={editForm.description}
-                onChange={(event) =>
-                  setEditForm({ ...editForm, description: event.target.value })
-                }
-                className="w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none"
-              />
+                  <tbody className="divide-y divide-white/10">
+                    {getCandidateTransactions(itemToReconcile)
+                      .filter((transaction) =>
+                        transaction.description
+                          .toLowerCase()
+                          .includes(candidateSearch.toLowerCase())
+                      )
+                      .map((transaction) => (
+                        <tr key={transaction.id} className="hover:bg-white/[0.03]">
+                          <td className="px-4 py-3 text-slate-300">
+                            {new Date(transaction.due_date + "T00:00:00").toLocaleDateString("pt-BR")}
+                          </td>
 
-              <input
-                type="number"
-                value={editForm.value}
-                onChange={(event) =>
-                  setEditForm({ ...editForm, value: event.target.value })
-                }
-                className="w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none"
-              />
+                          <td className="px-4 py-3 text-white">
+                            {transaction.description}
+                          </td>
 
-              <input
-                type="date"
-                value={editForm.due_date}
-                onChange={(event) =>
-                  setEditForm({ ...editForm, due_date: event.target.value })
-                }
-                className="w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none"
-              />
+                          <td className="px-4 py-3 text-right text-slate-300">
+                            {formatCurrency(transaction.remainingFinanceValue ?? transaction.value)}
+                          </td>
 
-              <button
-                onClick={updateTransactionFromReconciliation}
-                className="w-full rounded-xl bg-amber-600 px-4 py-3 font-bold text-white hover:bg-amber-500"
-              >
-                Salvar correção
-              </button>
+                          <td className="px-4 py-3 text-right text-slate-400">
+                            {transaction.daysDifference} dia(s) · {formatCurrency(transaction.valueDifference)}
+                          </td>
+
+                          <td className="px-4 py-3 text-right">
+                            <button
+                              onClick={() =>
+                                manuallyReconcile(itemToReconcile, transaction.id)
+                              }
+                              className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-500"
+                            >
+                              Usar este
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+
+                    {getCandidateTransactions(itemToReconcile).length === 0 && (
+                      <tr>
+                        <td colSpan={5} className="px-4 py-8 text-center text-slate-400">
+                          Nenhum lançamento encontrado para este cartão.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        )
+      }
 
-      {itemToCreateTransaction && (
-        <div className="fixed inset-0 z-50 flex justify-end bg-black/70">
-          <div className="h-full w-full max-w-xl overflow-y-auto border-l border-white/10 bg-slate-950 p-6 shadow-2xl">
-            <div className="mb-6 flex items-start justify-between gap-4">
-              <div>
-                <h2 className="text-2xl font-bold text-white">
-                  Criar lançamento
-                </h2>
-                <p className="mt-1 text-sm text-slate-400">
-                  A partir da conciliação da fatura.
-                </p>
+      {
+        itemToEditTransaction && (
+          <div className="fixed inset-0 z-50 flex justify-end bg-black/70">
+            <div className="h-full w-full max-w-xl overflow-y-auto border-l border-white/10 bg-slate-950 p-6 shadow-2xl">
+              <div className="mb-6 flex items-start justify-between gap-4">
+                <div>
+                  <h2 className="text-2xl font-bold text-white">
+                    Corrigir lançamento
+                  </h2>
+                  <p className="mt-1 text-sm text-slate-400">
+                    Ajuste o lançamento vinculado à fatura.
+                  </p>
+                </div>
+
+                <button
+                  onClick={() => setItemToEditTransaction(null)}
+                  className="rounded-lg px-3 py-2 text-slate-400 hover:bg-white/10 hover:text-white"
+                >
+                  Fechar
+                </button>
               </div>
 
-              <button
-                onClick={() => setItemToCreateTransaction(null)}
-                className="rounded-lg px-3 py-2 text-slate-400 hover:bg-white/10 hover:text-white"
-              >
-                Fechar
-              </button>
+              <div className="space-y-4">
+                <input
+                  value={editForm.description}
+                  onChange={(event) =>
+                    setEditForm({ ...editForm, description: event.target.value })
+                  }
+                  className="w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none"
+                />
+
+                <input
+                  type="number"
+                  value={editForm.value}
+                  onChange={(event) =>
+                    setEditForm({ ...editForm, value: event.target.value })
+                  }
+                  className="w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none"
+                />
+
+                <input
+                  type="date"
+                  value={editForm.due_date}
+                  onChange={(event) =>
+                    setEditForm({ ...editForm, due_date: event.target.value })
+                  }
+                  className="w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none"
+                />
+
+                <button
+                  onClick={updateTransactionFromReconciliation}
+                  className="w-full rounded-xl bg-amber-600 px-4 py-3 font-bold text-white hover:bg-amber-500"
+                >
+                  Salvar correção
+                </button>
+              </div>
             </div>
+          </div>
+        )
+      }
 
-            <div className="space-y-4">
-              <input
-                value={createForm.description}
-                onChange={(event) =>
-                  setCreateForm({ ...createForm, description: event.target.value })
-                }
-                placeholder="Descrição"
-                className="w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none"
-              />
+      {
+        itemToCreateTransaction && (
+          <div className="fixed inset-0 z-50 flex justify-end bg-black/70">
+            <div className="h-full w-full max-w-xl overflow-y-auto border-l border-white/10 bg-slate-950 p-6 shadow-2xl">
+              <div className="mb-6 flex items-start justify-between gap-4">
+                <div>
+                  <h2 className="text-2xl font-bold text-white">
+                    Criar lançamento
+                  </h2>
+                  <p className="mt-1 text-sm text-slate-400">
+                    A partir da conciliação da fatura.
+                  </p>
+                </div>
 
-              <input
-                type="number"
-                value={createForm.value}
-                onChange={(event) =>
-                  setCreateForm({ ...createForm, value: event.target.value })
-                }
-                placeholder="Valor"
-                className="w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none"
-              />
+                <button
+                  onClick={() => setItemToCreateTransaction(null)}
+                  className="rounded-lg px-3 py-2 text-slate-400 hover:bg-white/10 hover:text-white"
+                >
+                  Fechar
+                </button>
+              </div>
 
-              <input
-                type="date"
-                value={createForm.due_date}
-                onChange={(event) =>
-                  setCreateForm({ ...createForm, due_date: event.target.value })
-                }
-                className="w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none"
-              />
+              <div className="space-y-4">
+                <input
+                  value={createForm.description}
+                  onChange={(event) =>
+                    setCreateForm({ ...createForm, description: event.target.value })
+                  }
+                  placeholder="Descrição"
+                  className="w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none"
+                />
 
-              <select
-                value={createForm.type}
-                onChange={(event) => {
-                  const nextType = event.target.value;
+                <input
+                  type="number"
+                  value={createForm.value}
+                  onChange={(event) =>
+                    setCreateForm({ ...createForm, value: event.target.value })
+                  }
+                  placeholder="Valor"
+                  className="w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none"
+                />
 
-                  setCreateForm({
-                    ...createForm,
-                    type: nextType,
-                    status: nextType === "Receita" ? "Recebido" : "Pago",
-                    category_id: "",
-                  });
-                }}
-                className="w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none"
-              >
-                <option value="Despesa">Despesa</option>
-                <option value="Receita">Receita</option>
-              </select>
+                <input
+                  type="date"
+                  value={createForm.due_date}
+                  onChange={(event) =>
+                    setCreateForm({ ...createForm, due_date: event.target.value })
+                  }
+                  className="w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none"
+                />
 
-              <select
-                value={createForm.category_id}
-                onChange={(event) =>
-                  setCreateForm({ ...createForm, category_id: event.target.value })
-                }
-                className="w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none"
-              >
-                <option value="">Selecione a categoria</option>
-                {categories
-                  .filter((category) => category.type === createForm.type)
-                  .map((category) => (
+                <select
+                  value={createForm.type}
+                  onChange={(event) => {
+                    const nextType = event.target.value;
+
+                    setCreateForm({
+                      ...createForm,
+                      type: nextType,
+                      status: nextType === "Receita" ? "Recebido" : "Pago",
+                      category_id: "",
+                    });
+                  }}
+                  className="w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none"
+                >
+                  <option value="Despesa">Despesa</option>
+                  <option value="Receita">Crédito da fatura</option>
+                </select>
+
+                <select
+                  value={createForm.category_id}
+                  onChange={(event) =>
+                    setCreateForm({ ...createForm, category_id: event.target.value })
+                  }
+                  className="w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none"
+                >
+                  <option value="">Selecione a categoria</option>
+                  {categories.map((category) => (
                     <option key={category.id} value={category.id}>
                       {category.name}
                     </option>
                   ))}
-              </select>
+                </select>
 
-              <button
-                onClick={createTransactionFromImportedItem}
-                className="w-full rounded-xl bg-emerald-600 px-4 py-3 font-bold text-white hover:bg-emerald-500"
-              >
-                Criar e conciliar
-              </button>
+                <button
+                  onClick={createTransactionFromImportedItem}
+                  className="w-full rounded-xl bg-emerald-600 px-4 py-3 font-bold text-white hover:bg-emerald-500"
+                >
+                  Criar e conciliar
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
-    </AppShell>
+        )
+      }
+    </AppShell >
   );
 }
