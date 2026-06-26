@@ -43,6 +43,9 @@ type DetectedLayout = {
   dateColumnIndex: number;
   descriptionColumnIndex: number;
   valueColumnIndex: number;
+  creditColumnIndex?: number;
+  debitColumnIndex?: number;
+  layoutType: "standard" | "porto";
   signature: string;
 };
 
@@ -54,7 +57,7 @@ function normalizeText(value: unknown) {
     .replace(/[\u0300-\u036f]/g, "");
 }
 
-function parseDate(value: unknown) {
+function parseDate(value: unknown, fallbackYear?: number) {
   if (typeof value === "number") {
     const parsed = XLSX.SSF.parse_date_code(value);
     if (!parsed) return "";
@@ -64,24 +67,49 @@ function parseDate(value: unknown) {
   }
 
   const text = String(value ?? "").trim();
-  const match = text.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
 
-  if (match) {
-    return `${match[3]}-${match[2]}-${match[1]}`;
+  const fullDateMatch = text.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+
+  if (fullDateMatch) {
+    return `${fullDateMatch[3]}-${fullDateMatch[2]}-${fullDateMatch[1]}`;
+  }
+
+  const shortDateMatch = text.match(/^(\d{2})\/(\d{2})$/);
+
+  if (shortDateMatch && fallbackYear) {
+    return `${fallbackYear}-${shortDateMatch[2]}-${shortDateMatch[1]}`;
   }
 
   return "";
 }
 
+
 function parseValue(value: unknown) {
   if (typeof value === "number") return value;
 
-  const text = String(value ?? "")
+  let text = String(value ?? "")
     .replace("R$", "")
-    .replace(/\./g, "")
-    .replace(",", ".")
-    .replace(/[^\d.-]/g, "")
+    .replace(/\s/g, "")
+    .replace(/[^\d,.-]/g, "")
     .trim();
+
+  if (!text) return 0;
+
+  const hasComma = text.includes(",");
+  const hasDot = text.includes(".");
+
+  if (hasComma && hasDot) {
+    const lastCommaIndex = text.lastIndexOf(",");
+    const lastDotIndex = text.lastIndexOf(".");
+
+    if (lastCommaIndex > lastDotIndex) {
+      text = text.replace(/\./g, "").replace(",", ".");
+    } else {
+      text = text.replace(/,/g, "");
+    }
+  } else if (hasComma) {
+    text = text.replace(",", ".");
+  }
 
   return Number(text || 0);
 }
@@ -92,6 +120,163 @@ function formatCurrency(value: number) {
     currency: "BRL",
   });
 }
+
+function getCellColumnIndex(cellReference: string) {
+  const letters = cellReference.replace(/\d/g, "").toUpperCase();
+
+  return letters.split("").reduce((result, letter) => {
+    return result * 26 + letter.charCodeAt(0) - 64;
+  }, 0) - 1;
+}
+
+async function inflateRaw(data: Uint8Array) {
+  const DecompressionStreamConstructor = (globalThis as unknown as {
+    DecompressionStream?: new (format: "deflate-raw") => DecompressionStream;
+  }).DecompressionStream;
+
+  if (!DecompressionStreamConstructor) {
+    throw new Error(
+      "Este navegador não suporta a leitura alternativa deste XLSX. Abra a fatura no Excel/Google Sheets, salve novamente como .xlsx e tente importar de novo."
+    );
+  }
+
+  const stream = new Blob([data.buffer as ArrayBuffer]).stream().pipeThrough(
+    new DecompressionStreamConstructor("deflate-raw")
+  );
+
+  return new Uint8Array(await new Response(stream).arrayBuffer());
+}
+
+function findEndOfCentralDirectory(view: DataView) {
+  for (let offset = view.byteLength - 22; offset >= 0; offset--) {
+    if (view.getUint32(offset, true) === 0x06054b50) {
+      return offset;
+    }
+  }
+
+  throw new Error("Não foi possível localizar o índice interno do XLSX.");
+}
+
+async function unzipXlsxEntry(buffer: ArrayBuffer, entryName: string) {
+  const view = new DataView(buffer);
+  const bytes = new Uint8Array(buffer);
+  const decoder = new TextDecoder();
+  const endOffset = findEndOfCentralDirectory(view);
+  const totalEntries = view.getUint16(endOffset + 10, true);
+  const centralDirectoryOffset = view.getUint32(endOffset + 16, true);
+
+  let offset = centralDirectoryOffset;
+
+  for (let index = 0; index < totalEntries; index++) {
+    if (view.getUint32(offset, true) !== 0x02014b50) {
+      throw new Error("Estrutura interna do XLSX inválida.");
+    }
+
+    const compressionMethod = view.getUint16(offset + 10, true);
+    const compressedSize = view.getUint32(offset + 20, true);
+    const fileNameLength = view.getUint16(offset + 28, true);
+    const extraLength = view.getUint16(offset + 30, true);
+    const commentLength = view.getUint16(offset + 32, true);
+    const localHeaderOffset = view.getUint32(offset + 42, true);
+    const fileName = decoder.decode(
+      bytes.slice(offset + 46, offset + 46 + fileNameLength)
+    );
+
+    if (fileName === entryName) {
+      const localFileNameLength = view.getUint16(localHeaderOffset + 26, true);
+      const localExtraLength = view.getUint16(localHeaderOffset + 28, true);
+      const dataStart = localHeaderOffset + 30 + localFileNameLength + localExtraLength;
+      const compressedData = bytes.slice(dataStart, dataStart + compressedSize);
+
+      if (compressionMethod === 0) {
+        return decoder.decode(compressedData);
+      }
+
+      if (compressionMethod === 8) {
+        const inflated = await inflateRaw(compressedData);
+        return decoder.decode(inflated);
+      }
+
+      throw new Error(`Tipo de compactação XLSX não suportado: ${compressionMethod}`);
+    }
+
+    offset += 46 + fileNameLength + extraLength + commentLength;
+  }
+
+  throw new Error(`Arquivo interno não encontrado no XLSX: ${entryName}`);
+}
+
+function decodeXmlEntities(value: string) {
+  return value
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&amp;/g, "&");
+}
+
+function parseCellValue(cellXml: string) {
+  const inlineTextMatch = cellXml.match(/<is>[\s\S]*?<t[^>]*>([\s\S]*?)<\/t>[\s\S]*?<\/is>/);
+
+  if (inlineTextMatch) {
+    return decodeXmlEntities(inlineTextMatch[1]);
+  }
+
+  const valueMatch = cellXml.match(/<v>([\s\S]*?)<\/v>/);
+
+  if (!valueMatch) {
+    return "";
+  }
+
+  return decodeXmlEntities(valueMatch[1]);
+}
+
+function parseWorksheetRowsFromXml(sheetXml: string) {
+  const rows: unknown[][] = [];
+  const rowRegex = /<row[^>]*>([\s\S]*?)<\/row>/g;
+  let rowMatch: RegExpExecArray | null;
+
+  while ((rowMatch = rowRegex.exec(sheetXml))) {
+    const row: unknown[] = [];
+    const cellRegex = /<c[^>]*r="([A-Z]+\d+)"[^>]*>([\s\S]*?)<\/c>/g;
+    let cellMatch: RegExpExecArray | null;
+
+    while ((cellMatch = cellRegex.exec(rowMatch[1]))) {
+      const columnIndex = getCellColumnIndex(cellMatch[1]);
+      row[columnIndex] = parseCellValue(cellMatch[2]);
+    }
+
+    if (row.some((cell) => String(cell ?? "").trim())) {
+      rows.push(row);
+    }
+  }
+
+  return rows;
+}
+
+async function readWorkbookRows(buffer: ArrayBuffer) {
+  try {
+    const sheetXml = await unzipXlsxEntry(buffer, "xl/worksheets/sheet1.xml");
+    const rows = parseWorksheetRowsFromXml(sheetXml);
+
+    if (rows.length > 0) {
+      return rows;
+    }
+  } catch (error) {
+    console.warn("Leitor alternativo do XLSX falhou. Tentando leitor padrão.", error);
+  }
+
+  const workbook = XLSX.read(buffer, { type: "array" });
+  const firstSheetName = workbook.SheetNames[0];
+  const sheet = workbook.Sheets[firstSheetName];
+
+  return XLSX.utils.sheet_to_json<unknown[]>(sheet, {
+    header: 1,
+    raw: true,
+    blankrows: false,
+  });
+}
+
 
 function detectLayout(rows: unknown[][]): DetectedLayout | null {
   for (let rowIndex = 0; rowIndex < Math.min(rows.length, 80); rowIndex++) {
@@ -119,6 +304,23 @@ function detectLayout(rows: unknown[][]): DetectedLayout | null {
         dateColumnIndex,
         descriptionColumnIndex,
         valueColumnIndex,
+        layoutType: "standard",
+        signature: row.filter(Boolean).join("|"),
+      };
+    }
+
+    const creditColumnIndex = row.findIndex((cell) => cell === "credito");
+    const debitColumnIndex = row.findIndex((cell) => cell === "debito");
+
+    if (creditColumnIndex >= 0 && debitColumnIndex >= 0) {
+      return {
+        headerRowIndex: rowIndex,
+        dateColumnIndex: 0,
+        descriptionColumnIndex: 1,
+        valueColumnIndex: debitColumnIndex,
+        creditColumnIndex,
+        debitColumnIndex,
+        layoutType: "porto",
         signature: row.filter(Boolean).join("|"),
       };
     }
@@ -127,18 +329,53 @@ function detectLayout(rows: unknown[][]): DetectedLayout | null {
   return null;
 }
 
-function extractItems(rows: unknown[][], layout: DetectedLayout) {
+
+function extractItems(
+  rows: unknown[][],
+  layout: DetectedLayout,
+  fallbackYear?: number
+) {
   return rows
     .slice(layout.headerRowIndex + 1)
-    .map((row, index) => ({
-      importKey: `${layout.headerRowIndex + 1 + index}`,
-      date: parseDate(row[layout.dateColumnIndex]),
-      description: String(row[layout.descriptionColumnIndex] ?? "").trim(),
-      value: parseValue(row[layout.valueColumnIndex]),
-      matched: false,
-    }))
-    .filter((item) => item.date && item.description && item.value !== 0);
+    .map((row, index) => {
+      const description = String(row[layout.descriptionColumnIndex] ?? "").trim();
+
+      if (layout.layoutType === "porto") {
+        const creditValue = parseValue(row[layout.creditColumnIndex ?? -1]);
+        const debitValue = parseValue(row[layout.debitColumnIndex ?? -1]);
+        const value = debitValue || creditValue * -1;
+
+        return {
+          importKey: `${layout.headerRowIndex + 1 + index}`,
+          date: parseDate(row[layout.dateColumnIndex], fallbackYear),
+          description,
+          value,
+          matched: false,
+        };
+      }
+
+      return {
+        importKey: `${layout.headerRowIndex + 1 + index}`,
+        date: parseDate(row[layout.dateColumnIndex], fallbackYear),
+        description,
+        value: parseValue(row[layout.valueColumnIndex]),
+        matched: false,
+      };
+    })
+    .filter((item) => {
+      const normalizedDescription = normalizeText(item.description);
+
+      return (
+        item.date &&
+        item.description &&
+        item.value !== 0 &&
+        normalizedDescription !== "total" &&
+        !normalizedDescription.includes("fukumitsu") &&
+        !normalizedDescription.includes("barbara brand")
+      );
+    });
 }
+
 
 function getDaysDifference(dateA: string, dateB: string) {
   return (
@@ -147,16 +384,52 @@ function getDaysDifference(dateA: string, dateB: string) {
   );
 }
 
+function getInstallmentInfo(description: string) {
+  const match = description.match(/(?:^|\s)(\d{1,2})\s*\/\s*(\d{1,2})(?:\s|$)/);
+
+  if (!match) return null;
+
+  const currentInstallment = Number(match[1]);
+  const totalInstallments = Number(match[2]);
+
+  if (
+    !currentInstallment ||
+    !totalInstallments ||
+    currentInstallment < 1 ||
+    totalInstallments < 2 ||
+    currentInstallment > totalInstallments
+  ) {
+    return null;
+  }
+
+  return {
+    currentInstallment,
+    totalInstallments,
+  };
+}
+
+function addMonthsToDate(date: string, months: number) {
+  const result = new Date(date + "T00:00:00");
+  result.setMonth(result.getMonth() + months);
+  return result.toISOString().split("T")[0];
+}
+
 function findMatchingTransaction(
   importedItem: ImportedItem,
   transactions: Transaction[]
 ) {
+  const installmentInfo = getInstallmentInfo(importedItem.description);
+
   return transactions.find((transaction) => {
     const sameValue =
-      Math.abs(Number(transaction.value) - importedItem.value) < 0.01;
+      Math.abs(Number(transaction.value) - Math.abs(importedItem.value)) < 0.01;
+
+    const expectedDate = installmentInfo
+      ? addMonthsToDate(importedItem.date, installmentInfo.currentInstallment - 1)
+      : importedItem.date;
 
     const closeDate =
-      getDaysDifference(importedItem.date, transaction.due_date) <= 3;
+      getDaysDifference(expectedDate, transaction.due_date) <= 3;
 
     return sameValue && closeDate;
   });
@@ -412,16 +685,7 @@ export default function ReconciliationPage() {
 
     try {
       const buffer = await file.arrayBuffer();
-      const workbook = XLSX.read(buffer, { type: "array" });
-      const firstSheetName = workbook.SheetNames[0];
-      const sheet = workbook.Sheets[firstSheetName];
-
-      const rows = XLSX.utils.sheet_to_json<unknown[]>(sheet, {
-        header: 1,
-        raw: true,
-        blankrows: false,
-      });
-
+      const rows = await readWorkbookRows(buffer);
       const layout = detectLayout(rows);
 
       if (!layout) {
@@ -431,7 +695,11 @@ export default function ReconciliationPage() {
         return;
       }
 
-      const extractedItems = extractItems(rows, layout);
+      const selectedCompetence = competences.find(
+        (competence) => competence.id === selectedCompetenceId
+      );
+
+      const extractedItems = extractItems(rows, layout, selectedCompetence?.year);
       const accountTransactions = await loadTransactions(
         selectedAccountId,
         selectedCompetenceId
@@ -744,6 +1012,69 @@ export default function ReconciliationPage() {
     setItemToReconcile(null);
   }
 
+  async function unlinkReconciliation(item: ImportedItem) {
+    if (!selectedAccountId || !selectedCompetenceId) return;
+
+    const { error } = await supabase
+      .from("transaction_reconciliations")
+      .delete()
+      .eq("account_id", selectedAccountId)
+      .eq("competence_id", selectedCompetenceId)
+      .eq("import_key", item.importKey);
+
+    if (error) {
+      console.error("Erro ao desfazer conciliação:", error);
+      alert("Erro ao desfazer conciliação.");
+      return;
+    }
+
+    setItems((previousItems) =>
+      previousItems.map((currentItem) =>
+        currentItem.importKey === item.importKey
+          ? {
+            ...currentItem,
+            matched: false,
+            matchedTransactionId: undefined,
+            matchedTransaction: undefined,
+          }
+          : currentItem
+      )
+    );
+  }
+
+  async function ignoreStatementItem(item: ImportedItem) {
+    if (!selectedAccountId || !selectedCompetenceId) return;
+
+    const { error } = await supabase.from("transaction_reconciliations").upsert(
+      {
+        account_id: selectedAccountId,
+        competence_id: selectedCompetenceId,
+        import_key: item.importKey,
+        statement_date: item.date,
+        statement_description: item.description,
+        statement_value: item.value,
+        transaction_id: null,
+        ignored: true,
+        ignore_reason: "Ignorado manualmente",
+      },
+      {
+        onConflict: "account_id,competence_id,import_key,transaction_id",
+      }
+    );
+
+    if (error) {
+      console.error("Erro ao ignorar item:", error);
+      alert("Erro ao ignorar item.");
+      return;
+    }
+
+    setItems((previousItems) =>
+      previousItems.filter(
+        (currentItem) => currentItem.importKey !== item.importKey
+      )
+    );
+  }
+
   return (
     <AppShell>
       <div className="space-y-6">
@@ -1036,16 +1367,37 @@ export default function ReconciliationPage() {
                           >
                             Criar
                           </button>
+
+                          <button
+                            onClick={() => ignoreStatementItem(item)}
+                            className="ml-2 rounded-lg border border-white/10 px-3 py-2 text-xs font-semibold text-slate-300 hover:bg-white/10"
+                          >
+                            Ignorar
+                          </button>
                         </>
                       ) : !isFullyReconciled(item) ? (
-                        <button
-                          onClick={() => openEditTransactionDrawer(item)}
-                          className="rounded-lg bg-amber-600 px-3 py-2 text-xs font-semibold text-white hover:bg-amber-500"
-                        >
-                          Corrigir
-                        </button>
+                        <div className="flex justify-end gap-2">
+                          <button
+                            onClick={() => openEditTransactionDrawer(item)}
+                            className="rounded-lg bg-amber-600 px-3 py-2 text-xs font-semibold text-white hover:bg-amber-500"
+                          >
+                            Corrigir
+                          </button>
+
+                          <button
+                            onClick={() => unlinkReconciliation(item)}
+                            className="rounded-lg border border-white/10 px-3 py-2 text-xs font-semibold text-slate-300 hover:bg-white/10"
+                          >
+                            Desvincular
+                          </button>
+                        </div>
                       ) : (
-                        <span className="text-xs text-slate-500">—</span>
+                        <button
+                          onClick={() => unlinkReconciliation(item)}
+                          className="rounded-lg border border-white/10 px-3 py-2 text-xs font-semibold text-slate-300 hover:bg-white/10"
+                        >
+                          Desvincular
+                        </button>
                       )}
                     </td>
                   </tr>

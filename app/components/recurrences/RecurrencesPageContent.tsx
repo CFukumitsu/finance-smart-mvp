@@ -212,7 +212,7 @@ export default function RecurrencesPageContent() {
                     <button
                         type="button"
                         onClick={openCreateDrawer}
-                        className="rounded-xl bg-emerald-500 px-4 py-2 text-sm font-semibold text-slate-950 transition hover:bg-emerald-400"
+                        className="w-full rounded-xl bg-emerald-500 px-4 py-3 text-sm font-semibold text-slate-950 transition hover:bg-emerald-400 md:w-auto"
                     >
                         Nova recorrência
                     </button>
@@ -248,13 +248,108 @@ export default function RecurrencesPageContent() {
                             type="button"
                             disabled={isGenerating}
                             onClick={handleGenerateRecurringTransactions}
-                            className="rounded-xl bg-emerald-500 px-4 py-3 text-sm font-semibold text-slate-950 hover:bg-emerald-400 disabled:opacity-50"
+                            className="w-full rounded-xl bg-emerald-500 px-4 py-3 text-sm font-semibold text-slate-950 hover:bg-emerald-400 disabled:opacity-50 md:w-auto"
                         >
                             {isGenerating
                                 ? "Gerando..."
                                 : "Gerar recorrências"}
                         </button>
                     </div>
+                </div>
+
+                <div className="grid gap-3 md:hidden">
+                    {isLoading && (
+                        <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-5 text-center text-sm text-slate-400">
+                            Carregando recorrências...
+                        </div>
+                    )}
+
+                    {!isLoading &&
+                        items.map((item) => (
+                            <div
+                                key={item.id}
+                                className="rounded-2xl border border-white/10 bg-slate-950/60 p-4"
+                            >
+                                <div className="flex items-start justify-between gap-3">
+                                    <div>
+                                        <h3 className="font-semibold text-white">
+                                            {item.description}
+                                        </h3>
+
+                                        <div className="mt-2 flex flex-wrap gap-2">
+                                            <span
+                                                className={
+                                                    item.type === "income"
+                                                        ? "rounded-full bg-emerald-500/10 px-3 py-1 text-xs font-medium text-emerald-300"
+                                                        : "rounded-full bg-rose-500/10 px-3 py-1 text-xs font-medium text-rose-300"
+                                                }
+                                            >
+                                                {item.type === "income" ? "Receita" : "Despesa"}
+                                            </span>
+
+                                            <span
+                                                className={
+                                                    item.status === "active"
+                                                        ? "rounded-full bg-blue-500/10 px-3 py-1 text-xs font-medium text-blue-300"
+                                                        : "rounded-full bg-slate-500/10 px-3 py-1 text-xs font-medium text-slate-300"
+                                                }
+                                            >
+                                                {item.status === "active" ? "Ativa" : "Cancelada"}
+                                            </span>
+                                        </div>
+                                    </div>
+
+                                    <p className="whitespace-nowrap text-sm font-semibold text-slate-100">
+                                        {Number(item.amount).toLocaleString("pt-BR", {
+                                            style: "currency",
+                                            currency: "BRL",
+                                        })}
+                                    </p>
+                                </div>
+
+                                <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
+                                    <div className="rounded-xl bg-white/[0.03] p-3">
+                                        <p className="text-xs text-slate-500">Frequência</p>
+                                        <p className="mt-1 font-semibold text-slate-200">
+                                            Mensal
+                                        </p>
+                                    </div>
+
+                                    <div className="rounded-xl bg-white/[0.03] p-3">
+                                        <p className="text-xs text-slate-500">Status</p>
+                                        <p className="mt-1 font-semibold text-slate-200">
+                                            {item.status === "active" ? "Ativa" : "Cancelada"}
+                                        </p>
+                                    </div>
+                                </div>
+
+                                <div className="mt-4 flex gap-2">
+                                    <button
+                                        type="button"
+                                        onClick={() => openEditDrawer(item)}
+                                        className="flex-1 rounded-xl border border-white/10 px-3 py-2 text-xs font-semibold text-slate-200 transition hover:bg-white/10"
+                                    >
+                                        Editar
+                                    </button>
+
+                                    {item.status === "active" && (
+                                        <button
+                                            type="button"
+                                            onClick={() => handleCancel(item.id)}
+                                            className="flex-1 rounded-xl border border-rose-500/30 px-3 py-2 text-xs font-semibold text-rose-300 transition hover:bg-rose-500/10"
+                                        >
+                                            Cancelar
+                                        </button>
+                                    )}
+                                </div>
+                            </div>
+                        ))}
+
+                    {!isLoading && items.length === 0 && (
+                        <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-5 text-center text-sm text-slate-400">
+                            Nenhuma recorrência cadastrada.
+                        </div>
+                    )}
                 </div>
 
                 <div className="overflow-hidden rounded-2xl border border-white/10 bg-slate-950/60">
@@ -525,7 +620,7 @@ export default function RecurrencesPageContent() {
 
                                 <button
                                     type="submit"
-                                    className="rounded-xl bg-emerald-500 px-4 py-2 text-sm font-semibold text-slate-950 transition hover:bg-emerald-400"
+                                    className="w-full rounded-xl bg-emerald-500 px-4 py-3 text-sm font-semibold text-slate-950 transition hover:bg-emerald-400 md:w-auto"
                                 >
                                     Salvar recorrência
                                 </button>

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 import {
   closeCompetence,
   getClosureByCompetenceId,
@@ -10,13 +11,24 @@ import { supabase } from "@/src/lib/supabase";
 import type { CompetenceClosure } from "@/src/types/closing";
 
 type Competence = {
-    id: string;
-    name: string;
-  };
+  id: string;
+  name: string;
+};
 
 type CompetenceWithClosure = Competence & {
   closure: CompetenceClosure | null;
 };
+
+function getVisibleCompetenceNames(centerDate: Date) {
+  const names: string[] = [];
+
+  for (let offset = -3; offset <= 3; offset++) {
+    const date = new Date(centerDate.getFullYear(), centerDate.getMonth() + offset, 1);
+    names.push(getCompetenceName(date));
+  }
+
+  return names;
+}
 
 function formatCurrency(value: number) {
   return new Intl.NumberFormat("pt-BR", {
@@ -25,27 +37,54 @@ function formatCurrency(value: number) {
   }).format(value);
 }
 
+function getCompetenceName(date: Date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function formatMonthLabel(date: Date) {
+  return new Intl.DateTimeFormat("pt-BR", {
+    month: "short",
+    year: "2-digit",
+  })
+    .format(date)
+    .replace(".", "");
+}
+
+function getVisibleMonthDates(centerDate: Date) {
+  const dates: Date[] = [];
+
+  for (let offset = -3; offset <= 3; offset++) {
+    dates.push(new Date(centerDate.getFullYear(), centerDate.getMonth() + offset, 1));
+  }
+
+  return dates;
+}
+
 export default function ClosingsPageContent() {
   const [items, setItems] = useState<CompetenceWithClosure[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isProcessingId, setIsProcessingId] = useState<string | null>(null);
+  const [centerDate, setCenterDate] = useState(() => new Date());
 
   async function loadData() {
     setIsLoading(true);
 
-    const { data, error } = await supabase
-        .from("competences")
-        .select("id, name")
-        .order("name", { ascending: false });
+    const visibleCompetenceNames = getVisibleCompetenceNames(centerDate);
 
-      if (error) {
-        console.error("COMPETENCES ERROR:", error);
-        alert(JSON.stringify(error, null, 2));
-      
-        setItems([]);
-        setIsLoading(false);
-        return;
-      }
+    const { data, error } = await supabase
+      .from("competences")
+      .select("id, name")
+      .in("name", visibleCompetenceNames)
+      .order("name", { ascending: false });
+
+    if (error) {
+      console.error("COMPETENCES ERROR:", error);
+      alert(JSON.stringify(error, null, 2));
+
+      setItems([]);
+      setIsLoading(false);
+      return;
+    }
 
     const mapped = await Promise.all(
       (data ?? []).map(async (competence) => {
@@ -92,7 +131,23 @@ export default function ClosingsPageContent() {
 
   useEffect(() => {
     loadData();
-  }, []);
+  }, [centerDate]);
+
+  function goToPreviousMonth() {
+    setCenterDate(
+      (current) => new Date(current.getFullYear(), current.getMonth() - 1, 1)
+    );
+  }
+
+  function goToNextMonth() {
+    setCenterDate(
+      (current) => new Date(current.getFullYear(), current.getMonth() + 1, 1)
+    );
+  }
+
+  function goToCurrentMonth() {
+    setCenterDate(new Date());
+  }
 
   return (
     <div className="space-y-6">
@@ -111,6 +166,61 @@ export default function ClosingsPageContent() {
         </p>
       </div>
 
+      <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-4 shadow-xl">
+        <div className="flex items-center justify-between gap-3">
+          <button
+            type="button"
+            onClick={goToPreviousMonth}
+            className="flex h-10 w-10 items-center justify-center rounded-xl border border-white/10 text-slate-300 hover:bg-white/10 hover:text-white"
+          >
+            <ChevronLeft size={18} />
+          </button>
+
+          <div className="flex flex-1 items-center justify-center gap-2 overflow-x-auto">
+            {getVisibleMonthDates(centerDate).map((date) => {
+              const currentMonthName = getCompetenceName(new Date());
+              const monthName = getCompetenceName(date);
+              const isCurrentMonth = monthName === currentMonthName;
+              const isCenterMonth = monthName === getCompetenceName(centerDate);
+
+              return (
+                <button
+                  key={monthName}
+                  type="button"
+                  onClick={() => setCenterDate(date)}
+                  className={`whitespace-nowrap rounded-full px-3 py-2 text-xs font-semibold transition ${isCenterMonth
+                      ? "bg-blue-600 text-white"
+                      : isCurrentMonth
+                        ? "bg-cyan-500/10 text-cyan-300"
+                        : "bg-white/[0.03] text-slate-400 hover:bg-white/10 hover:text-white"
+                    }`}
+                >
+                  {formatMonthLabel(date)}
+                </button>
+              );
+            })}
+          </div>
+
+          <button
+            type="button"
+            onClick={goToNextMonth}
+            className="flex h-10 w-10 items-center justify-center rounded-xl border border-white/10 text-slate-300 hover:bg-white/10 hover:text-white"
+          >
+            <ChevronRight size={18} />
+          </button>
+        </div>
+
+        <div className="mt-3 flex justify-center">
+          <button
+            type="button"
+            onClick={goToCurrentMonth}
+            className="rounded-full px-3 py-1 text-xs font-medium text-slate-400 hover:bg-white/10 hover:text-white"
+          >
+            Voltar para o mês atual
+          </button>
+        </div>
+      </div>
+
       <div className="overflow-hidden rounded-2xl border border-white/10 bg-slate-950/60 shadow-xl">
         <div className="border-b border-white/10 px-6 py-4">
           <h2 className="text-lg font-semibold text-white">
@@ -118,7 +228,107 @@ export default function ClosingsPageContent() {
           </h2>
         </div>
 
-        <div className="overflow-x-auto">
+        <div className="grid gap-3 p-4 md:hidden">
+          {isLoading && (
+            <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-5 text-center text-sm text-slate-400">
+              Carregando competências...
+            </div>
+          )}
+
+          {!isLoading &&
+            items.map((item) => {
+              const isClosed = item.closure?.status === "Fechada";
+              const isProcessing = isProcessingId === item.id;
+
+              return (
+                <div
+                  key={item.id}
+                  className="rounded-2xl border border-white/10 bg-slate-950/60 p-4"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <h3 className="font-semibold text-white">{item.name}</h3>
+                      <p className="mt-1 text-xs text-slate-500">
+                        Competência financeira
+                      </p>
+                    </div>
+
+                    <span
+                      className={`rounded-full px-3 py-1 text-xs font-medium ${isClosed
+                          ? "bg-emerald-500/10 text-emerald-300"
+                          : "bg-yellow-500/10 text-yellow-300"
+                        }`}
+                    >
+                      {isClosed ? "Fechada" : "Aberta"}
+                    </span>
+                  </div>
+
+                  <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
+                    <div className="rounded-xl bg-white/[0.03] p-3">
+                      <p className="text-xs text-slate-500">Receitas</p>
+                      <p className="mt-1 font-semibold text-emerald-300">
+                        {formatCurrency(item.closure?.total_income ?? 0)}
+                      </p>
+                    </div>
+
+                    <div className="rounded-xl bg-white/[0.03] p-3">
+                      <p className="text-xs text-slate-500">Despesas</p>
+                      <p className="mt-1 font-semibold text-red-300">
+                        {formatCurrency(item.closure?.total_expense ?? 0)}
+                      </p>
+                    </div>
+
+                    <div className="rounded-xl bg-white/[0.03] p-3">
+                      <p className="text-xs text-slate-500">Saldo</p>
+                      <p className="mt-1 font-semibold text-white">
+                        {formatCurrency(item.closure?.balance ?? 0)}
+                      </p>
+                    </div>
+
+                    <div className="rounded-xl bg-white/[0.03] p-3">
+                      <p className="text-xs text-slate-500">Pendências</p>
+                      <p className="mt-1 font-semibold text-slate-200">
+                        {formatCurrency(
+                          (item.closure?.pending_income ?? 0) +
+                          (item.closure?.pending_expense ?? 0)
+                        )}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="mt-4">
+                    {isClosed ? (
+                      <button
+                        type="button"
+                        disabled={isProcessing}
+                        onClick={() => handleReopen(item.id)}
+                        className="w-full rounded-xl border border-white/10 px-4 py-3 text-sm font-semibold text-slate-200 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {isProcessing ? "Processando..." : "Reabrir competência"}
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        disabled={isProcessing}
+                        onClick={() => handleClose(item.id)}
+                        className="w-full rounded-xl bg-emerald-500 px-4 py-3 text-sm font-semibold text-slate-950 hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {isProcessing ? "Processando..." : "Fechar competência"}
+                      </button>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+
+          {!isLoading && items.length === 0 && (
+            <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-5 text-center text-sm text-slate-400">
+              Nenhuma competência encontrada.
+            </div>
+          )}
+        </div>
+
+        <div className="hidden overflow-x-auto md:block">
           <table className="w-full min-w-[900px] text-left text-sm">
             <thead className="bg-white/[0.03] text-xs uppercase text-slate-400">
               <tr>
@@ -170,17 +380,16 @@ export default function ClosingsPageContent() {
                           {item.name}
                         </div>
                         <div className="text-xs text-slate-500">
-                            Competência financeira
+                          Competência financeira
                         </div>
                       </td>
 
                       <td className="px-6 py-4">
                         <span
-                          className={`rounded-full px-3 py-1 text-xs font-medium ${
-                            isClosed
+                          className={`rounded-full px-3 py-1 text-xs font-medium ${isClosed
                               ? "bg-emerald-500/10 text-emerald-300"
                               : "bg-yellow-500/10 text-yellow-300"
-                          }`}
+                            }`}
                         >
                           {isClosed ? "Fechada" : "Aberta"}
                         </span>
@@ -201,7 +410,7 @@ export default function ClosingsPageContent() {
                       <td className="px-6 py-4 text-right text-slate-300">
                         {formatCurrency(
                           (item.closure?.pending_income ?? 0) +
-                            (item.closure?.pending_expense ?? 0)
+                          (item.closure?.pending_expense ?? 0)
                         )}
                       </td>
 

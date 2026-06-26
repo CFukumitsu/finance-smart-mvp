@@ -1,6 +1,7 @@
 "use client";
 
 import { Suspense, useEffect, useState } from "react";
+import { ChevronLeft, ChevronRight, SlidersHorizontal } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import AppShell from "../components/layout/AppShell";
 import { supabase } from "@/src/lib/supabase";
@@ -71,9 +72,9 @@ function TransactionsPageContent() {
   const [competenceFilter, setCompetenceFilter] = useState("");
   const [accountFilter, setAccountFilter] = useState("");
   const [listMode, setListMode] = useState<"competence" | "latest">("latest");
-  const [isCompetencePickerOpen, setIsCompetencePickerOpen] = useState(false);
-  const [pickerYear, setPickerYear] = useState(new Date().getFullYear());
-
+  const [showFilters, setShowFilters] = useState(false);
+  const [plannedCardLimit, setPlannedCardLimit] = useState(0);
+  
   const [form, setForm] = useState({
     description: "",
     value: "",
@@ -174,6 +175,29 @@ function TransactionsPageContent() {
         (competence) => competence.month === month && competence.year === year
       )?.id ?? form.competence_id
     );
+  }
+
+  async function loadPlannedCardLimit(accountId: string, competenceId: string) {
+    if (!accountId || !competenceId) {
+      setPlannedCardLimit(0);
+      return;
+    }
+
+    const { data, error } = await supabase
+      .from("financial_targets")
+      .select("planned_value")
+      .eq("target_type", "account")
+      .eq("target_id", accountId)
+      .eq("competence_id", competenceId)
+      .maybeSingle();
+
+    if (error) {
+      console.error("Erro ao carregar limite planejado:", error);
+      setPlannedCardLimit(0);
+      return;
+    }
+
+    setPlannedCardLimit(Number(data?.planned_value ?? 0));
   }
 
   async function loadDescriptionSuggestions() {
@@ -383,6 +407,17 @@ function TransactionsPageContent() {
       setIsDrawerOpen(true);
     }
   }, [searchParams]);
+
+  useEffect(() => {
+    const selected = accounts.find((account) => account.id === accountFilter);
+
+    if (selected?.type === "Cartão") {
+      loadPlannedCardLimit(accountFilter, competenceFilter);
+      return;
+    }
+
+    setPlannedCardLimit(0);
+  }, [accountFilter, competenceFilter, accounts]);
 
   useEffect(() => {
     if (!competenceFilter) return;
@@ -687,22 +722,87 @@ function TransactionsPageContent() {
     (item) => item.id === competenceFilter
   );
 
-  const monthLabels = [
-    "jan", "fev", "mar", "abr",
-    "mai", "jun", "jul", "ago",
-    "set", "out", "nov", "dez",
-  ];
+  function getCompetenceByDate(date: Date) {
+    const month = date.getMonth() + 1;
+    const year = date.getFullYear();
 
-  function selectCompetenceByMonth(year: number, month: number) {
-    const foundCompetence = competences.find(
-      (item) => item.year === year && item.month === month
+    return competences.find(
+      (competence) => competence.month === month && competence.year === year
+    );
+  }
+
+  function getVisibleMonthDates() {
+    if (!selectedCompetence) {
+      return [];
+    }
+
+    const centerDate = new Date(
+      selectedCompetence.year,
+      selectedCompetence.month - 1,
+      1
     );
 
+    const dates: Date[] = [];
+
+    for (let offset = -3; offset <= 3; offset++) {
+      dates.push(
+        new Date(centerDate.getFullYear(), centerDate.getMonth() + offset, 1)
+      );
+    }
+
+    return dates;
+  }
+
+  function formatMonthLabel(date: Date) {
+    return new Intl.DateTimeFormat("pt-BR", {
+      month: "short",
+      year: "2-digit",
+    })
+      .format(date)
+      .replace(".", "");
+  }
+
+  function selectCompetenceByDate(date: Date) {
+    const foundCompetence = getCompetenceByDate(date);
+
     if (foundCompetence) {
+      setListMode("competence");
       setCompetenceFilter(foundCompetence.id);
-      setIsCompetencePickerOpen(false);
     }
   }
+
+  function goToPreviousCompetence() {
+    if (!selectedCompetence) return;
+
+    const previousDate = new Date(
+      selectedCompetence.year,
+      selectedCompetence.month - 2,
+      1
+    );
+
+    selectCompetenceByDate(previousDate);
+  }
+
+  function goToNextCompetence() {
+    if (!selectedCompetence) return;
+
+    const nextDate = new Date(
+      selectedCompetence.year,
+      selectedCompetence.month,
+      1
+    );
+
+    selectCompetenceByDate(nextDate);
+  }
+
+  function goToCurrentCompetence() {
+    const currentCompetenceId = getCurrentCompetenceId(competences);
+
+    if (currentCompetenceId) {
+      setCompetenceFilter(currentCompetenceId);
+    }
+  }
+
 
   function formatCurrency(value: number) {
     return Number(value).toLocaleString("pt-BR", {
@@ -710,11 +810,6 @@ function TransactionsPageContent() {
       currency: "BRL",
     });
   }
-
-  console.log(
-    "IDS",
-    transactions.map((t) => t.id)
-  );
 
   const today = new Date().toISOString().split("T")[0];
 
@@ -776,17 +871,29 @@ function TransactionsPageContent() {
 
   const periodResult = totalIncome - totalExpense;
 
-  const cardLimit = Number(selectedAccount?.limit_amount ?? 0);
+  const cardLimit = plannedCardLimit;
+
+  const cardUsedLimit = transactions.reduce((sum, transaction) => {
+    if (transaction.type === "Despesa") {
+      return sum + Number(transaction.value);
+    }
+  
+    if (transaction.type === "Receita") {
+      return sum - Number(transaction.value);
+    }
+  
+    return sum;
+  }, 0);
 
   const cardAvailableLimit =
     selectedAccount?.type === "Cartão"
-      ? cardLimit - totalCardInvoice
+      ? cardLimit - cardUsedLimit
       : 0;
 
   return (
     <AppShell>
       <div className="space-y-6">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <div>
             <h1 className="text-3xl font-bold text-white">Lançamentos</h1>
             <p className="mt-1 text-sm text-slate-400">
@@ -799,110 +906,73 @@ function TransactionsPageContent() {
               resetForm();
               setIsDrawerOpen(true);
             }}
-            className="rounded-xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white hover:bg-blue-500"
+            className="w-full rounded-xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white hover:bg-blue-500 md:w-auto"
           >
             Novo lançamento
           </button>
         </div>
 
-        <div className="grid gap-3 md:grid-cols-6">
-          <div className="relative">
-            <div className="flex h-full items-center justify-between rounded-xl border border-white/10 bg-slate-900 px-4 py-3">
+        <div className="grid gap-3 md:grid-cols-7">
+          <div className="min-w-0 rounded-xl border border-white/10 bg-slate-900 p-2 md:col-span-2">
+            <div className="flex items-center justify-between gap-2">
               <button
-                onClick={() => {
-                  const currentIndex = competences.findIndex(
-                    (item) => item.id === competenceFilter
-                  );
-
-                  if (currentIndex >= 0 && currentIndex < competences.length - 1) {
-                    setCompetenceFilter(competences[currentIndex + 1].id);
-                  }
-                }}
-                className="rounded-lg px-2 text-lg text-slate-400 hover:bg-white/10 hover:text-white"
+                type="button"
+                onClick={goToPreviousCompetence}
+                className="flex h-9 w-9 items-center justify-center rounded-lg text-slate-400 hover:bg-white/10 hover:text-white"
                 title="Competência anterior"
               >
-                ‹
+                <ChevronLeft size={18} />
               </button>
 
-              <button
-                onClick={() => {
-                  setPickerYear(selectedCompetence?.year ?? new Date().getFullYear());
-                  setIsCompetencePickerOpen(!isCompetencePickerOpen);
-                }}
-                className="px-3 text-sm font-bold text-blue-300 hover:text-blue-200"
-              >
-                {selectedCompetence
-                  ? `${monthLabels[selectedCompetence.month - 1]} ${selectedCompetence.year}`
-                  : "Competência"}
-              </button>
+              <div className="flex min-w-0 flex-1 items-center justify-center gap-1 overflow-hidden">
+                {getVisibleMonthDates().map((date) => {
+                  const foundCompetence = getCompetenceByDate(date);
+                  const isSelected =
+                    foundCompetence?.id === selectedCompetence?.id;
 
-              <button
-                onClick={() => {
-                  const currentIndex = competences.findIndex(
-                    (item) => item.id === competenceFilter
+                  const today = new Date();
+                  const isCurrentMonth =
+                    date.getMonth() === today.getMonth() &&
+                    date.getFullYear() === today.getFullYear();
+
+                  return (
+                    <button
+                      key={`${date.getFullYear()}-${date.getMonth()}`}
+                      type="button"
+                      disabled={!foundCompetence}
+                      onClick={() => selectCompetenceByDate(date)}
+                      className={`shrink-0 whitespace-nowrap rounded-full px-3 py-2 text-xs font-semibold transition ${isSelected
+                        ? "bg-blue-600 text-white"
+                        : isCurrentMonth
+                          ? "bg-cyan-500/10 text-cyan-300"
+                          : foundCompetence
+                            ? "bg-white/[0.03] text-slate-400 hover:bg-white/10 hover:text-white"
+                            : "cursor-not-allowed bg-white/[0.02] text-slate-700"
+                        }`}
+                    >
+                      {formatMonthLabel(date)}
+                    </button>
                   );
+                })}
+              </div>
 
-                  if (currentIndex > 0) {
-                    setCompetenceFilter(competences[currentIndex - 1].id);
-                  }
-                }}
-                className="rounded-lg px-2 text-lg text-slate-400 hover:bg-white/10 hover:text-white"
+              <button
+                type="button"
+                onClick={goToNextCompetence}
+                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-slate-400 hover:bg-white/10 hover:text-white"
                 title="Próxima competência"
               >
-                ›
+                <ChevronRight size={18} />
               </button>
             </div>
 
-            {isCompetencePickerOpen && (
-              <div className="absolute left-0 top-14 z-40 w-80 rounded-2xl border border-white/10 bg-slate-950 p-4 shadow-2xl">
-                <div className="mb-4 flex items-center justify-between">
-                  <button
-                    onClick={() => setPickerYear(pickerYear - 1)}
-                    className="rounded-lg px-3 py-2 text-slate-400 hover:bg-white/10 hover:text-white"
-                  >
-                    ‹
-                  </button>
-
-                  <p className="text-lg font-bold text-white">{pickerYear}</p>
-
-                  <button
-                    onClick={() => setPickerYear(pickerYear + 1)}
-                    className="rounded-lg px-3 py-2 text-slate-400 hover:bg-white/10 hover:text-white"
-                  >
-                    ›
-                  </button>
-                </div>
-
-                <div className="grid grid-cols-4 gap-2">
-                  {monthLabels.map((month, index) => {
-                    const monthNumber = index + 1;
-                    const competenceExists = competences.some(
-                      (item) => item.year === pickerYear && item.month === monthNumber
-                    );
-
-                    const isSelected =
-                      selectedCompetence?.year === pickerYear &&
-                      selectedCompetence?.month === monthNumber;
-
-                    return (
-                      <button
-                        key={month}
-                        disabled={!competenceExists}
-                        onClick={() => selectCompetenceByMonth(pickerYear, monthNumber)}
-                        className={`rounded-xl px-3 py-4 text-sm font-semibold ${isSelected
-                          ? "bg-blue-600 text-white"
-                          : competenceExists
-                            ? "text-slate-200 hover:bg-white/10"
-                            : "cursor-not-allowed text-slate-600"
-                          }`}
-                      >
-                        {month}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
+            <button
+              type="button"
+              onClick={goToCurrentCompetence}
+              className="mt-2 w-full rounded-lg py-1 text-xs font-medium text-slate-400 hover:bg-white/10 hover:text-white"
+            >
+              Voltar para mês atual
+            </button>
           </div>
 
           <select
@@ -935,21 +1005,32 @@ function TransactionsPageContent() {
             className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-white outline-none"
           />
 
-          <select
-            value={accountFilter}
-            onChange={(event) => setAccountFilter(event.target.value)}
-            className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-white outline-none"
+          <button
+            type="button"
+            onClick={() => setShowFilters(!showFilters)}
+            className="flex items-center justify-center gap-2 rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm font-semibold text-white hover:bg-white/10 md:hidden"
           >
-            <option value="">Todas as contas</option>
-            {accounts.map((account) => (
-              <option key={account.id} value={account.id}>
-                {account.name}
-              </option>
-            ))}
-          </select>
+            <SlidersHorizontal size={16} />
+            Filtros
+          </button>
 
-          <select
-            value={typeFilter}
+          <div className={`${showFilters ? "grid" : "hidden"} gap-3 md:contents`}>
+
+            <select
+              value={accountFilter}
+              onChange={(event) => setAccountFilter(event.target.value)}
+              className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-white outline-none"
+            >
+              <option value="">Todas as contas</option>
+              {accounts.map((account) => (
+                <option key={account.id} value={account.id}>
+                  {account.name}
+                </option>
+              ))}
+            </select>
+
+            <select
+              value={typeFilter}
             onChange={(event) => setTypeFilter(event.target.value)}
             className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-white outline-none"
           >
@@ -960,16 +1041,17 @@ function TransactionsPageContent() {
             <option value="Pagamento de Fatura">Pagamento de Fatura</option>
           </select>
 
-          <select
-            value={statusFilter}
-            onChange={(event) => setStatusFilter(event.target.value)}
-            className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-white outline-none"
-          >
-            <option value="">Todos os status</option>
-            <option value="Pendente">Pendente</option>
-            <option value="Pago">Pago</option>
-            <option value="Recebido">Recebido</option>
-          </select>
+            <select
+              value={statusFilter}
+              onChange={(event) => setStatusFilter(event.target.value)}
+              className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-white outline-none"
+            >
+              <option value="">Todos os status</option>
+              <option value="Pendente">Pendente</option>
+              <option value="Pago">Pago</option>
+              <option value="Recebido">Recebido</option>
+            </select>
+          </div>
         </div>
 
         <div className="grid gap-4 md:grid-cols-4">
@@ -1061,13 +1143,17 @@ function TransactionsPageContent() {
               <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-5">
                 <p className="text-sm text-slate-400">Total da fatura</p>
                 <p className="mt-2 text-2xl font-bold text-red-300">
-                  {formatCurrency(totalCardInvoice)}
+                  {formatCurrency(cardUsedLimit)}
                 </p>
               </div>
 
               <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-5">
                 <p className="text-sm text-slate-400">Limite disponível</p>
-                <p className="mt-2 text-2xl font-bold text-emerald-300">
+                <p
+                  className={`mt-2 text-2xl font-bold ${
+                    cardAvailableLimit >= 0 ? "text-emerald-300" : "text-red-300"
+                  }`}
+                >
                   {formatCurrency(cardAvailableLimit)}
                 </p>
               </div>
@@ -1095,12 +1181,9 @@ function TransactionsPageContent() {
               <tr>
                 <th className="px-5 py-4">Data</th>
                 <th className="px-5 py-4">Descrição</th>
-                <th className="px-5 py-4">Valor</th>
                 <th className="px-5 py-4">Conta / Cartão</th>
-                <th className="px-5 py-4">Tipo</th>
                 <th className="px-5 py-4">Categoria</th>
-                <th className="px-5 py-4">Competência</th>
-                <th className="px-5 py-4">Status</th>
+                <th className="px-5 py-4 text-right">Valor</th>
                 <th className="px-5 py-4 text-right">Ações</th>
               </tr>
             </thead>
@@ -1108,7 +1191,7 @@ function TransactionsPageContent() {
             <tbody className="divide-y divide-white/10">
               {isLoading && (
                 <tr>
-                  <td colSpan={9} className="px-5 py-10 text-center text-slate-400">
+                  <td colSpan={6} className="px-5 py-10 text-center text-slate-400">
                     Carregando lançamentos...
                   </td>
                 </tr>
@@ -1124,12 +1207,29 @@ function TransactionsPageContent() {
                       ).toLocaleDateString("pt-BR")}
                     </td>
 
-                    <td className="px-5 py-4 text-white">
-                      {transaction.description}
-                    </td>
+                    <td className="px-5 py-4">
+                      <div className="font-medium text-white">
+                        {transaction.description}
+                      </div>
 
-                    <td className="px-5 py-4 text-slate-300">
-                      {formatCurrency(transaction.value)}
+                      <div className="mt-1 flex flex-wrap gap-2">
+                        <span
+                          className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${transaction.type === "Receita"
+                            ? "bg-emerald-500/10 text-emerald-300"
+                            : transaction.type === "Transferência"
+                              ? "bg-blue-500/10 text-blue-300"
+                              : transaction.type === "Pagamento de Fatura"
+                                ? "bg-cyan-500/10 text-cyan-300"
+                                : "bg-red-500/10 text-red-300"
+                            }`}
+                        >
+                          {transaction.type}
+                        </span>
+
+                        <span className="rounded-full bg-white/[0.04] px-2.5 py-0.5 text-xs font-semibold text-slate-400">
+                          {transaction.status ?? "-"}
+                        </span>
+                      </div>
                     </td>
 
                     <td className="px-5 py-4 text-slate-300">
@@ -1137,19 +1237,18 @@ function TransactionsPageContent() {
                     </td>
 
                     <td className="px-5 py-4 text-slate-300">
-                      {transaction.type}
-                    </td>
-
-                    <td className="px-5 py-4 text-slate-300">
                       {transaction.category?.name ?? "-"}
                     </td>
 
-                    <td className="px-5 py-4 text-slate-300">
-                      {transaction.competence?.name ?? "-"}
-                    </td>
-
-                    <td className="px-5 py-4 text-slate-300">
-                      {transaction.status ?? "-"}
+                    <td
+                      className={`px-5 py-4 text-right font-semibold ${transaction.type === "Receita"
+                        ? "text-emerald-300"
+                        : transaction.type === "Transferência"
+                          ? "text-blue-300"
+                          : "text-red-300"
+                        }`}
+                    >
+                      {formatCurrency(transaction.value)}
                     </td>
 
                     <td className="px-5 py-4 text-right">
@@ -1182,7 +1281,7 @@ function TransactionsPageContent() {
 
               {!isLoading && transactions.length === 0 && (
                 <tr>
-                  <td colSpan={9} className="px-5 py-10 text-center text-slate-400">
+                  <td colSpan={6} className="px-5 py-10 text-center text-slate-400">
                     Nenhum lançamento encontrado.
                   </td>
                 </tr>

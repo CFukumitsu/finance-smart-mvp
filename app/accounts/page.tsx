@@ -333,13 +333,113 @@ export default function AccountsPage() {
 
           <button
             onClick={openNewDrawer}
-            className="rounded-xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white hover:bg-blue-500"
+            className="w-full rounded-xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white hover:bg-blue-500 md:w-auto"
           >
             Nova conta/cartão
           </button>
         </div>
 
-        <div className="w-full overflow-x-auto rounded-2xl border border-white/10 bg-slate-950/60">
+        <div className="grid gap-3 md:hidden">
+          {isLoading && (
+            <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-5 text-center text-sm text-slate-400">
+              Carregando contas/cartões...
+            </div>
+          )}
+
+          {!isLoading &&
+            accounts.map((account) => (
+              <div
+                key={account.id}
+                className="rounded-2xl border border-white/10 bg-slate-950/60 p-4"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <h3 className="font-semibold text-white">{account.name}</h3>
+
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      <span
+                        className={`rounded-full px-3 py-1 text-xs font-bold ${
+                          account.type === "Conta"
+                            ? "bg-blue-500/10 text-blue-300"
+                            : "bg-purple-500/10 text-purple-300"
+                        }`}
+                      >
+                        {account.type}
+                      </span>
+
+                      <span
+                        className={`rounded-full px-3 py-1 text-xs font-bold ${
+                          account.active
+                            ? "bg-emerald-500/10 text-emerald-300"
+                            : "bg-slate-500/10 text-slate-400"
+                        }`}
+                      >
+                        {account.active ? "Ativa" : "Inativa"}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="flex gap-2">
+                    <button
+                      title="Planejamento"
+                      onClick={() => openPlanningModal(account)}
+                      className="flex h-9 w-9 items-center justify-center rounded-xl border border-cyan-500/20 bg-cyan-500/10 text-cyan-400"
+                    >
+                      <TrendingUp size={16} />
+                    </button>
+
+                    <button
+                      title="Editar"
+                      onClick={() => openEditDrawer(account)}
+                      className="flex h-9 w-9 items-center justify-center rounded-xl border border-amber-500/20 bg-amber-500/10 text-amber-400"
+                    >
+                      <Pencil size={16} />
+                    </button>
+
+                    <button
+                      title={account.active ? "Inativar" : "Ativar"}
+                      onClick={() => toggleActive(account)}
+                      className="flex h-9 w-9 items-center justify-center rounded-xl border border-slate-500/20 bg-slate-500/10 text-slate-300"
+                    >
+                      <Power size={16} />
+                    </button>
+
+                    <button
+                      title="Excluir"
+                      onClick={() => deleteAccount(account)}
+                      className="flex h-9 w-9 items-center justify-center rounded-xl border border-red-500/20 bg-red-500/10 text-red-400"
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  </div>
+                </div>
+
+                <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
+                  <div className="rounded-xl bg-white/[0.03] p-3">
+                    <p className="text-xs text-slate-500">Fechamento</p>
+                    <p className="mt-1 font-semibold text-slate-200">
+                      {account.closing_day ? `Dia ${account.closing_day}` : "-"}
+                    </p>
+                  </div>
+
+                  <div className="rounded-xl bg-white/[0.03] p-3">
+                    <p className="text-xs text-slate-500">Vencimento</p>
+                    <p className="mt-1 font-semibold text-slate-200">
+                      {account.due_day ? `Dia ${account.due_day}` : "-"}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            ))}
+
+          {!isLoading && accounts.length === 0 && (
+            <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-5 text-center text-sm text-slate-400">
+              Nenhuma conta/cartão cadastrada.
+            </div>
+          )}
+        </div>
+
+        <div className="hidden w-full overflow-x-auto rounded-2xl border border-white/10 bg-slate-950/60 md:block">
           <table className="min-w-[1100px] w-full text-left text-sm">
             <thead className="bg-white/5 text-slate-300">
               <tr>

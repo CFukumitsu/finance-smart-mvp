@@ -193,7 +193,7 @@ export default function CategoriesPage() {
 
           <button
             onClick={openNewDrawer}
-            className="rounded-xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white hover:bg-blue-500"
+            className="w-full rounded-xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white hover:bg-blue-500 md:w-auto"
           >
             Nova categoria
           </button>
@@ -210,7 +210,7 @@ export default function CategoriesPage() {
           <select
             value={statusFilter}
             onChange={(event) => setStatusFilter(event.target.value)}
-            className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-white outline-none"
+            className="w-full md:w-52 rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-white outline-none"
           >
             <option value="Ativas">Ativas</option>
             <option value="Inativas">Inativas</option>
@@ -218,7 +218,95 @@ export default function CategoriesPage() {
           </select>
         </div>
 
-        <div className="overflow-hidden rounded-2xl border border-white/10 bg-slate-950/60">
+        <div className="grid gap-3 md:hidden">
+          {isLoading && (
+            <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-5 text-center text-sm text-slate-400">
+              Carregando categorias...
+            </div>
+          )}
+
+          {!isLoading &&
+            categories.map((category) => (
+              <div
+                key={category.id}
+                className="rounded-2xl border border-white/10 bg-slate-950/60 p-4"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <h3 className="font-semibold text-white">{category.name}</h3>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      <span
+                        className={`rounded-full px-3 py-1 text-xs font-bold ${getTypeBadgeClass(
+                          category.type
+                        )}`}
+                      >
+                        {category.type}
+                      </span>
+
+                      <span
+                        className={`rounded-full px-3 py-1 text-xs font-bold ${category.active
+                            ? "bg-emerald-500/10 text-emerald-300"
+                            : "bg-slate-500/10 text-slate-400"
+                          }`}
+                      >
+                        {category.active ? "Ativa" : "Inativa"}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="flex gap-2">
+                    <button
+                      title="Editar"
+                      onClick={() => openEditDrawer(category)}
+                      className="flex h-9 w-9 items-center justify-center rounded-xl border border-amber-500/20 bg-amber-500/10 text-amber-400"
+                    >
+                      <Pencil size={16} />
+                    </button>
+
+                    <button
+                      title={category.active ? "Inativar" : "Ativar"}
+                      onClick={() => toggleActive(category)}
+                      className="flex h-9 w-9 items-center justify-center rounded-xl border border-slate-500/20 bg-slate-500/10 text-slate-300"
+                    >
+                      <CircleOff size={16} />
+                    </button>
+
+                    <button
+                      title="Excluir"
+                      onClick={() => deleteCategory(category)}
+                      className="flex h-9 w-9 items-center justify-center rounded-xl border border-red-500/20 bg-red-500/10 text-red-400"
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  </div>
+                </div>
+
+                <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
+                  <div className="rounded-xl bg-white/[0.03] p-3">
+                    <p className="text-xs text-slate-500">Limite mensal</p>
+                    <p className="mt-1 font-semibold text-slate-200">
+                      {formatCurrency(category.monthly_limit)}
+                    </p>
+                  </div>
+
+                  <div className="rounded-xl bg-white/[0.03] p-3">
+                    <p className="text-xs text-slate-500">Meta mensal</p>
+                    <p className="mt-1 font-semibold text-slate-200">
+                      {formatCurrency(category.monthly_goal)}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            ))}
+
+          {!isLoading && categories.length === 0 && (
+            <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-5 text-center text-sm text-slate-400">
+              Nenhuma categoria cadastrada.
+            </div>
+          )}
+        </div>
+
+        <div className="hidden overflow-x-auto rounded-2xl border border-white/10 bg-slate-950/60 md:block">
           <table className="min-w-[950px] w-full text-left text-sm">
             <thead className="bg-white/5 text-slate-300">
               <tr>
@@ -381,7 +469,7 @@ export default function CategoriesPage() {
                     type: event.target.value as "Receita" | "Despesa" | "Transferência",
                   })
                 }
-                className="w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none"
+                className="w-full md:w-52 rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-white outline-none"
               >
                 <option value="Receita">Receita</option>
                 <option value="Despesa">Despesa</option>
