@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx";
 import AppShell from "../components/layout/AppShell";
 import { supabase } from "@/src/lib/supabase";
@@ -9,6 +9,7 @@ type Account = {
   id: string;
   name: string;
   type: "Conta" | "Cartão";
+  due_day?: number | null;
 };
 
 type ImportedItem = {
@@ -36,6 +37,16 @@ type Category = {
   name: string;
   type: string | null;
   active?: boolean | null;
+};
+
+type SavedReconciliation = {
+  import_key: string;
+  statement_date: string;
+  statement_description: string;
+  statement_value: number;
+  transaction_id: string | null;
+  ignored?: boolean | null;
+  created_at?: string | null;
 };
 
 type DetectedLayout = {
@@ -181,7 +192,6 @@ async function unzipXlsxEntry(buffer: ArrayBuffer, entryName: string) {
     const fileName = decoder.decode(
       bytes.slice(offset + 46, offset + 46 + fileNameLength)
     );
-
     if (fileName === entryName) {
       const localFileNameLength = view.getUint16(localHeaderOffset + 26, true);
       const localExtraLength = view.getUint16(localHeaderOffset + 28, true);
@@ -444,6 +454,7 @@ export default function ReconciliationPage() {
   const [selectedCompetenceId, setSelectedCompetenceId] = useState("");
   const [candidateSearch, setCandidateSearch] = useState("");
   const [fileName, setFileName] = useState("");
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [detectedLayout, setDetectedLayout] = useState<DetectedLayout | null>(
     null
   );
@@ -458,6 +469,14 @@ export default function ReconciliationPage() {
     useState<ImportedItem | null>(null);
   const [itemToEditTransaction, setItemToEditTransaction] =
     useState<ImportedItem | null>(null);
+  const [paymentAccountId, setPaymentAccountId] = useState("");
+  const [paymentDueDate, setPaymentDueDate] = useState("");
+  const [isClosingStatement, setIsClosingStatement] = useState(false);
+  const isClosingStatementRef = useRef(false);
+  const [closedStatement, setClosedStatement] = useState<{
+    id: string;
+    payment_transaction_id: string | null;
+  } | null>(null);
 
   const [editForm, setEditForm] = useState({
     description: "",
@@ -599,7 +618,7 @@ export default function ReconciliationPage() {
     async function loadAccounts() {
       const { data, error } = await supabase
         .from("accounts")
-        .select("id, name, type")
+        .select("id, name, type, due_day")
         .eq("active", true)
         .order("name", { ascending: true });
 
@@ -657,6 +676,14 @@ export default function ReconciliationPage() {
     loadCategories();
   }, []);
 
+  useEffect(() => {
+    if (!selectedFile || !selectedAccountId || !selectedCompetenceId) {
+      return;
+    }
+
+    handleFileUpload(selectedFile);
+  }, [selectedAccountId, selectedCompetenceId]);
+
   async function loadTransactions(accountId: string, competenceId: string) {
     const { data, error } = await supabase
       .from("transactions")
@@ -669,6 +696,10 @@ export default function ReconciliationPage() {
     }
 
     return (data ?? []) as Transaction[];
+  }
+
+  function getStatementSignature(date: string, description: string, value: number) {
+    return `${date}|${normalizeText(description)}|${Number(value).toFixed(2)}`;
   }
 
   async function handleFileUpload(file: File) {
@@ -689,9 +720,7 @@ export default function ReconciliationPage() {
       const layout = detectLayout(rows);
 
       if (!layout) {
-        alert(
-          "Não consegui identificar automaticamente as colunas de data, lançamento e valor."
-        );
+        alert("Não consegui identificar automaticamente as colunas de data, lançamento e valor.");
         return;
       }
 
@@ -700,6 +729,7 @@ export default function ReconciliationPage() {
       );
 
       const extractedItems = extractItems(rows, layout, selectedCompetence?.year);
+
       const accountTransactions = await loadTransactions(
         selectedAccountId,
         selectedCompetenceId
@@ -708,41 +738,108 @@ export default function ReconciliationPage() {
       const { data: savedReconciliations, error: savedReconciliationsError } =
         await supabase
           .from("transaction_reconciliations")
-          .select("import_key, transaction_id")
+          .select("import_key, statement_date, statement_description, statement_value, transaction_id, ignored, created_at")
           .eq("account_id", selectedAccountId)
-          .eq("competence_id", selectedCompetenceId);
+          .eq("competence_id", selectedCompetenceId)
+          .order("created_at", { ascending: true });
 
       if (savedReconciliationsError) {
-        throw new Error("Erro ao carregar conciliações salvas.");
+        throw savedReconciliationsError;
       }
 
-      const reconciledItems = extractedItems.map((item) => {
-        const savedReconciliation = savedReconciliations?.find(
-          (reconciliation) => reconciliation.import_key === item.importKey
+      const savedReconciliationByStatement = new Map<string, SavedReconciliation>();
+
+      (savedReconciliations ?? []).forEach((reconciliation) => {
+        const key = getStatementSignature(
+          reconciliation.statement_date,
+          reconciliation.statement_description,
+          Number(reconciliation.statement_value)
         );
 
-        const savedTransaction = savedReconciliation
-          ? accountTransactions.find(
-            (transaction) => transaction.id === savedReconciliation.transaction_id
-          )
-          : undefined;
-
-        const automaticMatch = savedTransaction
-          ? undefined
-          : findMatchingTransaction(item, accountTransactions);
-
-        const match = savedTransaction ?? automaticMatch;
-
-        return {
-          ...item,
-          matched: !!match,
-          matchedTransactionId: match?.id,
-          matchedTransaction: match,
-        };
+        savedReconciliationByStatement.set(
+          key,
+          reconciliation as SavedReconciliation
+        );
       });
 
+      const savedTransactionIds = Array.from(
+        new Set(
+          (savedReconciliations ?? [])
+            .map((reconciliation) => reconciliation.transaction_id)
+            .filter(Boolean)
+        )
+      ) as string[];
+
+      let savedTransactions: Transaction[] = [];
+
+      if (savedTransactionIds.length > 0) {
+        const { data, error } = await supabase
+          .from("transactions")
+          .select("id, description, due_date, value, type, status, category_id")
+          .in("id", savedTransactionIds);
+
+        if (error) {
+          throw error;
+        }
+
+        savedTransactions = (data ?? []) as Transaction[];
+      }
+
+      const allAvailableTransactions = [
+        ...accountTransactions,
+        ...savedTransactions.filter(
+          (savedTransaction) =>
+            !accountTransactions.some(
+              (transaction) => transaction.id === savedTransaction.id
+            )
+        ),
+      ];
+
+      const { data: existingStatement } = await supabase
+        .from("credit_card_statements")
+        .select("id, payment_transaction_id")
+        .eq("account_id", selectedAccountId)
+        .eq("competence_id", selectedCompetenceId)
+        .maybeSingle();
+
+      setClosedStatement(existingStatement ?? null);
+
+      const reconciledItems = extractedItems
+        .map((item) => {
+          const savedReconciliation = savedReconciliationByStatement.get(
+            getStatementSignature(item.date, item.description, item.value)
+          );
+
+          if (savedReconciliation?.ignored) {
+            return null;
+          }
+
+          if (savedReconciliation) {
+            const savedTransaction = allAvailableTransactions.find(
+              (transaction) => transaction.id === savedReconciliation.transaction_id
+            );
+
+            return {
+              ...item,
+              matched: !!savedTransaction,
+              matchedTransactionId: savedTransaction?.id,
+              matchedTransaction: savedTransaction,
+            };
+          }
+
+          const automaticMatch = findMatchingTransaction(item, accountTransactions);
+
+          return {
+            ...item,
+            matched: !!automaticMatch,
+            matchedTransactionId: automaticMatch?.id,
+            matchedTransaction: automaticMatch,
+          };
+        })
+        .filter(Boolean) as ImportedItem[];
+
       setDetectedLayout(layout);
-      setTransactions(accountTransactions);
+      setTransactions(allAvailableTransactions);
       setItems(reconciledItems);
       setShowOnlyUnmatched(true);
     } catch (error) {
@@ -819,24 +916,9 @@ export default function ReconciliationPage() {
       newTransaction,
     ]);
 
-    const { error: reconciliationError } = await supabase
-      .from("transaction_reconciliations")
-      .upsert(
-        {
-          account_id: selectedAccountId,
-          competence_id: selectedCompetenceId,
-          import_key: itemToCreateTransaction.importKey,
-          statement_date: itemToCreateTransaction.date,
-          statement_description: itemToCreateTransaction.description,
-          statement_value: itemToCreateTransaction.value,
-          transaction_id: newTransaction.id,
-        },
-        {
-          onConflict: "account_id,competence_id,import_key,transaction_id",
-        }
-      );
-
-    if (reconciliationError) {
+    try {
+      await saveReconciliation(itemToCreateTransaction, newTransaction.id);
+    } catch (reconciliationError) {
       console.error("Erro ao gravar conciliação:", reconciliationError);
       alert("Lançamento criado, mas erro ao gravar conciliação.");
       return;
@@ -938,8 +1020,10 @@ export default function ReconciliationPage() {
           )
           .reduce((sum, currentItem) => sum + Number(currentItem.value), 0);
 
+        const financeValue = getSignedTransactionValue(transaction);
+
         const remainingFinanceValue =
-          Number(transaction.value) - alreadyLinkedStatementTotal;
+          financeValue - alreadyLinkedStatementTotal;
 
         const daysDifference = getDaysDifference(item.date, transaction.due_date);
         const valueDifference = Math.abs(remainingFinanceValue - item.value);
@@ -960,6 +1044,43 @@ export default function ReconciliationPage() {
       });
   }
 
+  async function saveReconciliation(
+    item: ImportedItem,
+    transactionId: string | null,
+    ignored = false
+  ) {
+    if (!selectedAccountId || !selectedCompetenceId) {
+      throw new Error("Selecione conta/cartão e competência.");
+    }
+
+    const { error: deleteError } = await supabase
+      .from("transaction_reconciliations")
+      .delete()
+      .eq("account_id", selectedAccountId)
+      .eq("competence_id", selectedCompetenceId)
+      .eq("import_key", item.importKey);
+
+    if (deleteError) {
+      throw deleteError;
+    }
+
+    const { error } = await supabase.from("transaction_reconciliations").insert({
+      account_id: selectedAccountId,
+      competence_id: selectedCompetenceId,
+      import_key: item.importKey,
+      statement_date: item.date,
+      statement_description: item.description,
+      statement_value: item.value,
+      transaction_id: transactionId,
+      ignored,
+      ignore_reason: ignored ? "Ignorado manualmente" : null,
+    });
+
+    if (error) {
+      throw error;
+    }
+  }
+
   async function manuallyReconcile(item: ImportedItem, transactionId: string) {
     if (!selectedAccountId || !selectedCompetenceId) {
       alert("Selecione conta/cartão e competência.");
@@ -975,22 +1096,9 @@ export default function ReconciliationPage() {
       return;
     }
 
-    const { error } = await supabase.from("transaction_reconciliations").upsert(
-      {
-        account_id: selectedAccountId,
-        competence_id: selectedCompetenceId,
-        import_key: item.importKey,
-        statement_date: item.date,
-        statement_description: item.description,
-        statement_value: item.value,
-        transaction_id: transactionId,
-      },
-      {
-        onConflict: "account_id,competence_id,import_key,transaction_id",
-      }
-    );
-
-    if (error) {
+    try {
+      await saveReconciliation(item, transactionId);
+    } catch (error) {
       console.error("Erro ao gravar conciliação:", error);
       alert("Erro ao gravar conciliação.");
       return;
@@ -1004,6 +1112,61 @@ export default function ReconciliationPage() {
             matched: true,
             matchedTransactionId: transactionId,
             matchedTransaction: selectedTransaction,
+          }
+          : currentItem
+      )
+    );
+
+    setItemToReconcile(null);
+  }
+
+  async function correctAndReconcile(
+    item: ImportedItem,
+    transaction: Transaction
+  ) {
+    const correctedValue = Math.abs(Number(item.value));
+
+    const { data: updatedTransaction, error } = await supabase
+      .from("transactions")
+      .update({
+        value: correctedValue,
+      })
+      .eq("id", transaction.id)
+      .select("id, description, due_date, value, type, status, category_id")
+      .single();
+
+    if (error || !updatedTransaction) {
+      console.error("Erro ao corrigir lançamento:", error);
+      alert("Erro ao corrigir lançamento.");
+      return;
+    }
+
+    const newTransaction = updatedTransaction as Transaction;
+
+    try {
+      await saveReconciliation(item, newTransaction.id);
+    } catch (reconciliationError) {
+      console.error("Erro ao gravar conciliação:", reconciliationError);
+      alert("Lançamento corrigido, mas erro ao conciliar.");
+      return;
+    }
+
+    setTransactions((previousTransactions) =>
+      previousTransactions.map((currentTransaction) =>
+        currentTransaction.id === newTransaction.id
+          ? newTransaction
+          : currentTransaction
+      )
+    );
+
+    setItems((previousItems) =>
+      previousItems.map((currentItem) =>
+        currentItem.importKey === item.importKey
+          ? {
+            ...currentItem,
+            matched: true,
+            matchedTransactionId: newTransaction.id,
+            matchedTransaction: newTransaction,
           }
           : currentItem
       )
@@ -1045,24 +1208,9 @@ export default function ReconciliationPage() {
   async function ignoreStatementItem(item: ImportedItem) {
     if (!selectedAccountId || !selectedCompetenceId) return;
 
-    const { error } = await supabase.from("transaction_reconciliations").upsert(
-      {
-        account_id: selectedAccountId,
-        competence_id: selectedCompetenceId,
-        import_key: item.importKey,
-        statement_date: item.date,
-        statement_description: item.description,
-        statement_value: item.value,
-        transaction_id: null,
-        ignored: true,
-        ignore_reason: "Ignorado manualmente",
-      },
-      {
-        onConflict: "account_id,competence_id,import_key,transaction_id",
-      }
-    );
-
-    if (error) {
+    try {
+      await saveReconciliation(item, null, true);
+    } catch (error) {
       console.error("Erro ao ignorar item:", error);
       alert("Erro ao ignorar item.");
       return;
@@ -1073,6 +1221,155 @@ export default function ReconciliationPage() {
         (currentItem) => currentItem.importKey !== item.importKey
       )
     );
+  }
+
+  function resetImportedStatement() {
+    setItems([]);
+    setTransactions([]);
+    setDetectedLayout(null);
+    setFileName("");
+    setViewMode("all");
+    setShowOnlyUnmatched(true);
+    setCandidateSearch("");
+    setPaymentAccountId("");
+    setPaymentDueDate("");
+    setClosedStatement(null);
+  }
+
+  async function closeStatementAndCreatePayment() {
+    if (isClosingStatement) return;
+
+    if (!selectedAccountId || !selectedCompetenceId) {
+      alert("Selecione cartão e competência.");
+      return;
+    }
+
+    if (!paymentAccountId) {
+      alert("Selecione a conta de pagamento.");
+      return;
+    }
+
+    if (!paymentDueDate) {
+      alert("Informe a data de pagamento.");
+      return;
+    }
+
+    if (Math.abs(totalDifference) >= 0.01) {
+      alert("A fatura só pode ser fechada quando a diferença estiver zerada.");
+      return;
+    }
+
+    const statementTotal = Math.abs(totalImported);
+
+    if (statementTotal <= 0) {
+      alert("Valor da fatura inválido.");
+      return;
+    }
+
+    setIsClosingStatement(true);
+
+    try {
+      const selectedCompetence = competences.find(
+        (competence) => competence.id === selectedCompetenceId
+      );
+
+      const description = `Pagamento de fatura ${selectedAccount?.name ?? ""} - ${selectedCompetence?.name ?? ""
+        }`;
+
+      const { data: existingStatement, error: existingStatementError } =
+        await supabase
+          .from("credit_card_statements")
+          .select("id, payment_transaction_id")
+          .eq("account_id", selectedAccountId)
+          .eq("competence_id", selectedCompetenceId)
+          .maybeSingle();
+
+      if (existingStatementError) {
+        throw existingStatementError;
+      }
+
+      let paymentTransactionId =
+        existingStatement?.payment_transaction_id ??
+        closedStatement?.payment_transaction_id ??
+        null;
+
+      if (paymentTransactionId) {
+        const { error: updatePaymentError } = await supabase
+          .from("transactions")
+          .update({
+            description,
+            value: statementTotal,
+            due_date: paymentDueDate,
+            type: "Pagamento de Fatura",
+            status: "Pendente",
+            account_id: paymentAccountId,
+          })
+          .eq("id", paymentTransactionId);
+
+        if (updatePaymentError) {
+          throw updatePaymentError;
+        }
+      } else {
+        const { data: paymentTransaction, error: paymentError } = await supabase
+          .from("transactions")
+          .insert({
+            description,
+            value: statementTotal,
+            due_date: paymentDueDate,
+            type: "Pagamento de Fatura",
+            mode: "unico",
+            status: "Pendente",
+            account_id: paymentAccountId,
+            competence_id: selectedCompetenceId,
+            category_id: null,
+          })
+          .select("id")
+          .single();
+
+        if (paymentError || !paymentTransaction) {
+          throw paymentError;
+        }
+
+        paymentTransactionId = paymentTransaction.id;
+      }
+
+      const { data: savedStatement, error: statementError } = await supabase
+        .from("credit_card_statements")
+        .upsert(
+          {
+            account_id: selectedAccountId,
+            competence_id: selectedCompetenceId,
+            payment_account_id: paymentAccountId,
+            payment_transaction_id: paymentTransactionId,
+            statement_total: statementTotal,
+            payment_due_date: paymentDueDate,
+            status: "Fechada",
+            closed_at: existingStatement ? undefined : new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          },
+          {
+            onConflict: "account_id,competence_id",
+          }
+        )
+        .select("id, payment_transaction_id")
+        .single();
+
+      if (statementError || !savedStatement) {
+        throw statementError;
+      }
+
+      setClosedStatement(savedStatement);
+      alert(
+        existingStatement
+          ? "Pagamento da fatura atualizado com sucesso."
+          : "Fatura fechada e pagamento programado com sucesso."
+      );
+    } catch (error: any) {
+      console.error("Erro ao fechar/atualizar fatura:", error);
+      alert(error?.message ?? JSON.stringify(error, null, 2) ?? "Erro ao salvar fatura.");
+    } finally {
+      setIsClosingStatement(false);
+    }
   }
 
   return (
@@ -1091,8 +1388,9 @@ export default function ReconciliationPage() {
             onChange={(event) => {
               setSelectedAccountId(event.target.value);
               setItems([]);
+              setTransactions([]);
               setDetectedLayout(null);
-              setFileName("");
+              setClosedStatement(null);
             }}
             className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none"
           >
@@ -1109,8 +1407,9 @@ export default function ReconciliationPage() {
             onChange={(event) => {
               setSelectedCompetenceId(event.target.value);
               setItems([]);
+              setTransactions([]);
               setDetectedLayout(null);
-              setFileName("");
+              setClosedStatement(null);
             }}
             className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none"
           >
@@ -1128,7 +1427,10 @@ export default function ReconciliationPage() {
             disabled={!selectedAccountId || isProcessing}
             onChange={(event) => {
               const file = event.target.files?.[0];
-              if (file) handleFileUpload(file);
+              if (file) {
+                setSelectedFile(file);
+                handleFileUpload(file);
+              }
             }}
             className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-slate-300 outline-none file:mr-4 file:rounded-lg file:border-0 file:bg-blue-600 file:px-4 file:py-2 file:text-sm file:font-semibold file:text-white disabled:cursor-not-allowed disabled:opacity-50"
           />
@@ -1217,6 +1519,60 @@ export default function ReconciliationPage() {
           </div>
         )}
 
+        {detectedLayout && Math.abs(totalDifference) < 0.01 && items.length > 0 && (
+          <div className="rounded-2xl border border-emerald-400/20 bg-emerald-400/10 p-5">
+            <div className="mb-4">
+              <h2 className="text-lg font-bold text-white">
+                Fechar fatura e programar pagamento
+              </h2>
+              <p className="mt-1 text-sm text-emerald-100">
+                A fatura está conciliada. Agora você pode gerar ou atualizar o pagamento.
+              </p>
+            </div>
+
+            <div className="grid gap-4 md:grid-cols-3">
+              <select
+                value={paymentAccountId}
+                onChange={(event) => setPaymentAccountId(event.target.value)}
+                className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none"
+              >
+                <option value="">Conta de pagamento</option>
+                {accounts
+                  .filter((account) => account.type === "Conta")
+                  .map((account) => (
+                    <option key={account.id} value={account.id}>
+                      {account.name}
+                    </option>
+                  ))}
+              </select>
+
+              <input
+                type="date"
+                value={paymentDueDate}
+                onChange={(event) => setPaymentDueDate(event.target.value)}
+                className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none"
+              />
+
+              <button
+                type="button"
+                disabled={isClosingStatement}
+                onClick={closeStatementAndCreatePayment}
+                className="rounded-xl bg-emerald-600 px-4 py-3 font-bold text-white hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {isClosingStatement
+                  ? "Salvando..."
+                  : closedStatement
+                    ? "Atualizar pagamento"
+                    : "Fechar fatura"}
+              </button>
+            </div>
+
+            <p className="mt-3 text-sm text-emerald-100">
+              Valor programado: {formatCurrency(Math.abs(totalImported))}
+            </p>
+          </div>
+        )}
+
         {items.length > 0 && (
           <div className="flex items-center justify-between rounded-2xl border border-white/10 bg-slate-950/60 p-4">
             <div>
@@ -1230,25 +1586,76 @@ export default function ReconciliationPage() {
                   : "Comparação por valor exato e data com tolerância de até 3 dias."}
               </p>
             </div>
+            <div className="flex gap-2">
 
-            <button
-              onClick={() => {
-                if (viewMode === "difference") {
-                  setViewMode("all");
-                  setShowOnlyUnmatched(false);
-                  return;
-                }
+              <button
+                type="button"
+                onClick={() => {
+                  if (!selectedFile) {
+                    alert("Nenhum arquivo carregado para recarregar.");
+                    return;
+                  }
 
-                setShowOnlyUnmatched(!showOnlyUnmatched);
-              }}
-              className="rounded-xl border border-white/10 px-4 py-2 text-sm font-semibold text-white hover:bg-white/10"
-            >
-              {viewMode === "difference"
-                ? "Mostrar todos"
-                : showOnlyUnmatched
+                  handleFileUpload(selectedFile);
+                }}
+                className="rounded-xl border border-white/10 px-4 py-2 text-sm font-semibold text-white hover:bg-white/10"
+              >
+                Recarregar
+              </button>
+              <button
+                onClick={async () => {
+                  if (!confirm("Deseja realmente desfazer TODAS as conciliações desta competência?")) {
+                    return;
+                  }
+
+                  const { error } = await supabase
+                    .from("transaction_reconciliations")
+                    .delete()
+                    .eq("account_id", selectedAccountId)
+                    .eq("competence_id", selectedCompetenceId);
+
+                  if (error) {
+                    alert("Erro ao desfazer as conciliações.");
+                    return;
+                  }
+
+                  setItems((items) =>
+                    items.map((item) => ({
+                      ...item,
+                      matched: false,
+                      matchedTransactionId: undefined,
+                      matchedTransaction: undefined,
+                    }))
+                  );
+
+                  alert("Conciliações removidas com sucesso.");
+                }}
+                className="rounded-xl bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-500"
+              >
+                Desvincular tudo
+              </button>
+
+              <button
+                onClick={() => {
+                  if (viewMode === "difference") {
+                    setViewMode("all");
+                    setShowOnlyUnmatched(false);
+                    return;
+                  }
+
+                  setShowOnlyUnmatched(!showOnlyUnmatched);
+                }}
+                className="rounded-xl border border-white/10 px-4 py-2 text-sm font-semibold text-white hover:bg-white/10"
+              >
+                {viewMode === "difference"
                   ? "Mostrar todos"
-                  : "Mostrar só pendentes"}
-            </button>
+                  : showOnlyUnmatched
+                    ? "Mostrar todos"
+                    : "Mostrar só pendentes"}
+              </button>
+
+            </div>
+
           </div>
         )}
 
@@ -1341,7 +1748,7 @@ export default function ReconciliationPage() {
 
                     <td className="px-5 py-4 text-right text-slate-300">
                       {item.matchedTransaction
-                        ? formatCurrency(Number(item.matchedTransaction.value))
+                        ? formatCurrency(getSignedTransactionValue(item.matchedTransaction))
                         : "-"}
                     </td>
 
@@ -1406,7 +1813,7 @@ export default function ReconciliationPage() {
 
               {isProcessing && (
                 <tr>
-                  <td colSpan={5} className="px-5 py-10 text-center text-slate-400">
+                  <td colSpan={8} className="px-5 py-10 text-center text-slate-400">
                     Processando fatura...
                   </td>
                 </tr>
@@ -1414,7 +1821,7 @@ export default function ReconciliationPage() {
 
               {!isProcessing && visibleItems.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="px-5 py-10 text-center text-slate-400">
+                  <td colSpan={8} className="px-5 py-10 text-center text-slate-400">
                     Selecione um cartão e importe uma fatura Excel.
                   </td>
                 </tr>
@@ -1545,14 +1952,25 @@ export default function ReconciliationPage() {
                           </td>
 
                           <td className="px-4 py-3 text-right">
-                            <button
-                              onClick={() =>
-                                manuallyReconcile(itemToReconcile, transaction.id)
-                              }
-                              className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-500"
-                            >
-                              Usar este
-                            </button>
+                            <div className="flex justify-end gap-2">
+                              <button
+                                onClick={() =>
+                                  manuallyReconcile(itemToReconcile, transaction.id)
+                                }
+                                className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-500"
+                              >
+                                Usar este
+                              </button>
+
+                              <button
+                                onClick={() =>
+                                  correctAndReconcile(itemToReconcile, transaction)
+                                }
+                                className="rounded-lg bg-amber-600 px-3 py-2 text-xs font-semibold text-white hover:bg-amber-500"
+                              >
+                                Corrigir e usar
+                              </button>
+                            </div>
                           </td>
                         </tr>
                       ))}
