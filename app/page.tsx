@@ -23,11 +23,18 @@ type Transaction = {
   value: number;
   status: string | null;
   account_id?: string | null;
+  category_id?: string | null;
   account:
   | { name: string; type?: string | null; limit_amount?: number | null }
   | null;
   category:
-  | { name: string; monthly_limit?: number | null; monthly_goal?: number | null }
+  | {
+    name: string;
+    monthly_limit?: number | null;
+    monthly_goal?: number | null;
+    show_on_dashboard?: boolean | null;
+    dashboard_order?: number | null;
+  }
   | null;
   competence: { name: string } | null;
 };
@@ -47,6 +54,12 @@ type ComparisonItem = {
   pending: number;
 };
 
+type FinancialTarget = {
+  target_type: "account" | "category";
+  target_id: string;
+  planned_value: number;
+};
+
 export default function DashboardPage() {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [currentCompetence, setCurrentCompetence] = useState<Competence | null>(
@@ -56,6 +69,8 @@ export default function DashboardPage() {
   const [cashFlowCompetence, setCashFlowCompetence] = useState<Competence | null>(null);
   const [cashFlowTransactions, setCashFlowTransactions] = useState<Transaction[]>([]);
   const [previousCardTransactions, setPreviousCardTransactions] = useState<Transaction[]>([]);
+  const [accountTargets, setAccountTargets] = useState<Record<string, number>>({});
+  const [categoryTargets, setCategoryTargets] = useState<Record<string, number>>({});
 
   function getPreviousMonth(month: number, year: number) {
     if (month === 1) {
@@ -93,15 +108,16 @@ export default function DashboardPage() {
       .from("transactions")
       .select(`
         id,
-description,
-due_date,
-type,
-value,
-status,
-account_id,
-account:accounts!transactions_account_id_fkey(name, type, limit_amount),
-category:categories!transactions_category_id_fkey(name, monthly_limit, monthly_goal),
-competence:competences!transactions_competence_id_fkey(name)
+        description,
+        due_date,
+        type,
+        value,
+        status,
+        account_id,
+        category_id,
+        account:accounts!transactions_account_id_fkey(name, type, limit_amount),
+        category:categories!transactions_category_id_fkey(name, monthly_limit, monthly_goal, show_on_dashboard, dashboard_order),
+        competence:competences!transactions_competence_id_fkey(name)
       `)
       .eq("competence_id", competenceData.id)
       .order("due_date", { ascending: false });
@@ -114,6 +130,37 @@ competence:competences!transactions_competence_id_fkey(name)
     }
 
     setTransactions((data ?? []) as unknown as Transaction[]);
+
+    const { data: targetData, error: targetError } = await supabase
+      .from("financial_targets")
+      .select("target_type, target_id, planned_value")
+      .eq("competence_id", competenceData.id)
+      .in("target_type", ["account", "category"]);
+
+    if (targetError) {
+      console.error("Erro ao carregar metas financeiras:", targetError);
+      setAccountTargets({});
+      setCategoryTargets({});
+    } else {
+      const targets = (targetData ?? []) as FinancialTarget[];
+
+      const accountTargetMap = targets
+        .filter((target) => target.target_type === "account")
+        .reduce<Record<string, number>>((acc, target) => {
+          acc[target.target_id] = Number(target.planned_value ?? 0);
+          return acc;
+        }, {});
+
+      const categoryTargetMap = targets
+        .filter((target) => target.target_type === "category")
+        .reduce<Record<string, number>>((acc, target) => {
+          acc[target.target_id] = Number(target.planned_value ?? 0);
+          return acc;
+        }, {});
+
+      setAccountTargets(accountTargetMap);
+      setCategoryTargets(categoryTargetMap);
+    }
 
     const previousMonth = getPreviousMonth(currentMonth, currentYear);
 
@@ -136,8 +183,9 @@ competence:competences!transactions_competence_id_fkey(name)
     value,
     status,
     account_id,
+    category_id,
     account:accounts!transactions_account_id_fkey(name, type, limit_amount),
-category:categories!transactions_category_id_fkey(name, monthly_limit, monthly_goal),
+    category:categories!transactions_category_id_fkey(name, monthly_limit, monthly_goal, show_on_dashboard, dashboard_order),
     competence:competences!transactions_competence_id_fkey(name)
   `)
       .eq("competence_id", competenceData.id);
@@ -160,8 +208,9 @@ category:categories!transactions_category_id_fkey(name, monthly_limit, monthly_g
       value,
       status,
       account_id,
+      category_id,
       account:accounts!transactions_account_id_fkey(name, type, limit_amount),
-category:categories!transactions_category_id_fkey(name, monthly_limit, monthly_goal),
+      category:categories!transactions_category_id_fkey(name, monthly_limit, monthly_goal, show_on_dashboard, dashboard_order),
       competence:competences!transactions_competence_id_fkey(name)
     `)
         .eq("competence_id", previousCompetenceData.id);
@@ -260,7 +309,7 @@ category:categories!transactions_category_id_fkey(name, monthly_limit, monthly_g
       if (!acc[cardName]) {
         acc[cardName] = {
           name: cardName,
-          planned: Number(transaction.account?.limit_amount ?? 0),
+          planned: Number(accountTargets[transaction.account_id ?? ""] ?? 0),
           realized: 0,
           pending: 0,
         };
@@ -286,22 +335,22 @@ category:categories!transactions_category_id_fkey(name, monthly_limit, monthly_g
       }))
       .filter((item) => item.planned !== 0 || item.realized !== 0)
       .sort((a, b) => b.planned - a.planned);
-  }, [previousCardTransactions]);
+  }, [previousCardTransactions, accountTargets]);
 
   const categoryComparisonData = useMemo<ComparisonItem[]>(() => {
     const grouped = cashFlowTransactions
-      .filter((transaction) => transaction.type === "Despesa")
+      .filter(
+        (transaction) =>
+          transaction.type === "Despesa" &&
+          transaction.category?.show_on_dashboard !== false
+      )
       .reduce<Record<string, ComparisonItem>>((acc, transaction) => {
         const categoryName = transaction.category?.name ?? "Sem categoria";
 
         if (!acc[categoryName]) {
           acc[categoryName] = {
             name: categoryName,
-            planned: Number(
-              transaction.category?.monthly_limit ??
-              transaction.category?.monthly_goal ??
-              0
-            ),
+            planned: Number(categoryTargets[transaction.category_id ?? ""] ?? 0),
             realized: 0,
             pending: 0,
           };
@@ -320,8 +369,25 @@ category:categories!transactions_category_id_fkey(name, monthly_limit, monthly_g
         pending: item.planned - item.realized,
       }))
       .filter((item) => item.planned !== 0 || item.realized !== 0)
-      .sort((a, b) => b.planned - a.planned);
-  }, [cashFlowTransactions]);
+      .sort((a, b) => {
+        const categoryA = cashFlowTransactions.find(
+          (transaction) => transaction.category?.name === a.name
+        )?.category;
+
+        const categoryB = cashFlowTransactions.find(
+          (transaction) => transaction.category?.name === b.name
+        )?.category;
+
+        const orderA = categoryA?.dashboard_order ?? 9999;
+        const orderB = categoryB?.dashboard_order ?? 9999;
+
+        if (orderA !== orderB) {
+          return orderA - orderB;
+        }
+
+        return b.planned - a.planned;
+      });
+  }, [cashFlowTransactions, categoryTargets]);
 
 
   function goToPreviousCompetence() {
@@ -392,6 +458,41 @@ category:categories!transactions_category_id_fkey(name, monthly_limit, monthly_g
             >
               Próxima →
             </button>
+          </div>
+        </div>
+
+        <div className="grid gap-4 md:grid-cols-4">
+          <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-5">
+            <p className="text-sm text-slate-400">Entradas previstas</p>
+            <p className="mt-2 text-2xl font-bold text-emerald-300">
+              {formatCurrency(cashFlowTotals.income)}
+            </p>
+          </div>
+
+          <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-5">
+            <p className="text-sm text-slate-400">Despesas da competência</p>
+            <p className="mt-2 text-2xl font-bold text-red-300">
+              {formatCurrency(cashFlowTotals.accountExpenses)}
+            </p>
+          </div>
+
+          <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-5">
+            <p className="text-sm text-slate-400">Faturas do mês anterior</p>
+            <p className="mt-2 text-2xl font-bold text-orange-300">
+              {formatCurrency(cashFlowTotals.creditCardInvoices)}
+            </p>
+          </div>
+
+          <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-5">
+            <p className="text-sm text-slate-400">Saldo projetado</p>
+            <p
+              className={`mt-2 text-2xl font-bold ${cashFlowTotals.projectedBalance >= 0
+                  ? "text-emerald-300"
+                  : "text-red-300"
+                }`}
+            >
+              {formatCurrency(cashFlowTotals.projectedBalance)}
+            </p>
           </div>
         </div>
 

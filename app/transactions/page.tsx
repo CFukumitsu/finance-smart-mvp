@@ -44,7 +44,7 @@ type Transaction = {
   account_id: string;
   category_id: string;
   competence_id: string;
-  account: { name: string } | null;
+  account: { name: string; type: "Conta" | "Cartão" } | null;
   category: { name: string } | null;
   competence: { name: string } | null;
   origin_account_id?: string | null;
@@ -74,7 +74,7 @@ function TransactionsPageContent() {
   const [listMode, setListMode] = useState<"competence" | "latest">("latest");
   const [showFilters, setShowFilters] = useState(false);
   const [plannedCardLimit, setPlannedCardLimit] = useState(0);
-  
+
   const [form, setForm] = useState({
     description: "",
     value: "",
@@ -251,7 +251,7 @@ function TransactionsPageContent() {
         competence_id,
         origin_account_id,
         destination_account_id,
-        account:accounts!transactions_account_id_fkey(name),
+        account:accounts!transactions_account_id_fkey(name, type),
         category:categories!transactions_category_id_fkey(name),
         competence:competences!transactions_competence_id_fkey(name)
       `)
@@ -844,6 +844,10 @@ function TransactionsPageContent() {
           return sum + Number(transaction.value);
         }
 
+        return sum;
+      }
+
+      if (transaction.type === "Pagamento de Fatura") {
         return sum - Number(transaction.value);
       }
 
@@ -859,17 +863,24 @@ function TransactionsPageContent() {
     .filter((transaction) => transaction.type === "Receita")
     .reduce((sum, transaction) => sum + Number(transaction.value), 0);
 
-  const totalExpense = transactions
-    .filter((transaction) => transaction.type === "Despesa")
+  const totalDirectExpenses = transactions
+    .filter(
+      (transaction) =>
+        transaction.type === "Despesa" &&
+        transaction.account?.type === "Conta"
+    )
     .reduce((sum, transaction) => sum + Number(transaction.value), 0);
 
-  const totalCardInvoice = totalExpense - totalIncome;
+  const totalInvoicePayments = transactions
+    .filter((transaction) => transaction.type === "Pagamento de Fatura")
+    .reduce((sum, transaction) => sum + Number(transaction.value), 0);
+
+    const cashFlowResult =
+    totalIncome - totalDirectExpenses - totalInvoicePayments;
 
   const totalTransfers = transactions
     .filter((transaction) => transaction.type === "Transferência")
     .reduce((sum, transaction) => sum + Number(transaction.value), 0);
-
-  const periodResult = totalIncome - totalExpense;
 
   const cardLimit = plannedCardLimit;
 
@@ -877,11 +888,11 @@ function TransactionsPageContent() {
     if (transaction.type === "Despesa") {
       return sum + Number(transaction.value);
     }
-  
+
     if (transaction.type === "Receita") {
       return sum - Number(transaction.value);
     }
-  
+
     return sum;
   }, 0);
 
@@ -1031,15 +1042,15 @@ function TransactionsPageContent() {
 
             <select
               value={typeFilter}
-            onChange={(event) => setTypeFilter(event.target.value)}
-            className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-white outline-none"
-          >
-            <option value="">Todos os tipos</option>
-            <option value="Despesa">Despesa</option>
-            <option value="Receita">Receita</option>
-            <option value="Transferência">Transferência</option>
-            <option value="Pagamento de Fatura">Pagamento de Fatura</option>
-          </select>
+              onChange={(event) => setTypeFilter(event.target.value)}
+              className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-white outline-none"
+            >
+              <option value="">Todos os tipos</option>
+              <option value="Despesa">Despesa</option>
+              <option value="Receita">Receita</option>
+              <option value="Transferência">Transferência</option>
+              <option value="Pagamento de Fatura">Pagamento de Fatura</option>
+            </select>
 
             <select
               value={statusFilter}
@@ -1047,6 +1058,7 @@ function TransactionsPageContent() {
               className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-white outline-none"
             >
               <option value="">Todos os status</option>
+              <option value="Pendente">Pendente</option>
               <option value="Pendente">Pendente</option>
               <option value="Pago">Pago</option>
               <option value="Recebido">Recebido</option>
@@ -1065,26 +1077,26 @@ function TransactionsPageContent() {
               </div>
 
               <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-5">
-                <p className="text-sm text-slate-400">Despesas</p>
+              <p className="text-sm text-slate-400">Despesas diretas</p>
                 <p className="mt-2 text-2xl font-bold text-red-300">
-                  {formatCurrency(totalCardInvoice)}
+                {formatCurrency(totalDirectExpenses)}
                 </p>
               </div>
 
               <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-5">
-                <p className="text-sm text-slate-400">Resultado</p>
+              <p className="text-sm text-slate-400">Fluxo de caixa</p>
                 <p
-                  className={`mt-2 text-2xl font-bold ${periodResult >= 0 ? "text-emerald-300" : "text-red-300"
+                  className={`mt-2 text-2xl font-bold ${cashFlowResult >= 0 ? "text-emerald-300" : "text-red-300"
                     }`}
                 >
-                  {formatCurrency(periodResult)}
+                  {formatCurrency(cashFlowResult)}
                 </p>
               </div>
 
               <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-5">
-                <p className="text-sm text-slate-400">Transferências</p>
-                <p className="mt-2 text-2xl font-bold text-blue-300">
-                  {formatCurrency(totalTransfers)}
+                <p className="text-sm text-slate-400">Pagamentos de fatura</p>
+                <p className="mt-2 text-2xl font-bold text-orange-300">
+                  {formatCurrency(totalInvoicePayments)}
                 </p>
               </div>
             </>
@@ -1150,9 +1162,8 @@ function TransactionsPageContent() {
               <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-5">
                 <p className="text-sm text-slate-400">Limite disponível</p>
                 <p
-                  className={`mt-2 text-2xl font-bold ${
-                    cardAvailableLimit >= 0 ? "text-emerald-300" : "text-red-300"
-                  }`}
+                  className={`mt-2 text-2xl font-bold ${cardAvailableLimit >= 0 ? "text-emerald-300" : "text-red-300"
+                    }`}
                 >
                   {formatCurrency(cardAvailableLimit)}
                 </p>
