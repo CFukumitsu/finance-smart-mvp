@@ -75,6 +75,42 @@ function TransactionsPageContent() {
   const [showFilters, setShowFilters] = useState(false);
   const [plannedCardLimit, setPlannedCardLimit] = useState(0);
 
+  const transactionDefaultsKey = "finance-smart-transaction-defaults";
+
+  function getAutomaticStatus(type: string, dueDate: string) {
+    const today = new Date().toISOString().split("T")[0];
+
+    if (dueDate > today) {
+      return "Pendente";
+    }
+
+    if (type === "Receita") {
+      return "Recebido";
+    }
+
+    return "Pago";
+  }
+
+  function getStoredTransactionDefaults() {
+    if (typeof window === "undefined") return null;
+
+    const saved = sessionStorage.getItem(transactionDefaultsKey);
+
+    if (!saved) return null;
+
+    try {
+      return JSON.parse(saved) as {
+        due_date?: string;
+        account_id?: string;
+        type?: string;
+        competence_id?: string;
+        status?: string;
+      };
+    } catch {
+      return null;
+    }
+  }
+
   const [form, setForm] = useState({
     description: "",
     value: "",
@@ -313,19 +349,7 @@ function TransactionsPageContent() {
             return 1;
           }
 
-          if (transaction.type === "Despesa") {
-            return 2;
-          }
-
-          if (
-            transaction.type === "Transferência" &&
-            filters?.accountId &&
-            transaction.origin_account_id === filters.accountId
-          ) {
-            return 2;
-          }
-
-          return 3;
+          return 2;
         }
 
         const typeDiff = getSortOrder(a) - getSortOrder(b);
@@ -433,25 +457,33 @@ function TransactionsPageContent() {
   }, [competenceFilter, accountFilter, typeFilter, statusFilter, listMode]);
 
   function resetForm() {
-    const defaultCompetenceId =
-      competenceFilter || getCurrentCompetenceId(competences);
+    const storedDefaults = getStoredTransactionDefaults();
+
+    const defaultDueDate =
+      storedDefaults?.due_date ?? new Date().toISOString().split("T")[0];
+
+    const defaultType = storedDefaults?.type ?? "Despesa";
 
     setEditingTransactionId(null);
 
     setForm({
       description: "",
       value: "",
-      due_date: new Date().toISOString().split("T")[0],
-      type: "Despesa",
+      due_date: defaultDueDate,
+      type: defaultType,
       mode: "unico",
-      status: "Pago",
+      status:
+        storedDefaults?.status ??
+        getAutomaticStatus(defaultType, defaultDueDate),
       installments: "2",
-      account_id: "",
+      account_id: storedDefaults?.account_id ?? "",
       card_payment_account_id: "",
       origin_account_id: "",
       destination_account_id: "",
       category_id: "",
-      competence_id: getCompetenceIdByDate(new Date().toISOString().split("T")[0]),
+      competence_id:
+        storedDefaults?.competence_id ??
+        getCompetenceIdByDate(defaultDueDate),
     });
   }
 
@@ -573,6 +605,17 @@ function TransactionsPageContent() {
         if (error) {
           throw new Error(error.message);
         }
+
+        sessionStorage.setItem(
+          transactionDefaultsKey,
+          JSON.stringify({
+            due_date: form.due_date,
+            account_id: form.account_id,
+            type: form.type,
+            competence_id: form.competence_id,
+            status: form.status,
+          })
+        );
 
         closeDrawer();
         await loadDescriptionSuggestions();
@@ -875,7 +918,7 @@ function TransactionsPageContent() {
     .filter((transaction) => transaction.type === "Pagamento de Fatura")
     .reduce((sum, transaction) => sum + Number(transaction.value), 0);
 
-    const cashFlowResult =
+  const cashFlowResult =
     totalIncome - totalDirectExpenses - totalInvoicePayments;
 
   const totalTransfers = transactions
@@ -1077,14 +1120,14 @@ function TransactionsPageContent() {
               </div>
 
               <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-5">
-              <p className="text-sm text-slate-400">Despesas diretas</p>
+                <p className="text-sm text-slate-400">Despesas diretas</p>
                 <p className="mt-2 text-2xl font-bold text-red-300">
-                {formatCurrency(totalDirectExpenses)}
+                  {formatCurrency(totalDirectExpenses)}
                 </p>
               </div>
 
               <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-5">
-              <p className="text-sm text-slate-400">Fluxo de caixa</p>
+                <p className="text-sm text-slate-400">Fluxo de caixa</p>
                 <p
                   className={`mt-2 text-2xl font-bold ${cashFlowResult >= 0 ? "text-emerald-300" : "text-red-300"
                     }`}
@@ -1186,7 +1229,7 @@ function TransactionsPageContent() {
           )}
         </div>
 
-        <div className="max-h-[calc(100vh-360px)] w-full overflow-auto rounded-2xl border border-white/10 bg-slate-950/60">
+        <div className="w-full overflow-x-auto rounded-2xl border border-white/10 bg-slate-950/60">
           <table className="min-w-[1200px] w-full text-left text-sm">
             <thead className="sticky top-0 z-10 bg-slate-900 text-slate-300">
               <tr>
@@ -1325,9 +1368,16 @@ function TransactionsPageContent() {
             <div className="space-y-4">
               <input
                 value={form.due_date}
-                onChange={(event) =>
-                  setForm({ ...form, due_date: event.target.value })
-                }
+                onChange={(event) => {
+                  const newDate = event.target.value;
+                
+                  setForm({
+                    ...form,
+                    due_date: newDate,
+                    competence_id: getCompetenceIdByDate(newDate),
+                    status: getAutomaticStatus(form.type, newDate),
+                  });
+                }}
                 type="date"
                 className="w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none"
               />
@@ -1398,9 +1448,15 @@ function TransactionsPageContent() {
 
               <select
                 value={form.type}
-                onChange={(event) =>
-                  setForm({ ...form, type: event.target.value })
-                }
+                onChange={(event) => {
+                  const newType = event.target.value;
+                
+                  setForm({
+                    ...form,
+                    type: newType,
+                    status: getAutomaticStatus(newType, form.due_date),
+                  });
+                }}
                 className="w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none"
               >
                 <option value="Receita">Receita</option>

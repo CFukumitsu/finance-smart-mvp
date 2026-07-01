@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import {
   closeCompetence,
@@ -10,25 +10,35 @@ import {
 import { supabase } from "@/src/lib/supabase";
 import type { CompetenceClosure } from "@/src/types/closing";
 
+type Account = {
+  id: string;
+  name: string;
+  type: "Conta" | "Cartão";
+};
+
+type Transaction = {
+  account_id: string;
+  type: string;
+  value: number;
+};
+
 type Competence = {
   id: string;
   name: string;
 };
 
-type CompetenceWithClosure = Competence & {
-  closure: CompetenceClosure | null;
+type AccountClosure = {
+  id: string;
+  account_id: string;
+  closing_balance: number | null;
 };
 
-function getVisibleCompetenceNames(centerDate: Date) {
-  const names: string[] = [];
-
-  for (let offset = -3; offset <= 3; offset++) {
-    const date = new Date(centerDate.getFullYear(), centerDate.getMonth() + offset, 1);
-    names.push(getCompetenceName(date));
-  }
-
-  return names;
-}
+type CardStatement = {
+  id: string;
+  account_id: string;
+  statement_total: number | null;
+  status: string | null;
+};
 
 function formatCurrency(value: number) {
   return new Intl.NumberFormat("pt-BR", {
@@ -37,116 +47,265 @@ function formatCurrency(value: number) {
   }).format(value);
 }
 
-function getCompetenceName(date: Date) {
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
-}
-
-function formatMonthLabel(date: Date) {
-  return new Intl.DateTimeFormat("pt-BR", {
-    month: "short",
-    year: "2-digit",
-  })
-    .format(date)
-    .replace(".", "");
-}
-
-function getVisibleMonthDates(centerDate: Date) {
-  const dates: Date[] = [];
-
-  for (let offset = -3; offset <= 3; offset++) {
-    dates.push(new Date(centerDate.getFullYear(), centerDate.getMonth() + offset, 1));
-  }
-
-  return dates;
+function getCurrentCompetenceName() {
+  const today = new Date();
+  return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}`;
 }
 
 export default function ClosingsPageContent() {
-  const [items, setItems] = useState<CompetenceWithClosure[]>([]);
+  const [competences, setCompetences] = useState<Competence[]>([]);
+  const [selectedCompetenceId, setSelectedCompetenceId] = useState("");
+  const [accounts, setAccounts] = useState<Account[]>([]);
+  const [accountClosures, setAccountClosures] = useState<AccountClosure[]>([]);
+  const [cardStatements, setCardStatements] = useState<CardStatement[]>([]);
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [competenceClosure, setCompetenceClosure] =
+    useState<CompetenceClosure | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isProcessingId, setIsProcessingId] = useState<string | null>(null);
-  const [centerDate, setCenterDate] = useState(() => new Date());
 
-  async function loadData() {
+  const selectedCompetence = useMemo(
+    () => competences.find((competence) => competence.id === selectedCompetenceId),
+    [competences, selectedCompetenceId]
+  );
+
+  const cashAccounts = accounts.filter((account) => account.type === "Conta");
+  const cardAccounts = accounts.filter((account) => account.type === "Cartão");
+
+  async function loadData(competenceId?: string) {
     setIsLoading(true);
 
-    const visibleCompetenceNames = getVisibleCompetenceNames(centerDate);
-
-    const { data, error } = await supabase
+    const { data: competenceData, error: competenceError } = await supabase
       .from("competences")
       .select("id, name")
-      .in("name", visibleCompetenceNames)
       .order("name", { ascending: false });
 
-    if (error) {
-      console.error("COMPETENCES ERROR:", error);
-      alert(JSON.stringify(error, null, 2));
-
-      setItems([]);
+    if (competenceError) {
+      alert("Erro ao carregar competências.");
       setIsLoading(false);
       return;
     }
 
-    const mapped = await Promise.all(
-      (data ?? []).map(async (competence) => {
-        const closure = await getClosureByCompetenceId(competence.id);
+    const competenceList = (competenceData ?? []) as Competence[];
+    setCompetences(competenceList);
 
-        return {
-          ...competence,
-          closure,
-        };
-      })
-    );
+    const currentName = getCurrentCompetenceName();
+    const defaultCompetence =
+      competenceList.find((competence) => competence.name === currentName) ??
+      competenceList[0];
 
-    setItems(mapped);
+    const resolvedCompetenceId = competenceId || selectedCompetenceId || defaultCompetence?.id;
+
+    if (!resolvedCompetenceId) {
+      setIsLoading(false);
+      return;
+    }
+
+    setSelectedCompetenceId(resolvedCompetenceId);
+
+    const { data: accountsData, error: accountsError } = await supabase
+      .from("accounts")
+      .select("id, name, type")
+      .eq("active", true)
+      .order("type", { ascending: true })
+      .order("name", { ascending: true });
+
+    if (accountsError) {
+      alert("Erro ao carregar contas/cartões.");
+      setIsLoading(false);
+      return;
+    }
+
+    const { data: accountClosuresData } = await supabase
+      .from("account_closures")
+      .select("id, account_id, closing_balance")
+      .eq("competence_id", resolvedCompetenceId)
+      .eq("account_type", "Conta");
+
+    const { data: cardStatementsData } = await supabase
+      .from("credit_card_statements")
+      .select("id, account_id, statement_total, status")
+      .eq("competence_id", resolvedCompetenceId);
+
+    const { data: transactionsData, error: transactionsError } = await supabase
+      .from("transactions")
+      .select("account_id, type, value")
+      .eq("competence_id", resolvedCompetenceId);
+
+    if (transactionsError) {
+      throw transactionsError;
+    }
+
+    const closure = await getClosureByCompetenceId(resolvedCompetenceId);
+
+    setAccounts((accountsData ?? []) as Account[]);
+    setAccountClosures((accountClosuresData ?? []) as AccountClosure[]);
+    setCardStatements((cardStatementsData ?? []) as CardStatement[]);
+    setTransactions((transactionsData ?? []) as Transaction[]);
+    setCompetenceClosure(closure);
     setIsLoading(false);
-  }
-
-  async function handleClose(competenceId: string) {
-    setIsProcessingId(competenceId);
-
-    try {
-      await closeCompetence(competenceId);
-      await loadData();
-    } catch (error) {
-      console.error(error);
-      alert("Não foi possível fechar a competência.");
-    } finally {
-      setIsProcessingId(null);
-    }
-  }
-
-  async function handleReopen(competenceId: string) {
-    setIsProcessingId(competenceId);
-
-    try {
-      await reopenCompetence(competenceId);
-      await loadData();
-    } catch (error) {
-      console.error(error);
-      alert("Não foi possível reabrir a competência.");
-    } finally {
-      setIsProcessingId(null);
-    }
   }
 
   useEffect(() => {
     loadData();
-  }, [centerDate]);
+  }, []);
 
-  function goToPreviousMonth() {
-    setCenterDate(
-      (current) => new Date(current.getFullYear(), current.getMonth() - 1, 1)
-    );
+  function getAccountClosure(accountId: string) {
+    return accountClosures.find((closure) => closure.account_id === accountId);
   }
 
-  function goToNextMonth() {
-    setCenterDate(
-      (current) => new Date(current.getFullYear(), current.getMonth() + 1, 1)
-    );
+  function getCardStatement(accountId: string) {
+    return cardStatements.find((statement) => statement.account_id === accountId);
   }
 
-  function goToCurrentMonth() {
-    setCenterDate(new Date());
+  function isAccountClosed(accountId: string) {
+    return !!getAccountClosure(accountId);
+  }
+
+  function isCardClosed(accountId: string) {
+    return !!getCardStatement(accountId);
+  }
+
+  const openAccountsCount = cashAccounts.filter(
+    (account) => !isAccountClosed(account.id)
+  ).length;
+
+  const openCardsCount = cardAccounts.filter(
+    (account) => !isCardClosed(account.id)
+  ).length;
+
+  const canCloseCompetence = openAccountsCount === 0 && openCardsCount === 0;
+  const isCompetenceClosed = competenceClosure?.status === "Fechada";
+
+  async function closeAccount(account: Account) {
+    if (!selectedCompetenceId) return;
+
+    setIsProcessingId(account.id);
+
+    try {
+      const { error } = await supabase.from("account_closures").upsert(
+        {
+          competence_id: selectedCompetenceId,
+          account_id: account.id,
+          account_type: "Conta",
+          status: "Fechada",
+          opening_balance: 0,
+          closing_balance: getAccountCurrentBalance(account.id),
+          closed_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        },
+        {
+          onConflict: "competence_id,account_id",
+        }
+      );
+
+      if (error) throw error;
+
+      await loadData(selectedCompetenceId);
+    } catch (error) {
+      console.error(error);
+      alert("Erro ao fechar conta.");
+    } finally {
+      setIsProcessingId(null);
+    }
+  }
+
+  async function reopenAccount(accountId: string) {
+    if (!selectedCompetenceId) return;
+
+    if (!confirm("Deseja reabrir esta conta nesta competência?")) return;
+
+    setIsProcessingId(accountId);
+
+    try {
+      const { error } = await supabase
+        .from("account_closures")
+        .delete()
+        .eq("competence_id", selectedCompetenceId)
+        .eq("account_id", accountId);
+
+      if (error) throw error;
+
+      await loadData(selectedCompetenceId);
+    } catch (error) {
+      console.error(error);
+      alert("Erro ao reabrir conta.");
+    } finally {
+      setIsProcessingId(null);
+    }
+  }
+
+  async function handleCloseCompetence() {
+    if (!selectedCompetenceId) return;
+
+    if (!canCloseCompetence) {
+      alert("Feche todas as contas e faturas antes de fechar a competência.");
+      return;
+    }
+
+    setIsProcessingId(selectedCompetenceId);
+
+    try {
+      await closeCompetence(selectedCompetenceId);
+      await loadData(selectedCompetenceId);
+    } catch (error) {
+      console.error(error);
+      alert("Erro ao fechar competência.");
+    } finally {
+      setIsProcessingId(null);
+    }
+  }
+
+  async function handleReopenCompetence() {
+    if (!selectedCompetenceId) return;
+
+    if (!confirm("Deseja reabrir esta competência?")) return;
+
+    setIsProcessingId(selectedCompetenceId);
+
+    try {
+      await reopenCompetence(selectedCompetenceId);
+      await loadData(selectedCompetenceId);
+    } catch (error) {
+      console.error(error);
+      alert("Erro ao reabrir competência.");
+    } finally {
+      setIsProcessingId(null);
+    }
+  }
+
+  function moveCompetence(direction: "previous" | "next") {
+    const currentIndex = competences.findIndex(
+      (competence) => competence.id === selectedCompetenceId
+    );
+
+    const nextIndex =
+      direction === "previous" ? currentIndex + 1 : currentIndex - 1;
+
+    const nextCompetence = competences[nextIndex];
+
+    if (nextCompetence) {
+      loadData(nextCompetence.id);
+    }
+  }
+
+  function getAccountCurrentBalance(accountId: string) {
+    return transactions
+      .filter((transaction) => transaction.account_id === accountId)
+      .reduce((sum, transaction) => {
+        if (transaction.type === "Receita") {
+          return sum + Number(transaction.value);
+        }
+  
+        if (
+          transaction.type === "Despesa" ||
+          transaction.type === "Pagamento de Fatura"
+        ) {
+          return sum - Number(transaction.value);
+        }
+  
+        return sum;
+      }, 0);
   }
 
   return (
@@ -160,287 +319,185 @@ export default function ClosingsPageContent() {
           Fechamento de Competência
         </h1>
 
-        <p className="mt-2 max-w-3xl text-sm text-slate-400">
-          Feche uma competência para congelar o snapshot financeiro do período.
-          Competências fechadas não devem permitir alterações nos lançamentos.
+        <p className="mt-2 max-w-4xl text-sm text-slate-400">
+          Feche as contas, confirme as faturas dos cartões e depois feche a competência.
         </p>
       </div>
 
-      <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-4 shadow-xl">
-        <div className="flex items-center justify-between gap-3">
-          <button
-            type="button"
-            onClick={goToPreviousMonth}
-            className="flex h-10 w-10 items-center justify-center rounded-xl border border-white/10 text-slate-300 hover:bg-white/10 hover:text-white"
-          >
-            <ChevronLeft size={18} />
-          </button>
+      <div className="flex items-center justify-between rounded-2xl border border-white/10 bg-slate-950/60 p-4">
+        <button
+          type="button"
+          onClick={() => moveCompetence("previous")}
+          className="rounded-xl border border-white/10 p-3 text-slate-300 hover:bg-white/10"
+        >
+          <ChevronLeft size={18} />
+        </button>
 
-          <div className="flex flex-1 items-center justify-center gap-2 overflow-x-auto">
-            {getVisibleMonthDates(centerDate).map((date) => {
-              const currentMonthName = getCompetenceName(new Date());
-              const monthName = getCompetenceName(date);
-              const isCurrentMonth = monthName === currentMonthName;
-              const isCenterMonth = monthName === getCompetenceName(centerDate);
-
-              return (
-                <button
-                  key={monthName}
-                  type="button"
-                  onClick={() => setCenterDate(date)}
-                  className={`whitespace-nowrap rounded-full px-3 py-2 text-xs font-semibold transition ${isCenterMonth
-                      ? "bg-blue-600 text-white"
-                      : isCurrentMonth
-                        ? "bg-cyan-500/10 text-cyan-300"
-                        : "bg-white/[0.03] text-slate-400 hover:bg-white/10 hover:text-white"
-                    }`}
-                >
-                  {formatMonthLabel(date)}
-                </button>
-              );
-            })}
-          </div>
-
-          <button
-            type="button"
-            onClick={goToNextMonth}
-            className="flex h-10 w-10 items-center justify-center rounded-xl border border-white/10 text-slate-300 hover:bg-white/10 hover:text-white"
-          >
-            <ChevronRight size={18} />
-          </button>
-        </div>
-
-        <div className="mt-3 flex justify-center">
-          <button
-            type="button"
-            onClick={goToCurrentMonth}
-            className="rounded-full px-3 py-1 text-xs font-medium text-slate-400 hover:bg-white/10 hover:text-white"
-          >
-            Voltar para o mês atual
-          </button>
-        </div>
-      </div>
-
-      <div className="overflow-hidden rounded-2xl border border-white/10 bg-slate-950/60 shadow-xl">
-        <div className="border-b border-white/10 px-6 py-4">
-          <h2 className="text-lg font-semibold text-white">
-            Competências
+        <div className="text-center">
+          <p className="text-sm text-slate-400">Competência</p>
+          <h2 className="text-2xl font-bold text-white">
+            {selectedCompetence?.name ?? "-"}
           </h2>
         </div>
 
-        <div className="grid gap-3 p-4 md:hidden">
-          {isLoading && (
-            <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-5 text-center text-sm text-slate-400">
-              Carregando competências...
-            </div>
-          )}
+        <button
+          type="button"
+          onClick={() => moveCompetence("next")}
+          className="rounded-xl border border-white/10 p-3 text-slate-300 hover:bg-white/10"
+        >
+          <ChevronRight size={18} />
+        </button>
+      </div>
 
-          {!isLoading &&
-            items.map((item) => {
-              const isClosed = item.closure?.status === "Fechada";
-              const isProcessing = isProcessingId === item.id;
+      <div className="grid gap-4 md:grid-cols-3">
+        <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-5">
+          <p className="text-sm text-slate-400">Contas abertas</p>
+          <p className="mt-2 text-2xl font-bold text-yellow-300">
+            {openAccountsCount}
+          </p>
+        </div>
 
-              return (
-                <div
-                  key={item.id}
-                  className="rounded-2xl border border-white/10 bg-slate-950/60 p-4"
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <h3 className="font-semibold text-white">{item.name}</h3>
-                      <p className="mt-1 text-xs text-slate-500">
-                        Competência financeira
-                      </p>
-                    </div>
+        <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-5">
+          <p className="text-sm text-slate-400">Faturas abertas</p>
+          <p className="mt-2 text-2xl font-bold text-yellow-300">
+            {openCardsCount}
+          </p>
+        </div>
 
-                    <span
-                      className={`rounded-full px-3 py-1 text-xs font-medium ${isClosed
-                          ? "bg-emerald-500/10 text-emerald-300"
-                          : "bg-yellow-500/10 text-yellow-300"
-                        }`}
-                    >
-                      {isClosed ? "Fechada" : "Aberta"}
-                    </span>
-                  </div>
+        <div
+          className={`rounded-2xl border p-5 ${isCompetenceClosed
+              ? "border-emerald-400/20 bg-emerald-400/10"
+              : canCloseCompetence
+                ? "border-blue-400/20 bg-blue-400/10"
+                : "border-yellow-400/20 bg-yellow-400/10"
+            }`}
+        >
+          <p className="text-sm text-slate-300">Status</p>
+          <p className="mt-2 text-2xl font-bold text-white">
+            {isCompetenceClosed
+              ? "Fechada"
+              : canCloseCompetence
+                ? "Pronta"
+                : "Aberta"}
+          </p>
+        </div>
+      </div>
 
-                  <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
-                    <div className="rounded-xl bg-white/[0.03] p-3">
-                      <p className="text-xs text-slate-500">Receitas</p>
-                      <p className="mt-1 font-semibold text-emerald-300">
-                        {formatCurrency(item.closure?.total_income ?? 0)}
-                      </p>
-                    </div>
+      <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-5">
+        <h2 className="mb-4 text-lg font-bold text-white">Contas</h2>
 
-                    <div className="rounded-xl bg-white/[0.03] p-3">
-                      <p className="text-xs text-slate-500">Despesas</p>
-                      <p className="mt-1 font-semibold text-red-300">
-                        {formatCurrency(item.closure?.total_expense ?? 0)}
-                      </p>
-                    </div>
+        <div className="space-y-3">
+          {cashAccounts.map((account) => {
+            const closure = getAccountClosure(account.id);
+            const isClosed = !!closure;
+            const isProcessing = isProcessingId === account.id;
 
-                    <div className="rounded-xl bg-white/[0.03] p-3">
-                      <p className="text-xs text-slate-500">Saldo</p>
-                      <p className="mt-1 font-semibold text-white">
-                        {formatCurrency(item.closure?.balance ?? 0)}
-                      </p>
-                    </div>
-
-                    <div className="rounded-xl bg-white/[0.03] p-3">
-                      <p className="text-xs text-slate-500">Pendências</p>
-                      <p className="mt-1 font-semibold text-slate-200">
-                        {formatCurrency(
-                          (item.closure?.pending_income ?? 0) +
-                          (item.closure?.pending_expense ?? 0)
-                        )}
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="mt-4">
-                    {isClosed ? (
-                      <button
-                        type="button"
-                        disabled={isProcessing}
-                        onClick={() => handleReopen(item.id)}
-                        className="w-full rounded-xl border border-white/10 px-4 py-3 text-sm font-semibold text-slate-200 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        {isProcessing ? "Processando..." : "Reabrir competência"}
-                      </button>
-                    ) : (
-                      <button
-                        type="button"
-                        disabled={isProcessing}
-                        onClick={() => handleClose(item.id)}
-                        className="w-full rounded-xl bg-emerald-500 px-4 py-3 text-sm font-semibold text-slate-950 hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        {isProcessing ? "Processando..." : "Fechar competência"}
-                      </button>
-                    )}
-                  </div>
+            return (
+              <div
+                key={account.id}
+                className="flex items-center justify-between rounded-xl border border-white/10 bg-white/[0.03] p-4"
+              >
+                <div>
+                  <p className="font-semibold text-white">{account.name}</p>
+                  <p className="text-sm text-slate-400">
+                  Saldo atual: {formatCurrency(getAccountCurrentBalance(account.id))}
+                  </p>
                 </div>
-              );
-            })}
 
-          {!isLoading && items.length === 0 && (
-            <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-5 text-center text-sm text-slate-400">
-              Nenhuma competência encontrada.
-            </div>
-          )}
-        </div>
-
-        <div className="hidden overflow-x-auto md:block">
-          <table className="w-full min-w-[900px] text-left text-sm">
-            <thead className="bg-white/[0.03] text-xs uppercase text-slate-400">
-              <tr>
-                <th className="px-6 py-4">Competência</th>
-                <th className="px-6 py-4">Status</th>
-                <th className="px-6 py-4 text-right">Receitas</th>
-                <th className="px-6 py-4 text-right">Despesas</th>
-                <th className="px-6 py-4 text-right">Saldo</th>
-                <th className="px-6 py-4 text-right">Pendências</th>
-                <th className="px-6 py-4 text-right">Ações</th>
-              </tr>
-            </thead>
-
-            <tbody className="divide-y divide-white/10">
-              {isLoading && (
-                <tr>
-                  <td
-                    colSpan={7}
-                    className="px-6 py-10 text-center text-slate-400"
+                <div className="flex items-center gap-3">
+                  <span
+                    className={`rounded-full px-3 py-1 text-xs font-semibold ${isClosed
+                        ? "bg-emerald-500/10 text-emerald-300"
+                        : "bg-yellow-500/10 text-yellow-300"
+                      }`}
                   >
-                    Carregando competências...
-                  </td>
-                </tr>
-              )}
+                    {isClosed ? "Fechada" : "Aberta"}
+                  </span>
 
-              {!isLoading && items.length === 0 && (
-                <tr>
-                  <td
-                    colSpan={7}
-                    className="px-6 py-10 text-center text-slate-400"
-                  >
-                    Nenhuma competência encontrada.
-                  </td>
-                </tr>
-              )}
-
-              {!isLoading &&
-                items.map((item) => {
-                  const isClosed = item.closure?.status === "Fechada";
-                  const isProcessing = isProcessingId === item.id;
-
-                  return (
-                    <tr
-                      key={item.id}
-                      className="bg-slate-950/30 hover:bg-white/[0.03]"
+                  {isClosed ? (
+                    <button
+                      type="button"
+                      disabled={isProcessing || isCompetenceClosed}
+                      onClick={() => reopenAccount(account.id)}
+                      className="rounded-xl border border-white/10 px-4 py-2 text-xs font-semibold text-slate-200 hover:bg-white/10 disabled:opacity-50"
                     >
-                      <td className="px-6 py-4">
-                        <div className="font-medium text-white">
-                          {item.name}
-                        </div>
-                        <div className="text-xs text-slate-500">
-                          Competência financeira
-                        </div>
-                      </td>
-
-                      <td className="px-6 py-4">
-                        <span
-                          className={`rounded-full px-3 py-1 text-xs font-medium ${isClosed
-                              ? "bg-emerald-500/10 text-emerald-300"
-                              : "bg-yellow-500/10 text-yellow-300"
-                            }`}
-                        >
-                          {isClosed ? "Fechada" : "Aberta"}
-                        </span>
-                      </td>
-
-                      <td className="px-6 py-4 text-right text-emerald-300">
-                        {formatCurrency(item.closure?.total_income ?? 0)}
-                      </td>
-
-                      <td className="px-6 py-4 text-right text-red-300">
-                        {formatCurrency(item.closure?.total_expense ?? 0)}
-                      </td>
-
-                      <td className="px-6 py-4 text-right font-semibold text-white">
-                        {formatCurrency(item.closure?.balance ?? 0)}
-                      </td>
-
-                      <td className="px-6 py-4 text-right text-slate-300">
-                        {formatCurrency(
-                          (item.closure?.pending_income ?? 0) +
-                          (item.closure?.pending_expense ?? 0)
-                        )}
-                      </td>
-
-                      <td className="px-6 py-4 text-right">
-                        {isClosed ? (
-                          <button
-                            type="button"
-                            disabled={isProcessing}
-                            onClick={() => handleReopen(item.id)}
-                            className="rounded-xl border border-white/10 px-4 py-2 text-xs font-medium text-slate-200 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
-                          >
-                            {isProcessing ? "Processando..." : "Reabrir"}
-                          </button>
-                        ) : (
-                          <button
-                            type="button"
-                            disabled={isProcessing}
-                            onClick={() => handleClose(item.id)}
-                            className="rounded-xl bg-emerald-500 px-4 py-2 text-xs font-semibold text-slate-950 hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-50"
-                          >
-                            {isProcessing ? "Processando..." : "Fechar"}
-                          </button>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-            </tbody>
-          </table>
+                      Reabrir
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      disabled={isProcessing || isCompetenceClosed}
+                      onClick={() => closeAccount(account)}
+                      className="rounded-xl bg-emerald-500 px-4 py-2 text-xs font-bold text-slate-950 hover:bg-emerald-400 disabled:opacity-50"
+                    >
+                      {isProcessing ? "Fechando..." : "Fechar"}
+                    </button>
+                  )}
+                </div>
+              </div>
+            );
+          })}
         </div>
+      </div>
+
+      <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-5">
+        <h2 className="mb-4 text-lg font-bold text-white">Cartões</h2>
+
+        <div className="space-y-3">
+          {cardAccounts.map((account) => {
+            const statement = getCardStatement(account.id);
+            const isClosed = !!statement;
+
+            return (
+              <div
+                key={account.id}
+                className="flex items-center justify-between rounded-xl border border-white/10 bg-white/[0.03] p-4"
+              >
+                <div>
+                  <p className="font-semibold text-white">{account.name}</p>
+                  <p className="text-sm text-slate-400">
+                    {isClosed
+                      ? `Fatura: ${formatCurrency(Number(statement.statement_total ?? 0))}`
+                      : "Fatura ainda não fechada"}
+                  </p>
+                </div>
+
+                <span
+                  className={`rounded-full px-3 py-1 text-xs font-semibold ${isClosed
+                      ? "bg-emerald-500/10 text-emerald-300"
+                      : "bg-yellow-500/10 text-yellow-300"
+                    }`}
+                >
+                  {isClosed ? "Fechada" : "Aberta"}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="flex justify-end">
+        {isCompetenceClosed ? (
+          <button
+            type="button"
+            disabled={isProcessingId === selectedCompetenceId}
+            onClick={handleReopenCompetence}
+            className="rounded-xl border border-white/10 px-6 py-3 font-bold text-white hover:bg-white/10 disabled:opacity-50"
+          >
+            Reabrir competência
+          </button>
+        ) : (
+          <button
+            type="button"
+            disabled={
+              !canCloseCompetence || isProcessingId === selectedCompetenceId
+            }
+            onClick={handleCloseCompetence}
+            className="rounded-xl bg-emerald-500 px-6 py-3 font-bold text-slate-950 hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Fechar competência
+          </button>
+        )}
       </div>
     </div>
   );

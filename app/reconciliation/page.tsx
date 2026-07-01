@@ -13,13 +13,17 @@ type Account = {
 };
 
 type ImportedItem = {
+  id?: string;
   importKey: string;
+  sourceHash: string;
   date: string;
   description: string;
   value: number;
+  status?: "Pendente" | "Conciliado" | "Ignorado";
   matched: boolean;
   matchedTransactionId?: string;
   matchedTransaction?: Transaction;
+  ignoredReason?: string;
 };
 
 type Transaction = {
@@ -30,6 +34,7 @@ type Transaction = {
   type?: string;
   status?: string;
   category_id?: string;
+  signedValue?: number;
 };
 
 type Category = {
@@ -39,15 +44,6 @@ type Category = {
   active?: boolean | null;
 };
 
-type SavedReconciliation = {
-  import_key: string;
-  statement_date: string;
-  statement_description: string;
-  statement_value: number;
-  transaction_id: string | null;
-  ignored?: boolean | null;
-  created_at?: string | null;
-};
 
 type DetectedLayout = {
   headerRowIndex: number;
@@ -339,6 +335,9 @@ function detectLayout(rows: unknown[][]): DetectedLayout | null {
   return null;
 }
 
+function getStatementSourceHash(description: string, value: number) {
+  return `${normalizeText(description)}|${Number(value).toFixed(2)}`;
+}
 
 function extractItems(
   rows: unknown[][],
@@ -355,20 +354,27 @@ function extractItems(
         const debitValue = parseValue(row[layout.debitColumnIndex ?? -1]);
         const value = debitValue || creditValue * -1;
 
+        const date = parseDate(row[layout.dateColumnIndex], fallbackYear);
+
         return {
-          importKey: `${layout.headerRowIndex + 1 + index}`,
-          date: parseDate(row[layout.dateColumnIndex], fallbackYear),
+          importKey: getStatementSourceHash(description, value),
+          sourceHash: getStatementSourceHash(description, value),
+          date,
           description,
           value,
           matched: false,
         };
       }
 
+      const date = parseDate(row[layout.dateColumnIndex], fallbackYear);
+      const value = parseValue(row[layout.valueColumnIndex]);
+
       return {
-        importKey: `${layout.headerRowIndex + 1 + index}`,
-        date: parseDate(row[layout.dateColumnIndex], fallbackYear),
+        importKey: getStatementSourceHash(description, value),
+        sourceHash: getStatementSourceHash(description, value),
+        date,
         description,
-        value: parseValue(row[layout.valueColumnIndex]),
+        value,
         matched: false,
       };
     })
@@ -426,30 +432,45 @@ function addMonthsToDate(date: string, months: number) {
 
 function findMatchingTransaction(
   importedItem: ImportedItem,
-  transactions: Transaction[]
+  transactions: Transaction[],
+  usedTransactionIds = new Set<string>()
 ) {
   const installmentInfo = getInstallmentInfo(importedItem.description);
 
-  return transactions.find((transaction) => {
-    const sameValue =
-      Math.abs(Number(transaction.value) - Math.abs(importedItem.value)) < 0.01;
+  const candidates = transactions
+    .filter(
+      (transaction) =>
+        !usedTransactionIds.has(transaction.id) &&
+        transaction.type !== "Pagamento de Fatura" &&
+        transaction.type !== "Transferência"
+    )
+    .map((transaction) => {
+      const sameValue =
+        Math.abs(Number(transaction.value) - Math.abs(importedItem.value)) < 0.01;
 
-    const expectedDate = installmentInfo
-      ? addMonthsToDate(importedItem.date, installmentInfo.currentInstallment - 1)
-      : importedItem.date;
+      const expectedDate = installmentInfo
+        ? addMonthsToDate(importedItem.date, installmentInfo.currentInstallment - 1)
+        : importedItem.date;
 
-    const closeDate =
-      getDaysDifference(expectedDate, transaction.due_date) <= 3;
+      const daysDifference = getDaysDifference(expectedDate, transaction.due_date);
 
-    return sameValue && closeDate;
-  });
+      return {
+        transaction,
+        sameValue,
+        daysDifference,
+      };
+    })
+    .filter((candidate) => candidate.sameValue && candidate.daysDifference <= 3)
+    .sort((a, b) => a.daysDifference - b.daysDifference);
+
+  return candidates[0]?.transaction;
 }
 
 export default function ReconciliationPage() {
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [selectedAccountId, setSelectedAccountId] = useState("");
   const [competences, setCompetences] = useState<
-    { id: string; name: string; month: number; year: number }[]
+    { id: string; name: string; month: number; year: number; start_date?: string; end_date?: string }[]
   >([]);
   const [selectedCompetenceId, setSelectedCompetenceId] = useState("");
   const [candidateSearch, setCandidateSearch] = useState("");
@@ -530,8 +551,12 @@ export default function ReconciliationPage() {
     return Math.abs(groupDifference) < 0.01;
   }
 
-  const matchedItems = items.filter((item) => item.matched);
-  const unresolvedItems = items.filter((item) => !isFullyReconciled(item));
+  const matchedItems = items.filter(
+    (item) => item.status === "Conciliado" || item.matched
+  );
+  const unresolvedItems = items.filter(
+    (item) => item.status !== "Conciliado" || !isFullyReconciled(item)
+  );
   const visibleItems = showOnlyUnmatched ? unresolvedItems : items;
 
   const totalImported = items.reduce((sum, item) => sum + item.value, 0);
@@ -543,62 +568,66 @@ export default function ReconciliationPage() {
     0
   );
 
+  const reconciliationGroups = transactions
+    .filter(
+      (transaction) =>
+        transaction.type !== "Pagamento de Fatura" &&
+        transaction.type !== "Transferência"
+    )
+    .map((transaction) => {
+      const linkedItems = items.filter(
+        (item) => item.matchedTransactionId === transaction.id
+      );
+
+      const statementTotal = linkedItems.reduce(
+        (sum, item) => sum + Number(item.value),
+        0
+      );
+
+      const financeValue =
+        transaction.type === "Receita"
+          ? Number(transaction.value) * -1
+          : Number(transaction.value);
+
+      return {
+        ...transaction,
+        statementTotal,
+        financeValue,
+        difference: statementTotal - financeValue,
+        hasStatementMatch: linkedItems.length > 0,
+      };
+    });
+
   const reconciledTransactionIds = Array.from(
     new Set(
-      items
-        .filter((item) => isFullyReconciled(item))
-        .map((item) => item.matchedTransactionId)
-        .filter(Boolean)
+      reconciliationGroups
+        .filter((transaction) => Math.abs(transaction.difference) < 0.01)
+        .map((transaction) => transaction.id)
     )
   );
 
-  const financeOnlyTransactions = transactions
-    .filter((transaction) => !reconciledTransactionIds.includes(transaction.id))
-    .map((transaction) => ({
-      ...transaction,
-      signedValue:
-        transaction.type === "Receita"
-          ? Number(transaction.value) * -1
-          : Number(transaction.value),
-    }));
-
-  const totalFinanceOnly = financeOnlyTransactions.reduce(
-    (sum, transaction) => sum + Number(transaction.signedValue),
-    0
+  const financeOnlyTransactions = reconciliationGroups.filter(
+    (transaction) => !transaction.hasStatementMatch
   );
 
-  const reconciliationGroups = transactions.map((transaction) => {
-    const linkedItems = items.filter(
-      (item) => item.matchedTransactionId === transaction.id
-    );
-
-    const statementTotal = linkedItems.reduce(
-      (sum, item) => sum + Number(item.value),
-      0
-    );
-
-    const financeValue =
-      transaction.type === "Receita"
-        ? Number(transaction.value) * -1
-        : Number(transaction.value);
-
-    return {
-      ...transaction,
-      statementTotal,
-      financeValue,
-      difference: statementTotal - financeValue,
-      hasStatementMatch: linkedItems.length > 0,
-    };
-  });
+  const totalFinanceOnly = financeOnlyTransactions.reduce(
+    (sum, transaction) => sum + transaction.financeValue,
+    0
+  );
 
   const totalFinanceMatched = reconciliationGroups
     .filter((transaction) => transaction.hasStatementMatch)
     .reduce((sum, transaction) => sum + transaction.financeValue, 0);
 
-  const totalDifference = totalUnmatched - totalFinanceOnly;
+  const totalStatementDifference = reconciliationGroups
+    .filter((transaction) => transaction.hasStatementMatch)
+    .reduce((sum, transaction) => sum + transaction.difference, 0);
+
+  const totalDifference = totalStatementDifference + totalUnmatched;
 
   const financeDifferenceTransactions = reconciliationGroups.filter(
-    (transaction) => Math.abs(transaction.difference) >= 0.01
+    (transaction) =>
+      transaction.hasStatementMatch && Math.abs(transaction.difference) >= 0.01
   );
 
   function getCurrentCompetenceId(list: { id: string; month: number; year: number }[]) {
@@ -641,7 +670,7 @@ export default function ReconciliationPage() {
     async function loadCompetences() {
       const { data, error } = await supabase
         .from("competences")
-        .select("id, name, month, year")
+        .select("id, name, month, year, start_date, end_date")
         .order("year", { ascending: false })
         .order("month", { ascending: false });
 
@@ -677,11 +706,24 @@ export default function ReconciliationPage() {
   }, []);
 
   useEffect(() => {
-    if (!selectedFile || !selectedAccountId || !selectedCompetenceId) {
+    if (!selectedAccountId || !selectedCompetenceId) {
       return;
     }
 
-    handleFileUpload(selectedFile);
+    if (selectedFile) {
+      handleFileUpload(selectedFile);
+      return;
+    }
+
+    (async () => {
+      try {
+        await runAutoReconciliation(selectedAccountId, selectedCompetenceId);
+        await loadPersistedStatement(selectedAccountId, selectedCompetenceId);
+      } catch (error) {
+        console.error("Erro ao recarregar conferência:", error);
+        alert("Erro ao recarregar conferência.");
+      }
+    })();
   }, [selectedAccountId, selectedCompetenceId]);
 
   async function loadTransactions(accountId: string, competenceId: string) {
@@ -698,8 +740,192 @@ export default function ReconciliationPage() {
     return (data ?? []) as Transaction[];
   }
 
-  function getStatementSignature(date: string, description: string, value: number) {
-    return `${date}|${normalizeText(description)}|${Number(value).toFixed(2)}`;
+  async function loadPersistedStatement(accountId: string, competenceId: string) {
+    const persistedTransactions = await loadTransactions(accountId, competenceId);
+
+    const { data: persistedItems, error: persistedItemsError } = await supabase
+      .from("credit_card_statement_items")
+      .select("id, statement_date, statement_description, statement_value, source_hash, status")
+      .eq("account_id", accountId)
+      .eq("competence_id", competenceId)
+      .neq("status", "Ignorado")
+      .order("statement_date", { ascending: true })
+      .order("created_at", { ascending: true });
+
+    if (persistedItemsError) {
+      throw persistedItemsError;
+    }
+
+    const statementItemIds = (persistedItems ?? []).map((item) => item.id);
+
+    let linkedRows: {
+      statement_item_id: string;
+      transaction_id: string;
+    }[] = [];
+
+    if (statementItemIds.length > 0) {
+      const { data: links, error: linksError } = await supabase
+        .from("credit_card_statement_item_transactions")
+        .select("statement_item_id, transaction_id")
+        .in("statement_item_id", statementItemIds);
+
+      if (linksError) {
+        throw linksError;
+      }
+
+      linkedRows = links ?? [];
+    }
+
+    const linkedTransactionIds = Array.from(
+      new Set(linkedRows.map((link) => link.transaction_id))
+    );
+
+    let linkedTransactions: Transaction[] = [];
+
+    if (linkedTransactionIds.length > 0) {
+      const { data, error } = await supabase
+        .from("transactions")
+        .select("id, description, due_date, value, type, status, category_id")
+        .in("id", linkedTransactionIds);
+
+      if (error) {
+        throw error;
+      }
+
+      linkedTransactions = (data ?? []) as Transaction[];
+    }
+
+    const allAvailableTransactions = [
+      ...persistedTransactions,
+      ...linkedTransactions.filter(
+        (linkedTransaction) =>
+          !persistedTransactions.some(
+            (transaction) => transaction.id === linkedTransaction.id
+          )
+      ),
+    ];
+
+    const persistedImportedItems = (persistedItems ?? []).map((persistedItem) => {
+      const linkedRow = linkedRows.find(
+        (link) => link.statement_item_id === persistedItem.id
+      );
+
+      const linkedTransaction = linkedRow
+        ? allAvailableTransactions.find(
+          (transaction) => transaction.id === linkedRow.transaction_id
+        )
+        : undefined;
+
+      return {
+        id: persistedItem.id,
+        importKey: persistedItem.source_hash,
+        sourceHash: persistedItem.source_hash,
+        date: persistedItem.statement_date,
+        description: persistedItem.statement_description,
+        value: Number(persistedItem.statement_value),
+        status:
+          (persistedItem.status as
+            | "Pendente"
+            | "Conciliado"
+            | "Ignorado") ?? "Pendente",
+        matched:
+          persistedItem.status === "Conciliado"
+            ? true
+            : !!linkedTransaction,
+        matchedTransactionId: linkedTransaction?.id,
+        matchedTransaction:
+          persistedItem.status === "Conciliado"
+            ? linkedTransaction
+            : linkedTransaction,
+      };
+    }) as ImportedItem[];
+
+    const { data: existingStatement } = await supabase
+      .from("credit_card_statements")
+      .select("id, payment_transaction_id")
+      .eq("account_id", accountId)
+      .eq("competence_id", competenceId)
+      .maybeSingle();
+
+    setClosedStatement(existingStatement ?? null);
+    setTransactions(allAvailableTransactions);
+    setItems(persistedImportedItems);
+
+    if (persistedImportedItems.length > 0) {
+      setDetectedLayout({
+        headerRowIndex: 0,
+        dateColumnIndex: 0,
+        descriptionColumnIndex: 1,
+        valueColumnIndex: 2,
+        layoutType: "standard",
+        signature: "persisted-statement",
+      });
+    }
+  }
+
+  async function runAutoReconciliation(accountId: string, competenceId: string) {
+    const accountTransactions = await loadTransactions(accountId, competenceId);
+
+    const { data: pendingItems, error: pendingItemsError } = await supabase
+      .from("credit_card_statement_items")
+      .select("id, statement_date, statement_description, statement_value, source_hash, status")
+      .eq("account_id", accountId)
+      .eq("competence_id", competenceId)
+      .eq("status", "Pendente");
+
+    if (pendingItemsError) {
+      throw pendingItemsError;
+    }
+
+    const usedTransactionIds = new Set<string>();
+
+    for (const item of pendingItems ?? []) {
+      const importedItem: ImportedItem = {
+        id: item.id,
+        importKey: item.source_hash,
+        sourceHash: item.source_hash,
+        date: item.statement_date,
+        description: item.statement_description,
+        value: Number(item.statement_value),
+        status: "Pendente",
+        matched: false,
+      };
+
+      const automaticMatch = findMatchingTransaction(
+        importedItem,
+        accountTransactions,
+        usedTransactionIds
+      );
+
+      if (!automaticMatch) {
+        continue;
+      }
+
+      const { error: linkError } = await supabase
+        .from("credit_card_statement_item_transactions")
+        .insert({
+          statement_item_id: item.id,
+          transaction_id: automaticMatch.id,
+        });
+
+      if (linkError) {
+        console.warn("Sugestão automática ignorada:", linkError);
+        continue;
+      }
+
+      const { error: updateError } = await supabase
+        .from("credit_card_statement_items")
+        .update({
+          status: "Conciliado",
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", item.id);
+
+      if (updateError) {
+        throw updateError;
+      }
+      usedTransactionIds.add(automaticMatch.id);
+    }
   }
 
   async function handleFileUpload(file: File) {
@@ -730,70 +956,148 @@ export default function ReconciliationPage() {
 
       const extractedItems = extractItems(rows, layout, selectedCompetence?.year);
 
+      const itemOccurrenceCounter = new Map<string, number>();
+
+      const statementItemsPayload = extractedItems.map((item) => {
+        const baseHash = `${item.date}|${normalizeText(item.description)}|${Number(
+          item.value
+        ).toFixed(2)}`;
+
+        const occurrence = (itemOccurrenceCounter.get(baseHash) ?? 0) + 1;
+        itemOccurrenceCounter.set(baseHash, occurrence);
+
+        const sourceHash = `${baseHash}|${occurrence}`;
+
+        return {
+          account_id: selectedAccountId,
+          competence_id: selectedCompetenceId,
+          statement_date: item.date,
+          statement_description: item.description,
+          normalized_description: normalizeText(item.description),
+          statement_value: item.value,
+          source_hash: sourceHash,
+          status: "Pendente",
+          updated_at: new Date().toISOString(),
+        };
+      });
+
+      if (statementItemsPayload.length > 0) {
+        const { error: upsertItemsError } = await supabase
+          .from("credit_card_statement_items")
+          .upsert(statementItemsPayload, {
+            onConflict: "account_id,competence_id,source_hash",
+            ignoreDuplicates: true,
+          });
+
+        if (upsertItemsError) {
+          throw upsertItemsError;
+        }
+        await runAutoReconciliation(selectedAccountId, selectedCompetenceId);
+      }
+
+      const { data: persistedItems, error: persistedItemsError } = await supabase
+        .from("credit_card_statement_items")
+        .select(
+          "id, statement_date, statement_description, statement_value, source_hash, status"
+        )
+        .eq("account_id", selectedAccountId)
+        .eq("competence_id", selectedCompetenceId)
+        .neq("status", "Ignorado")
+        .order("statement_date", { ascending: true })
+        .order("created_at", { ascending: true });
+
+      if (persistedItemsError) {
+        throw persistedItemsError;
+      }
+
       const accountTransactions = await loadTransactions(
         selectedAccountId,
         selectedCompetenceId
       );
 
-      const { data: savedReconciliations, error: savedReconciliationsError } =
-        await supabase
-          .from("transaction_reconciliations")
-          .select("import_key, statement_date, statement_description, statement_value, transaction_id, ignored, created_at")
-          .eq("account_id", selectedAccountId)
-          .eq("competence_id", selectedCompetenceId)
-          .order("created_at", { ascending: true });
+      const statementItemIds = (persistedItems ?? []).map((item) => item.id);
 
-      if (savedReconciliationsError) {
-        throw savedReconciliationsError;
+      let linkedRows: {
+        statement_item_id: string;
+        transaction_id: string;
+      }[] = [];
+
+      if (statementItemIds.length > 0) {
+        const { data: links, error: linksError } = await supabase
+          .from("credit_card_statement_item_transactions")
+          .select("statement_item_id, transaction_id")
+          .in("statement_item_id", statementItemIds);
+
+        if (linksError) {
+          throw linksError;
+        }
+
+        linkedRows = links ?? [];
       }
 
-      const savedReconciliationByStatement = new Map<string, SavedReconciliation>();
+      const linkedTransactionIds = Array.from(
+        new Set(linkedRows.map((link) => link.transaction_id))
+      );
 
-      (savedReconciliations ?? []).forEach((reconciliation) => {
-        const key = getStatementSignature(
-          reconciliation.statement_date,
-          reconciliation.statement_description,
-          Number(reconciliation.statement_value)
-        );
+      let linkedTransactions: Transaction[] = [];
 
-        savedReconciliationByStatement.set(
-          key,
-          reconciliation as SavedReconciliation
-        );
-      });
-
-      const savedTransactionIds = Array.from(
-        new Set(
-          (savedReconciliations ?? [])
-            .map((reconciliation) => reconciliation.transaction_id)
-            .filter(Boolean)
-        )
-      ) as string[];
-
-      let savedTransactions: Transaction[] = [];
-
-      if (savedTransactionIds.length > 0) {
+      if (linkedTransactionIds.length > 0) {
         const { data, error } = await supabase
           .from("transactions")
           .select("id, description, due_date, value, type, status, category_id")
-          .in("id", savedTransactionIds);
+          .in("id", linkedTransactionIds);
 
         if (error) {
           throw error;
         }
 
-        savedTransactions = (data ?? []) as Transaction[];
+        linkedTransactions = (data ?? []) as Transaction[];
       }
 
       const allAvailableTransactions = [
         ...accountTransactions,
-        ...savedTransactions.filter(
-          (savedTransaction) =>
+        ...linkedTransactions.filter(
+          (linkedTransaction) =>
             !accountTransactions.some(
-              (transaction) => transaction.id === savedTransaction.id
+              (transaction) => transaction.id === linkedTransaction.id
             )
         ),
       ];
+
+      const reconciledItems = (persistedItems ?? []).map((persistedItem) => {
+        const linkedRow = linkedRows.find(
+          (link) => link.statement_item_id === persistedItem.id
+        );
+
+        const linkedTransaction = linkedRow
+          ? allAvailableTransactions.find(
+            (transaction) => transaction.id === linkedRow.transaction_id
+          )
+          : undefined;
+
+        return {
+          id: persistedItem.id,
+          importKey: persistedItem.source_hash,
+          sourceHash: persistedItem.source_hash,
+          date: persistedItem.statement_date,
+          description: persistedItem.statement_description,
+          value: Number(persistedItem.statement_value),
+          status:
+            (persistedItem.status as
+              | "Pendente"
+              | "Conciliado"
+              | "Ignorado") ?? "Pendente",
+          matched:
+            persistedItem.status === "Conciliado"
+              ? true
+              : !!linkedTransaction,
+          matchedTransactionId: linkedTransaction?.id,
+          matchedTransaction:
+            persistedItem.status === "Conciliado"
+              ? linkedTransaction
+              : linkedTransaction,
+        };
+      }) as ImportedItem[];
 
       const { data: existingStatement } = await supabase
         .from("credit_card_statements")
@@ -803,52 +1107,19 @@ export default function ReconciliationPage() {
         .maybeSingle();
 
       setClosedStatement(existingStatement ?? null);
-
-      const reconciledItems = extractedItems
-        .map((item) => {
-          const savedReconciliation = savedReconciliationByStatement.get(
-            getStatementSignature(item.date, item.description, item.value)
-          );
-
-          if (savedReconciliation?.ignored) {
-            return null;
-          }
-
-          if (savedReconciliation) {
-            const savedTransaction = allAvailableTransactions.find(
-              (transaction) => transaction.id === savedReconciliation.transaction_id
-            );
-
-            return {
-              ...item,
-              matched: !!savedTransaction,
-              matchedTransactionId: savedTransaction?.id,
-              matchedTransaction: savedTransaction,
-            };
-          }
-
-          const automaticMatch = findMatchingTransaction(item, accountTransactions);
-
-          return {
-            ...item,
-            matched: !!automaticMatch,
-            matchedTransactionId: automaticMatch?.id,
-            matchedTransaction: automaticMatch,
-          };
-        })
-        .filter(Boolean) as ImportedItem[];
-
       setDetectedLayout(layout);
       setTransactions(allAvailableTransactions);
       setItems(reconciledItems);
       setShowOnlyUnmatched(true);
+      if (statementItemsPayload.length > 0) {
+        console.log("Fatura importada/conferência atualizada:", {
+          itensNaPlanilha: statementItemsPayload.length,
+          itensNaConferencia: reconciledItems.length,
+        });
+      }
     } catch (error) {
       console.error("Erro ao processar fatura:", error);
-      alert(
-        error instanceof Error
-          ? error.message
-          : "Erro ao processar fatura."
-      );
+      alert(error instanceof Error ? error.message : "Erro ao processar fatura.");
     } finally {
       setIsProcessing(false);
     }
@@ -926,9 +1197,10 @@ export default function ReconciliationPage() {
 
     setItems((previousItems) =>
       previousItems.map((currentItem) =>
-        currentItem.importKey === itemToCreateTransaction.importKey
+        currentItem.id === itemToCreateTransaction.id
           ? {
             ...currentItem,
+            status: "Conciliado",
             matched: true,
             matchedTransactionId: newTransaction.id,
             matchedTransaction: newTransaction,
@@ -1001,7 +1273,13 @@ export default function ReconciliationPage() {
 
   function getCandidateTransactions(item: ImportedItem) {
     const fullyReconciledTransactionIds = items
-      .filter((currentItem) => isFullyReconciled(currentItem))
+      .filter((currentItem) => {
+        if (currentItem.matchedTransactionId === item.matchedTransactionId) {
+          return false;
+        }
+
+        return isFullyReconciled(currentItem);
+      })
       .map((currentItem) => currentItem.matchedTransactionId)
       .filter(Boolean);
 
@@ -1016,7 +1294,7 @@ export default function ReconciliationPage() {
           .filter(
             (currentItem) =>
               currentItem.matchedTransactionId === transaction.id &&
-              currentItem.importKey !== item.importKey
+              currentItem.id !== item.id
           )
           .reduce((sum, currentItem) => sum + Number(currentItem.value), 0);
 
@@ -1049,35 +1327,75 @@ export default function ReconciliationPage() {
     transactionId: string | null,
     ignored = false
   ) {
-    if (!selectedAccountId || !selectedCompetenceId) {
-      throw new Error("Selecione conta/cartão e competência.");
+    if (!item.id) {
+      throw new Error("Item da fatura ainda não foi persistido.");
     }
 
-    const { error: deleteError } = await supabase
-      .from("transaction_reconciliations")
+    const { error: deleteLinksError } = await supabase
+      .from("credit_card_statement_item_transactions")
       .delete()
-      .eq("account_id", selectedAccountId)
-      .eq("competence_id", selectedCompetenceId)
-      .eq("import_key", item.importKey);
+      .eq("statement_item_id", item.id);
 
-    if (deleteError) {
-      throw deleteError;
+    if (deleteLinksError) {
+      throw deleteLinksError;
     }
 
-    const { error } = await supabase.from("transaction_reconciliations").insert({
-      account_id: selectedAccountId,
-      competence_id: selectedCompetenceId,
-      import_key: item.importKey,
-      statement_date: item.date,
-      statement_description: item.description,
-      statement_value: item.value,
-      transaction_id: transactionId,
-      ignored,
-      ignore_reason: ignored ? "Ignorado manualmente" : null,
-    });
+    if (ignored) {
+      const { error: ignoreError } = await supabase
+        .from("credit_card_statement_items")
+        .update({
+          status: "Ignorado",
+          ignored_reason: "Ignorado manualmente",
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", item.id);
 
-    if (error) {
-      throw error;
+      if (ignoreError) {
+        throw ignoreError;
+      }
+
+      return;
+    }
+
+    if (!transactionId) {
+      const { error: pendingError } = await supabase
+        .from("credit_card_statement_items")
+        .update({
+          status: "Pendente",
+          ignored_reason: null,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", item.id);
+
+      if (pendingError) {
+        throw pendingError;
+      }
+
+      return;
+    }
+
+    const { error: insertLinkError } = await supabase
+      .from("credit_card_statement_item_transactions")
+      .insert({
+        statement_item_id: item.id,
+        transaction_id: transactionId,
+      });
+
+    if (insertLinkError) {
+      throw insertLinkError;
+    }
+
+    const { error: updateItemError } = await supabase
+      .from("credit_card_statement_items")
+      .update({
+        status: "Conciliado",
+        ignored_reason: null,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", item.id);
+
+    if (updateItemError) {
+      throw updateItemError;
     }
   }
 
@@ -1106,9 +1424,10 @@ export default function ReconciliationPage() {
 
     setItems((previousItems) =>
       previousItems.map((currentItem) =>
-        currentItem.importKey === item.importKey
+        currentItem.id === item.id
           ? {
             ...currentItem,
+            status: "Conciliado",
             matched: true,
             matchedTransactionId: transactionId,
             matchedTransaction: selectedTransaction,
@@ -1161,9 +1480,10 @@ export default function ReconciliationPage() {
 
     setItems((previousItems) =>
       previousItems.map((currentItem) =>
-        currentItem.importKey === item.importKey
+        currentItem.id === item.id
           ? {
             ...currentItem,
+            status: "Conciliado",
             matched: true,
             matchedTransactionId: newTransaction.id,
             matchedTransaction: newTransaction,
@@ -1176,16 +1496,11 @@ export default function ReconciliationPage() {
   }
 
   async function unlinkReconciliation(item: ImportedItem) {
-    if (!selectedAccountId || !selectedCompetenceId) return;
+    if (!item.id) return;
 
-    const { error } = await supabase
-      .from("transaction_reconciliations")
-      .delete()
-      .eq("account_id", selectedAccountId)
-      .eq("competence_id", selectedCompetenceId)
-      .eq("import_key", item.importKey);
-
-    if (error) {
+    try {
+      await saveReconciliation(item, null);
+    } catch (error) {
       console.error("Erro ao desfazer conciliação:", error);
       alert("Erro ao desfazer conciliação.");
       return;
@@ -1193,9 +1508,10 @@ export default function ReconciliationPage() {
 
     setItems((previousItems) =>
       previousItems.map((currentItem) =>
-        currentItem.importKey === item.importKey
+        currentItem.id === item.id
           ? {
             ...currentItem,
+            status: "Pendente",
             matched: false,
             matchedTransactionId: undefined,
             matchedTransaction: undefined,
@@ -1206,7 +1522,7 @@ export default function ReconciliationPage() {
   }
 
   async function ignoreStatementItem(item: ImportedItem) {
-    if (!selectedAccountId || !selectedCompetenceId) return;
+    if (!item.id) return;
 
     try {
       await saveReconciliation(item, null, true);
@@ -1217,9 +1533,7 @@ export default function ReconciliationPage() {
     }
 
     setItems((previousItems) =>
-      previousItems.filter(
-        (currentItem) => currentItem.importKey !== item.importKey
-      )
+      previousItems.filter((currentItem) => currentItem.id !== item.id)
     );
   }
 
@@ -1228,6 +1542,7 @@ export default function ReconciliationPage() {
     setTransactions([]);
     setDetectedLayout(null);
     setFileName("");
+    setSelectedFile(null);
     setViewMode("all");
     setShowOnlyUnmatched(true);
     setCandidateSearch("");
@@ -1236,8 +1551,96 @@ export default function ReconciliationPage() {
     setClosedStatement(null);
   }
 
+  async function getOrCreateCompetenceByDate(date: string) {
+    const baseDate = new Date(date + "T00:00:00");
+    const month = baseDate.getMonth() + 1;
+    const year = baseDate.getFullYear();
+    const name = `${year}-${String(month).padStart(2, "0")}`;
+
+    const existingCompetence = competences.find(
+      (competence) => competence.month === month && competence.year === year
+    );
+
+    if (existingCompetence) {
+      return existingCompetence.id;
+    }
+
+    const startDate = `${year}-${String(month).padStart(2, "0")}-01`;
+    const endDate = new Date(year, month, 0).toISOString().split("T")[0];
+
+    const { data, error } = await supabase
+      .from("competences")
+      .insert({
+        name,
+        month,
+        year,
+        start_date: startDate,
+        end_date: endDate,
+        closed: false,
+      })
+      .select("id, name, month, year, start_date, end_date")
+      .single();
+
+    if (error || !data) {
+      throw error ?? new Error("Erro ao criar competência do pagamento.");
+    }
+
+    setCompetences((previousCompetences) => [data, ...previousCompetences]);
+
+    return data.id;
+  }
+
+  async function reopenStatement() {
+    if (!closedStatement?.id) {
+      alert("Nenhuma fatura fechada encontrada.");
+      return;
+    }
+
+    const shouldDeletePayment = confirm(
+      "Deseja reabrir esta fatura e excluir também o lançamento de Pagamento de Fatura?"
+    );
+
+    try {
+      const paymentTransactionId = closedStatement.payment_transaction_id;
+
+      const { error: statementError } = await supabase
+        .from("credit_card_statements")
+        .delete()
+        .eq("id", closedStatement.id);
+
+      if (statementError) {
+        throw statementError;
+      }
+
+      if (shouldDeletePayment && paymentTransactionId) {
+        const { error: paymentError } = await supabase
+          .from("transactions")
+          .delete()
+          .eq("id", paymentTransactionId);
+
+        if (paymentError) {
+          throw paymentError;
+        }
+      }
+
+      setClosedStatement(null);
+
+      await loadPersistedStatement(selectedAccountId, selectedCompetenceId);
+
+      alert("Fatura reaberta com sucesso. As conciliações foram mantidas.");
+    } catch (error) {
+      console.error("Erro ao reabrir fatura:", error);
+      alert("Erro ao reabrir fatura.");
+    }
+  }
+
   async function closeStatementAndCreatePayment() {
-    if (isClosingStatement) return;
+    if (isClosingStatementRef.current) return;
+
+    isClosingStatementRef.current = true;
+    setIsClosingStatement(true);
+
+    await new Promise((resolve) => setTimeout(resolve, 50));
 
     if (!selectedAccountId || !selectedCompetenceId) {
       alert("Selecione cartão e competência.");
@@ -1254,9 +1657,27 @@ export default function ReconciliationPage() {
       return;
     }
 
-    if (Math.abs(totalDifference) >= 0.01) {
-      alert("A fatura só pode ser fechada quando a diferença estiver zerada.");
+    const hasPendingStatementItems = items.some(
+      (item) => !item.matched || !isFullyReconciled(item)
+    );
+
+    if (hasPendingStatementItems || Math.abs(totalDifference) >= 0.01) {
+      alert("A fatura só pode ser fechada quando todos os itens estiverem conciliados e a diferença estiver zerada.");
       return;
+    }
+
+    const itemsWithoutDatabaseLink = items.filter(
+      (item) => !item.id || !item.matchedTransactionId || !item.matchedTransaction
+    );
+
+    if (itemsWithoutDatabaseLink.length > 0) {
+      throw new Error(
+        "Existem itens aparentemente pendentes ou sem vínculo salvo. Recarregue a conferência antes de fechar."
+      );
+    }
+
+    for (const item of items) {
+      await saveReconciliation(item, item.matchedTransactionId ?? null);
     }
 
     const statementTotal = Math.abs(totalImported);
@@ -1275,6 +1696,8 @@ export default function ReconciliationPage() {
 
       const description = `Pagamento de fatura ${selectedAccount?.name ?? ""} - ${selectedCompetence?.name ?? ""
         }`;
+
+      const paymentCompetenceId = await getOrCreateCompetenceByDate(paymentDueDate);
 
       const { data: existingStatement, error: existingStatementError } =
         await supabase
@@ -1303,6 +1726,7 @@ export default function ReconciliationPage() {
             type: "Pagamento de Fatura",
             status: "Pendente",
             account_id: paymentAccountId,
+            competence_id: paymentCompetenceId,
           })
           .eq("id", paymentTransactionId);
 
@@ -1320,7 +1744,7 @@ export default function ReconciliationPage() {
             mode: "unico",
             status: "Pendente",
             account_id: paymentAccountId,
-            competence_id: selectedCompetenceId,
+            competence_id: paymentCompetenceId,
             category_id: null,
           })
           .select("id")
@@ -1331,6 +1755,29 @@ export default function ReconciliationPage() {
         }
 
         paymentTransactionId = paymentTransaction.id;
+      }
+
+      const reconciledItemIds = items
+        .filter((item) => item.id && item.matchedTransactionId && isFullyReconciled(item))
+        .map((item) => item.id) as string[];
+
+      if (reconciledItemIds.length !== items.length) {
+        throw new Error(
+          "Não foi possível confirmar todas as conciliações no banco. Recarregue a tela antes de fechar a fatura."
+        );
+      }
+
+      const { error: confirmItemsError } = await supabase
+        .from("credit_card_statement_items")
+        .update({
+          status: "Conciliado",
+          ignored_reason: null,
+          updated_at: new Date().toISOString(),
+        })
+        .in("id", reconciledItemIds);
+
+      if (confirmItemsError) {
+        throw confirmItemsError;
       }
 
       const { data: savedStatement, error: statementError } = await supabase
@@ -1368,6 +1815,7 @@ export default function ReconciliationPage() {
       console.error("Erro ao fechar/atualizar fatura:", error);
       alert(error?.message ?? JSON.stringify(error, null, 2) ?? "Erro ao salvar fatura.");
     } finally {
+      isClosingStatementRef.current = false;
       setIsClosingStatement(false);
     }
   }
@@ -1391,6 +1839,8 @@ export default function ReconciliationPage() {
               setTransactions([]);
               setDetectedLayout(null);
               setClosedStatement(null);
+              setSelectedFile(null);
+              setFileName("");
             }}
             className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none"
           >
@@ -1410,6 +1860,8 @@ export default function ReconciliationPage() {
               setTransactions([]);
               setDetectedLayout(null);
               setClosedStatement(null);
+              setSelectedFile(null);
+              setFileName("");
             }}
             className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none"
           >
@@ -1446,7 +1898,7 @@ export default function ReconciliationPage() {
             <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-5">
               <p className="text-sm text-slate-400">Arquivo</p>
               <p className="mt-2 truncate text-xl font-bold text-white">
-                {fileName}
+                {fileName || "Conferência salva"}
               </p>
             </div>
 
@@ -1519,59 +1971,72 @@ export default function ReconciliationPage() {
           </div>
         )}
 
-        {detectedLayout && Math.abs(totalDifference) < 0.01 && items.length > 0 && (
-          <div className="rounded-2xl border border-emerald-400/20 bg-emerald-400/10 p-5">
-            <div className="mb-4">
-              <h2 className="text-lg font-bold text-white">
-                Fechar fatura e programar pagamento
-              </h2>
-              <p className="mt-1 text-sm text-emerald-100">
-                A fatura está conciliada. Agora você pode gerar ou atualizar o pagamento.
+        {selectedAccount?.type === "Cartão" &&
+          detectedLayout &&
+          items.length > 0 &&
+          !items.some((item) => !item.matched || !isFullyReconciled(item)) &&
+          Math.abs(totalDifference) < 0.01 && (
+            <div className="rounded-2xl border border-emerald-400/20 bg-emerald-400/10 p-5">
+              <div className="mb-4">
+                <h2 className="text-lg font-bold text-white">
+                  Fechar fatura e programar pagamento
+                </h2>
+                <p className="mt-1 text-sm text-emerald-100">
+                  A fatura está conciliada. Agora você pode gerar ou atualizar o pagamento.
+                </p>
+              </div>
+
+              <div className="grid gap-4 md:grid-cols-4">
+                <select
+                  value={paymentAccountId}
+                  onChange={(event) => setPaymentAccountId(event.target.value)}
+                  className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none"
+                >
+                  <option value="">Conta de pagamento</option>
+                  {accounts
+                    .filter((account) => account.type === "Conta")
+                    .map((account) => (
+                      <option key={account.id} value={account.id}>
+                        {account.name}
+                      </option>
+                    ))}
+                </select>
+
+                <input
+                  type="date"
+                  value={paymentDueDate}
+                  onChange={(event) => setPaymentDueDate(event.target.value)}
+                  className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none"
+                />
+
+                <button
+                  type="button"
+                  disabled={isClosingStatement || isClosingStatementRef.current}
+                  onClick={closeStatementAndCreatePayment}
+                  className="rounded-xl bg-emerald-600 px-4 py-3 font-bold text-white hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {isClosingStatement
+                    ? "Salvando..."
+                    : closedStatement
+                      ? "Atualizar pagamento"
+                      : "Fechar fatura"}
+                </button>
+                {closedStatement && (
+                  <button
+                    type="button"
+                    onClick={reopenStatement}
+                    className="rounded-xl border border-red-400/30 px-4 py-3 font-bold text-red-300 hover:bg-red-500/10"
+                  >
+                    Reabrir fatura
+                  </button>
+                )}
+              </div>
+
+              <p className="mt-3 text-sm text-emerald-100">
+                Valor programado: {formatCurrency(Math.abs(totalImported))}
               </p>
             </div>
-
-            <div className="grid gap-4 md:grid-cols-3">
-              <select
-                value={paymentAccountId}
-                onChange={(event) => setPaymentAccountId(event.target.value)}
-                className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none"
-              >
-                <option value="">Conta de pagamento</option>
-                {accounts
-                  .filter((account) => account.type === "Conta")
-                  .map((account) => (
-                    <option key={account.id} value={account.id}>
-                      {account.name}
-                    </option>
-                  ))}
-              </select>
-
-              <input
-                type="date"
-                value={paymentDueDate}
-                onChange={(event) => setPaymentDueDate(event.target.value)}
-                className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none"
-              />
-
-              <button
-                type="button"
-                disabled={isClosingStatement}
-                onClick={closeStatementAndCreatePayment}
-                className="rounded-xl bg-emerald-600 px-4 py-3 font-bold text-white hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {isClosingStatement
-                  ? "Salvando..."
-                  : closedStatement
-                    ? "Atualizar pagamento"
-                    : "Fechar fatura"}
-              </button>
-            </div>
-
-            <p className="mt-3 text-sm text-emerald-100">
-              Valor programado: {formatCurrency(Math.abs(totalImported))}
-            </p>
-          </div>
-        )}
+          )}
 
         {items.length > 0 && (
           <div className="flex items-center justify-between rounded-2xl border border-white/10 bg-slate-950/60 p-4">
@@ -1591,12 +2056,20 @@ export default function ReconciliationPage() {
               <button
                 type="button"
                 onClick={() => {
-                  if (!selectedFile) {
-                    alert("Nenhum arquivo carregado para recarregar.");
+                  if (selectedFile) {
+                    handleFileUpload(selectedFile);
                     return;
                   }
 
-                  handleFileUpload(selectedFile);
+                  if (!selectedAccountId || !selectedCompetenceId) {
+                    alert("Selecione conta/cartão e competência.");
+                    return;
+                  }
+
+                  loadPersistedStatement(selectedAccountId, selectedCompetenceId).catch((error) => {
+                    console.error("Erro ao recarregar conferência:", error);
+                    alert("Erro ao recarregar conferência.");
+                  });
                 }}
                 className="rounded-xl border border-white/10 px-4 py-2 text-sm font-semibold text-white hover:bg-white/10"
               >
@@ -1608,11 +2081,32 @@ export default function ReconciliationPage() {
                     return;
                   }
 
-                  const { error } = await supabase
-                    .from("transaction_reconciliations")
+                  const statementItemIds = items
+                    .map((item) => item.id)
+                    .filter(Boolean) as string[];
+
+                  if (statementItemIds.length === 0) {
+                    return;
+                  }
+
+                  const { error: deleteLinksError } = await supabase
+                    .from("credit_card_statement_item_transactions")
                     .delete()
-                    .eq("account_id", selectedAccountId)
-                    .eq("competence_id", selectedCompetenceId);
+                    .in("statement_item_id", statementItemIds);
+
+                  if (deleteLinksError) {
+                    alert("Erro ao desfazer as conciliações.");
+                    return;
+                  }
+
+                  const { error } = await supabase
+                    .from("credit_card_statement_items")
+                    .update({
+                      status: "Pendente",
+                      ignored_reason: null,
+                      updated_at: new Date().toISOString(),
+                    })
+                    .in("id", statementItemIds);
 
                   if (error) {
                     alert("Erro ao desfazer as conciliações.");
@@ -1622,6 +2116,7 @@ export default function ReconciliationPage() {
                   setItems((items) =>
                     items.map((item) => ({
                       ...item,
+                      status: "Pendente",
                       matched: false,
                       matchedTransactionId: undefined,
                       matchedTransaction: undefined,
@@ -1713,9 +2208,9 @@ export default function ReconciliationPage() {
                 ))
               ) : (
                 visibleItems.map((item, index) => (
-                  <tr key={`${item.date}-${item.description}-${index}`}>
+                  <tr key={item.id ?? `${item.date}-${item.description}-${index}`}>
                     <td className="px-5 py-4">
-                      {isFullyReconciled(item) ? (
+                      {item.status === "Conciliado" && isFullyReconciled(item) ? (
                         <span className="rounded-full bg-emerald-500/10 px-3 py-1 text-xs font-bold text-emerald-300">
                           Conciliado
                         </span>
@@ -1861,11 +2356,15 @@ export default function ReconciliationPage() {
                       </td>
 
                       <td className="px-4 py-3 text-right text-slate-300">
-                        {formatCurrency(Number(transaction.signedValue))}
+                        {formatCurrency(
+                          Number.isFinite(Number(transaction.signedValue))
+                            ? Number(transaction.signedValue)
+                            : getSignedTransactionValue(transaction)
+                        )}
                       </td>
 
                       <td className="px-4 py-3 text-blue-300">
-                        Ainda não encontrado na fatura
+                        Não vinculado à fatura
                       </td>
                     </tr>
                   ))}
@@ -2146,6 +2645,21 @@ export default function ReconciliationPage() {
           </div>
         )
       }
+      {isClosingStatement && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/70">
+          <div className="rounded-2xl border border-emerald-400/20 bg-slate-950 p-6 text-center shadow-2xl">
+            <div className="mx-auto mb-4 h-10 w-10 animate-spin rounded-full border-4 border-emerald-400/30 border-t-emerald-300" />
+
+            <h2 className="text-lg font-bold text-white">
+              Fechando fatura...
+            </h2>
+
+            <p className="mt-2 text-sm text-slate-400">
+              Gerando pagamento e salvando a conferência.
+            </p>
+          </div>
+        </div>
+      )}
     </AppShell >
   );
 }

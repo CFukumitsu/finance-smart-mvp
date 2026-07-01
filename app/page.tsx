@@ -8,6 +8,7 @@ import {
   Bar,
   BarChart,
   CartesianGrid,
+  Cell,
   Legend,
   ResponsiveContainer,
   Tooltip,
@@ -34,6 +35,7 @@ type Transaction = {
     monthly_goal?: number | null;
     show_on_dashboard?: boolean | null;
     dashboard_order?: number | null;
+    active?: boolean | null;
   }
   | null;
   competence: { name: string } | null;
@@ -116,7 +118,7 @@ export default function DashboardPage() {
         account_id,
         category_id,
         account:accounts!transactions_account_id_fkey(name, type, limit_amount),
-        category:categories!transactions_category_id_fkey(name, monthly_limit, monthly_goal, show_on_dashboard, dashboard_order),
+        category:categories!transactions_category_id_fkey(name, monthly_limit, monthly_goal, show_on_dashboard, dashboard_order, active),
         competence:competences!transactions_competence_id_fkey(name)
       `)
       .eq("competence_id", competenceData.id)
@@ -185,7 +187,7 @@ export default function DashboardPage() {
     account_id,
     category_id,
     account:accounts!transactions_account_id_fkey(name, type, limit_amount),
-    category:categories!transactions_category_id_fkey(name, monthly_limit, monthly_goal, show_on_dashboard, dashboard_order),
+    category:categories!transactions_category_id_fkey(name, monthly_limit, monthly_goal, show_on_dashboard, dashboard_order, active),
     competence:competences!transactions_competence_id_fkey(name)
   `)
       .eq("competence_id", competenceData.id);
@@ -210,7 +212,7 @@ export default function DashboardPage() {
       account_id,
       category_id,
       account:accounts!transactions_account_id_fkey(name, type, limit_amount),
-      category:categories!transactions_category_id_fkey(name, monthly_limit, monthly_goal, show_on_dashboard, dashboard_order),
+      category:categories!transactions_category_id_fkey(name, monthly_limit, monthly_goal, show_on_dashboard, dashboard_order, active),
       competence:competences!transactions_competence_id_fkey(name)
     `)
         .eq("competence_id", previousCompetenceData.id);
@@ -342,6 +344,7 @@ export default function DashboardPage() {
       .filter(
         (transaction) =>
           transaction.type === "Despesa" &&
+          transaction.category?.active !== false &&
           transaction.category?.show_on_dashboard !== false
       )
       .reduce<Record<string, ComparisonItem>>((acc, transaction) => {
@@ -487,8 +490,8 @@ export default function DashboardPage() {
             <p className="text-sm text-slate-400">Saldo projetado</p>
             <p
               className={`mt-2 text-2xl font-bold ${cashFlowTotals.projectedBalance >= 0
-                  ? "text-emerald-300"
-                  : "text-red-300"
+                ? "text-emerald-300"
+                : "text-red-300"
                 }`}
             >
               {formatCurrency(cashFlowTotals.projectedBalance)}
@@ -553,9 +556,9 @@ function ComparisonBarChart({
                 stroke="#94a3b8"
                 tick={{ fontSize: 12 }}
                 interval={0}
-                angle={-20}
+                angle={-90}
                 textAnchor="end"
-                height={70}
+                height={130}
               />
 
               <YAxis
@@ -577,10 +580,20 @@ function ComparisonBarChart({
                   borderRadius: "12px",
                   color: "#ffffff",
                 }}
-                formatter={(value) => formatCurrency(Number(value))}
+                labelStyle={{
+                  color: "#ffffff",
+                  fontWeight: 700,
+                }}
+                itemStyle={{
+                  color: "#ffffff",
+                }}
+                formatter={(value, name) => [
+                  formatCurrency(Number(value)),
+                  String(name),
+                ]}
               />
 
-              <Legend />
+              <Legend content={() => null} />
 
               <Bar
                 dataKey="planned"
@@ -592,11 +605,39 @@ function ComparisonBarChart({
               <Bar
                 dataKey="realized"
                 name="Realizado"
-                fill="#10b981"
                 radius={[6, 6, 0, 0]}
-              />
+              >
+                {data.map((item) => (
+                  <Cell
+                    key={`realized-${item.name}`}
+                    fill={
+                      item.realized > item.planned
+                        ? "#ef4444" // vermelho
+                        : item.realized >= item.planned * 0.8
+                          ? "#facc15" // amarelo
+                          : "#10b981" // verde
+                    }
+                  />
+                ))}
+              </Bar>
             </BarChart>
           </ResponsiveContainer>
+          <div className="mt-5 flex flex-wrap items-center justify-center gap-6 text-sm">
+            <div className="flex items-center gap-2">
+              <div className="h-3 w-3 rounded-full bg-blue-500" />
+              <span className="text-slate-300">Planejado</span>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <div className="h-3 w-3 rounded-full bg-emerald-500" />
+              <span className="text-slate-300">Dentro do previsto</span>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <div className="h-3 w-3 rounded-full bg-red-500" />
+              <span className="text-slate-300">Acima do previsto</span>
+            </div>
+          </div>
         </div>
       )}
     </div>

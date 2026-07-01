@@ -9,6 +9,7 @@ import {
   CircleOff,
   Trash2,
   TrendingUp,
+  LayoutDashboard,
 } from "lucide-react";
 
 type Competence = {
@@ -84,9 +85,10 @@ export default function CategoriesPage() {
       query = query.ilike("name", `%${searchTerm.trim()}%`);
     }
 
-    const { data, error } = await query.order("name", {
-      ascending: true,
-    });
+    const { data, error } = await query
+      .order("active", { ascending: false })
+      .order("show_on_dashboard", { ascending: false })
+      .order("name", { ascending: true });
 
     if (error) {
       console.error("Erro ao carregar categorias:", error);
@@ -274,6 +276,24 @@ export default function CategoriesPage() {
     await loadCategories();
   }
 
+  async function toggleShowOnDashboard(category: Category) {
+    const { error } = await supabase
+      .from("categories")
+      .update({
+        show_on_dashboard: !category.show_on_dashboard,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", category.id);
+
+    if (error) {
+      console.error("Erro ao alterar exibição no dashboard:", error);
+      alert(error.message);
+      return;
+    }
+
+    await loadCategories();
+  }
+
   async function toggleActive(category: Category) {
     const { error } = await supabase
       .from("categories")
@@ -432,6 +452,20 @@ export default function CategoriesPage() {
 
                   <div className="flex gap-2">
                     <button
+                      title={
+                        category.show_on_dashboard
+                          ? "Ocultar do Dashboard"
+                          : "Mostrar no Dashboard"
+                      }
+                      onClick={() => toggleShowOnDashboard(category)}
+                      className={`flex h-9 w-9 items-center justify-center rounded-xl border ${category.show_on_dashboard
+                        ? "border-cyan-500/20 bg-cyan-500/10 text-cyan-400"
+                        : "border-slate-500/20 bg-slate-500/10 text-slate-400"
+                        }`}
+                    >
+                      <LayoutDashboard size={16} />
+                    </button>
+                    <button
                       title="Planejamento"
                       onClick={() => openPlanningModal(category)}
                       className="flex h-9 w-9 items-center justify-center rounded-xl border border-cyan-500/20 bg-cyan-500/10 text-cyan-400"
@@ -535,6 +569,27 @@ export default function CategoriesPage() {
                     <td className="px-5 py-4 text-right">
                       <div className="flex justify-end gap-2">
                         <button
+                          title={
+                            category.show_on_dashboard
+                              ? "Ocultar do Dashboard"
+                              : "Mostrar no Dashboard"
+                          }
+                          onClick={() => toggleShowOnDashboard(category)}
+                          className={`
+                                flex h-10 w-10 items-center justify-center
+                                rounded-xl
+                                border
+                                transition-all duration-200
+                                hover:scale-105
+                                ${category.show_on_dashboard
+                              ? "border-cyan-500/20 bg-cyan-500/10 text-cyan-400 hover:border-cyan-400/40 hover:bg-cyan-500/20 hover:text-cyan-300"
+                              : "border-slate-500/20 bg-slate-500/10 text-slate-400 hover:border-slate-400/40 hover:bg-slate-500/20 hover:text-white"
+                            }
+  `}
+                        >
+                          <LayoutDashboard size={18} />
+                        </button>
+                        <button
                           title="Planejamento"
                           onClick={() => openPlanningModal(category)}
                           className="
@@ -615,7 +670,7 @@ export default function CategoriesPage() {
 
               {!isLoading && categories.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="px-5 py-10 text-center text-slate-400">
+                  <td colSpan={5} className="px-5 py-10 text-center text-slate-400">
                     Nenhuma categoria cadastrada.
                   </td>
                 </tr>
