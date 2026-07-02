@@ -8,14 +8,39 @@ import {
 export async function getRecurringTransactions() {
   const { data, error } = await supabase
     .from("recurring_transactions")
-    .select("*")
-    .order("created_at", { ascending: false });
+    .select(`
+      *,
+      account:accounts(name)
+    `);
 
   if (error) {
     throw new Error(error.message);
   }
 
-  return data as RecurringTransaction[];
+  return ((data ?? []) as RecurringTransaction[]).sort((a, b) => {
+    const accountA = a.account?.name ?? "";
+    const accountB = b.account?.name ?? "";
+
+    const accountCompare = accountA.localeCompare(accountB, "pt-BR");
+
+    if (accountCompare !== 0) {
+      return accountCompare;
+    }
+
+    const typeOrder: Record<string, number> = {
+      income: 0,
+      expense: 1,
+    };
+    
+    const typeCompare =
+      (typeOrder[a.type] ?? 99) - (typeOrder[b.type] ?? 99);
+    
+    if (typeCompare !== 0) {
+      return typeCompare;
+    }
+
+    return a.description.localeCompare(b.description, "pt-BR");
+  });
 }
 
 export async function createRecurringTransaction(
@@ -25,7 +50,7 @@ export async function createRecurringTransaction(
     const lock = await ensureCompetenceIsOpen(
       formData.endCompetenceId
     );
-  
+
     if (!lock.allowed) {
       return {
         success: false,
@@ -40,6 +65,7 @@ export async function createRecurringTransaction(
     account_id: formData.accountId || null,
     category_id: formData.categoryId || null,
     frequency: "monthly",
+    day_of_month: Math.min(Math.max(Number(formData.dayOfMonth || 1), 1), 31),
     start_competence_id: formData.startCompetenceId,
     end_competence_id: formData.endCompetenceId || null,
     status: "active",
@@ -62,6 +88,7 @@ export async function updateRecurringTransaction(
       amount: Number(formData.amount),
       account_id: formData.accountId || null,
       category_id: formData.categoryId || null,
+      day_of_month: Math.min(Math.max(Number(formData.dayOfMonth || 1), 1), 31),
       start_competence_id: formData.startCompetenceId,
       end_competence_id: formData.endCompetenceId || null,
       updated_at: new Date().toISOString(),

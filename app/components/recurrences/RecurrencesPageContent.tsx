@@ -19,20 +19,47 @@ type SelectOption = {
     id: string;
     name: string;
 };
+
 import { generateRecurringTransactions } from "@/src/services/generateRecurringTransactionsService";
+import { useModalShortcuts } from "@/src/hooks/useModalShortcuts";
 const emptyForm: RecurringTransactionFormData = {
     description: "",
     type: "expense",
     amount: "",
     accountId: "",
     categoryId: "",
+    dayOfMonth: String(new Date().getDate()),
     startCompetenceId: "",
     endCompetenceId: "",
 };
+function formatCurrencyInput(value: string) {
+    const onlyNumbers = value.replace(/\D/g, "");
+
+    if (!onlyNumbers) return "";
+
+    const numericValue = Number(onlyNumbers) / 100;
+
+    return numericValue.toLocaleString("pt-BR", {
+        style: "currency",
+        currency: "BRL",
+    });
+}
+
+function parseCurrencyInput(value: string) {
+    return value
+        .replace(/\s/g, "")
+        .replace("R$", "")
+        .replace(/\./g, "")
+        .replace(",", ".")
+        .trim();
+}
 
 export default function RecurrencesPageContent() {
     const [items, setItems] = useState<RecurringTransaction[]>([]);
     const [accounts, setAccounts] = useState<SelectOption[]>([]);
+
+    const accountName = (id?: string | null) =>
+        accounts.find((a) => a.id === id)?.name ?? "-";
     const [categories, setCategories] = useState<SelectOption[]>([]);
     const [competences, setCompetences] = useState<SelectOption[]>([]);
     const [selectedCompetenceId, setSelectedCompetenceId] = useState("");
@@ -95,13 +122,22 @@ export default function RecurrencesPageContent() {
         loadAuxiliaryData();
     }, []);
 
+    useModalShortcuts({
+        enabled: isDrawerOpen,
+        onEscape: closeDrawer,
+    });
+
     function openCreateDrawer() {
         setEditingItem(null);
 
-        setFormData({
+        setFormData((current) => ({
             ...emptyForm,
+            type: current.type || emptyForm.type,
+            accountId: current.accountId,
+            categoryId: current.categoryId,
+            dayOfMonth: current.dayOfMonth || String(new Date().getDate()),
             startCompetenceId: selectedCompetenceId,
-        });
+        }));
 
         setIsDrawerOpen(true);
     }
@@ -112,9 +148,10 @@ export default function RecurrencesPageContent() {
         setFormData({
             description: item.description,
             type: item.type,
-            amount: String(item.amount),
+            amount: formatCurrencyInput(String(Math.round(Number(item.amount) * 100))),
             accountId: item.account_id ?? "",
             categoryId: item.category_id ?? "",
+            dayOfMonth: String(item.day_of_month ?? new Date().getDate()),
             startCompetenceId: item.start_competence_id,
             endCompetenceId: item.end_competence_id ?? "",
         });
@@ -125,7 +162,14 @@ export default function RecurrencesPageContent() {
     function closeDrawer() {
         setIsDrawerOpen(false);
         setEditingItem(null);
-        setFormData(emptyForm);
+        setFormData((current) => ({
+            ...emptyForm,
+            type: current.type,
+            accountId: current.accountId,
+            categoryId: current.categoryId,
+            dayOfMonth: current.dayOfMonth || String(new Date().getDate()),
+            startCompetenceId: selectedCompetenceId,
+        }));
     }
 
     function updateField(field: keyof RecurringTransactionFormData, value: string) {
@@ -140,6 +184,7 @@ export default function RecurrencesPageContent() {
 
         const normalizedFormData: RecurringTransactionFormData = {
             ...formData,
+            amount: parseCurrencyInput(formData.amount),
             endCompetenceId: formData.endCompetenceId || "",
         };
 
@@ -353,10 +398,12 @@ export default function RecurrencesPageContent() {
                 </div>
 
                 <div className="overflow-hidden rounded-2xl border border-white/10 bg-slate-950/60">
-                    <table className="w-full min-w-[900px] text-left text-sm">
+                    <table className="w-full min-w-[1000px] text-left text-sm">
                         <thead className="border-b border-white/10 bg-white/[0.03] text-slate-400">
                             <tr>
+                                <th className="px-5 py-4 font-medium">Conta/Cartão</th>
                                 <th className="px-5 py-4 font-medium">Descrição</th>
+                                <th className="px-5 py-4 font-medium">Dia</th>
                                 <th className="px-5 py-4 font-medium">Tipo</th>
                                 <th className="px-5 py-4 font-medium">Valor</th>
                                 <th className="px-5 py-4 font-medium">Frequência</th>
@@ -369,7 +416,7 @@ export default function RecurrencesPageContent() {
                             {isLoading && (
                                 <tr>
                                     <td
-                                        colSpan={6}
+                                        colSpan={8}
                                         className="px-5 py-10 text-center text-slate-400"
                                     >
                                         Carregando recorrências...
@@ -380,7 +427,7 @@ export default function RecurrencesPageContent() {
                             {!isLoading && items.length === 0 && (
                                 <tr>
                                     <td
-                                        colSpan={6}
+                                        colSpan={8}
                                         className="px-5 py-10 text-center text-slate-400"
                                     >
                                         Nenhuma recorrência cadastrada.
@@ -394,8 +441,16 @@ export default function RecurrencesPageContent() {
                                         key={item.id}
                                         className="bg-slate-950/40 hover:bg-white/[0.03]"
                                     >
+                                        <td className="px-5 py-4 text-slate-300">
+                                            {accountName(item.account_id)}
+                                        </td>
+
                                         <td className="px-5 py-4 text-white">
                                             {item.description}
+                                        </td>
+
+                                        <td className="px-5 py-4 text-slate-300">
+                                            Dia {item.day_of_month}
                                         </td>
 
                                         <td className="px-5 py-4">
@@ -518,16 +573,37 @@ export default function RecurrencesPageContent() {
                                     Valor
                                 </label>
                                 <input
-                                    type="number"
-                                    step="0.01"
+                                    type="text"
+                                    inputMode="numeric"
                                     value={formData.amount}
-                                    onChange={(event) => updateField("amount", event.target.value)}
+                                    onChange={(event) =>
+                                        updateField("amount", formatCurrencyInput(event.target.value))
+                                    }
                                     required
                                     className="w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-white outline-none focus:border-emerald-400"
                                     placeholder="0,00"
                                 />
                             </div>
+                            <div>
+                                <label className="mb-2 block text-sm font-medium text-slate-300">
+                                    Dia de vencimento
+                                </label>
 
+                                <input
+                                    type="number"
+                                    min={1}
+                                    max={31}
+                                    value={formData.dayOfMonth}
+                                    onChange={(event) => updateField("dayOfMonth", event.target.value)}
+                                    required
+                                    className="w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-white outline-none focus:border-emerald-400"
+                                    placeholder="Ex: 27"
+                                />
+
+                                <p className="mt-1 text-xs text-slate-500">
+                                    Se o mês não tiver esse dia, o lançamento será gerado no último dia do mês.
+                                </p>
+                            </div>
                             <div>
                                 <label className="mb-2 block text-sm font-medium text-slate-300">
                                     Conta

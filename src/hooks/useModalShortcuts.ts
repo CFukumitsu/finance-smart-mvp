@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 
-type ShortcutConfig = {
+type ModalShortcutOptions = {
   enabled: boolean;
   onEscape?: () => void;
   onEnter?: () => void;
@@ -10,7 +10,7 @@ export function useModalShortcuts({
   enabled,
   onEscape,
   onEnter,
-}: ShortcutConfig) {
+}: ModalShortcutOptions) {
   useEffect(() => {
     if (!enabled) return;
 

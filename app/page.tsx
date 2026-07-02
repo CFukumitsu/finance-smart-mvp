@@ -5,6 +5,12 @@ import AppShell from "./components/layout/AppShell";
 import { supabase } from "@/src/lib/supabase";
 import { updateOverduePaymentStatusesOncePerDay } from "@/src/services/paymentStatusService";
 import {
+  calculateCardRealizedValue,
+  calculateCashFlowTotals,
+  calculateCategoryRealizedValue,
+  calculateComparisonPending,
+} from "@/src/utils/balanceCalculations";
+import {
   Bar,
   BarChart,
   CartesianGrid,
@@ -23,14 +29,14 @@ type Transaction = {
   type: string;
   value: number;
   status: string | null;
-  account_id?: string | null;
-  category_id?: string | null;
+  account_id: string | null;
+  category_id: string | null;
   account:
-  | { name: string; type?: string | null; limit_amount?: number | null }
+  | { name?: string | null; type?: string | null; limit_amount?: number | null }
   | null;
   category:
   | {
-    name: string;
+    name?: string | null;
     monthly_limit?: number | null;
     monthly_goal?: number | null;
     show_on_dashboard?: boolean | null;
@@ -63,12 +69,10 @@ type FinancialTarget = {
 };
 
 export default function DashboardPage() {
-  const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [currentCompetence, setCurrentCompetence] = useState<Competence | null>(
     null
   );
   const [isLoading, setIsLoading] = useState(false);
-  const [cashFlowCompetence, setCashFlowCompetence] = useState<Competence | null>(null);
   const [cashFlowTransactions, setCashFlowTransactions] = useState<Transaction[]>([]);
   const [previousCardTransactions, setPreviousCardTransactions] = useState<Transaction[]>([]);
   const [accountTargets, setAccountTargets] = useState<Record<string, number>>({});
@@ -99,39 +103,11 @@ export default function DashboardPage() {
     if (competenceError || !competenceData) {
       console.error("Erro ao carregar competência atual:", competenceError);
       setCurrentCompetence(null);
-      setTransactions([]);
       setIsLoading(false);
       return;
     }
 
     setCurrentCompetence(competenceData as Competence);
-
-    const { data, error } = await supabase
-      .from("transactions")
-      .select(`
-        id,
-        description,
-        due_date,
-        type,
-        value,
-        status,
-        account_id,
-        category_id,
-        account:accounts!transactions_account_id_fkey(name, type, limit_amount),
-        category:categories!transactions_category_id_fkey(name, monthly_limit, monthly_goal, show_on_dashboard, dashboard_order, active),
-        competence:competences!transactions_competence_id_fkey(name)
-      `)
-      .eq("competence_id", competenceData.id)
-      .order("due_date", { ascending: false });
-
-    if (error) {
-      console.error("Erro ao carregar dashboard:", error);
-      setTransactions([]);
-      setIsLoading(false);
-      return;
-    }
-
-    setTransactions((data ?? []) as unknown as Transaction[]);
 
     const { data: targetData, error: targetError } = await supabase
       .from("financial_targets")
@@ -172,8 +148,6 @@ export default function DashboardPage() {
       .eq("month", previousMonth.month)
       .eq("year", previousMonth.year)
       .single();
-
-    setCashFlowCompetence(competenceData as Competence);
 
     const { data: cashFlowData, error: cashFlowError } = await supabase
       .from("transactions")
@@ -242,65 +216,11 @@ export default function DashboardPage() {
 
     initDashboard();
   }, []);
-
-  const totals = useMemo(() => {
-    const income = transactions
-      .filter((item) => item.type === "Receita")
-      .reduce((sum, item) => sum + Number(item.value), 0);
-
-    const expense = transactions
-      .filter((item) => item.type === "Despesa")
-      .reduce((sum, item) => sum + Number(item.value), 0);
-
-    const paid = transactions
-      .filter((item) => item.status === "Pago")
-      .reduce((sum, item) => sum + Number(item.value), 0);
-
-    const pending = transactions
-      .filter((item) => item.status === "Pendente")
-      .reduce((sum, item) => sum + Number(item.value), 0);
-
-    return {
-      income,
-      expense,
-      result: income - expense,
-      paid,
-      pending,
-    };
-  }, [transactions]);
-
-  const cashFlowTotals = useMemo(() => {
-    const income = cashFlowTransactions
-      .filter((item) => item.type === "Receita")
-      .reduce((sum, item) => sum + Number(item.value), 0);
-
-    const accountExpenses = cashFlowTransactions
-      .filter(
-        (item) =>
-          item.type === "Despesa" &&
-          item.account?.type === "Conta"
-      )
-      .reduce((sum, item) => sum + Number(item.value), 0);
-
-    const creditCardInvoices = previousCardTransactions.reduce((sum, item) => {
-      if (item.type === "Despesa") {
-        return sum + Number(item.value);
-      }
-
-      if (item.type === "Receita") {
-        return sum - Number(item.value);
-      }
-
-      return sum;
-    }, 0);
-
-    return {
-      income,
-      accountExpenses,
-      creditCardInvoices,
-      projectedBalance: income - accountExpenses - creditCardInvoices,
-    };
-  }, [cashFlowTransactions, previousCardTransactions]);
+  
+  const cashFlowTotals = useMemo(
+    () => calculateCashFlowTotals(cashFlowTransactions, previousCardTransactions),
+    [cashFlowTransactions, previousCardTransactions]
+  );
 
   const cardComparisonData = useMemo<ComparisonItem[]>(() => {
     const grouped = previousCardTransactions.reduce<
@@ -316,16 +236,11 @@ export default function DashboardPage() {
           pending: 0,
         };
       }
-
-      const value = Number(transaction.value);
-
-      if (transaction.type === "Despesa") {
-        acc[cardName].realized += value;
-      }
-
-      if (transaction.type === "Receita") {
-        acc[cardName].realized -= value;
-      }
+      acc[cardName].realized = calculateCardRealizedValue(
+        previousCardTransactions.filter(
+          (item) => item.account_id === transaction.account_id
+        )
+      );
 
       return acc;
     }, {});
@@ -333,7 +248,7 @@ export default function DashboardPage() {
     return Object.values(grouped)
       .map((item) => ({
         ...item,
-        pending: item.planned - item.realized,
+        pending: calculateComparisonPending(item.planned, item.realized),
       }))
       .filter((item) => item.planned !== 0 || item.realized !== 0)
       .sort((a, b) => b.planned - a.planned);
@@ -359,9 +274,11 @@ export default function DashboardPage() {
           };
         }
 
-        const value = Number(transaction.value);
-
-        acc[categoryName].realized += value;
+        acc[categoryName].realized = calculateCategoryRealizedValue(
+          cashFlowTransactions.filter(
+            (item) => item.category_id === transaction.category_id
+          )
+        );
 
         return acc;
       }, {});
@@ -369,7 +286,7 @@ export default function DashboardPage() {
     return Object.values(grouped)
       .map((item) => ({
         ...item,
-        pending: item.planned - item.realized,
+        pending: calculateComparisonPending(item.planned, item.realized),
       }))
       .filter((item) => item.planned !== 0 || item.realized !== 0)
       .sort((a, b) => {
