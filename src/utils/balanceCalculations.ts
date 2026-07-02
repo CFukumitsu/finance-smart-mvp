@@ -36,9 +36,7 @@ export function calculateAccountCredits(
   accountId: string,
   transactions: BalanceTransaction[]
 ) {
-  return transactions
-    .filter((transaction) => !isLegacyOpeningBalance(transaction))
-    .reduce((sum, transaction) => {
+  return transactions.reduce((sum, transaction) => {
       const value = Math.abs(Number(transaction.value));
 
       if (
@@ -54,6 +52,14 @@ export function calculateAccountCredits(
       ) {
         return sum + value;
       }
+      
+      if (
+        transaction.account_id === accountId &&
+        transaction.type === "Transferência" &&
+        transaction.status === "Recebido"
+      ) {
+        return sum + value;
+      }
 
       return sum;
     }, 0);
@@ -63,9 +69,7 @@ export function calculateAccountDebits(
   accountId: string,
   transactions: BalanceTransaction[]
 ) {
-  return transactions
-    .filter((transaction) => !isLegacyOpeningBalance(transaction))
-    .reduce((sum, transaction) => {
+  return transactions.reduce((sum, transaction) => {
       const value = Math.abs(Number(transaction.value));
 
       if (
@@ -78,7 +82,8 @@ export function calculateAccountDebits(
 
       if (
         transaction.account_id === accountId &&
-        transaction.type === "Transferência"
+        transaction.type === "Transferência" &&
+        transaction.status !== "Recebido"
       ) {
         return sum + value;
       }

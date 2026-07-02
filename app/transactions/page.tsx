@@ -56,6 +56,12 @@ type Transaction = {
   destination_account_id?: string | null;
 };
 
+type AccountClosure = {
+  account_id: string;
+  competence_id: string;
+  closing_balance: number | null;
+};
+
 function TransactionsPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -79,10 +85,7 @@ function TransactionsPageContent() {
   const [listMode, setListMode] = useState<"competence" | "latest">("latest");
   const [showFilters, setShowFilters] = useState(false);
   const [plannedCardLimit, setPlannedCardLimit] = useState(0);
-
-  const [accountClosures, setAccountClosures] = useState<
-    { account_id: string; competence_id: string }[]
-  >([]);
+  const [accountClosures, setAccountClosures] = useState<AccountClosure[]>([]);
 
   const [cardStatements, setCardStatements] = useState<
     { account_id: string; competence_id: string }[]
@@ -402,7 +405,7 @@ function TransactionsPageContent() {
     setIsLoading(true);
 
     const [accountClosuresResponse, cardStatementsResponse] = await Promise.all([
-      supabase.from("account_closures").select("account_id, competence_id"),
+      supabase.from("account_closures").select("*"),
       supabase.from("credit_card_statements").select("account_id, competence_id"),
     ]);
 
@@ -831,6 +834,60 @@ function TransactionsPageContent() {
     (item) => item.id === competenceFilter
   );
 
+  function getCompetenceOrder(competence: Competence) {
+    return competence.year * 100 + competence.month;
+  }
+
+  function getClosureBalance(closure: AccountClosure) {
+    if (closure.closing_balance === null || closure.closing_balance === undefined) {
+      return null;
+    }
+  
+    return Number(closure.closing_balance);
+  }
+
+  function getAccountOpeningBalance(account: Account) {
+    if (!selectedCompetence) {
+      return Number(account.current_balance ?? 0);
+    }
+  
+    const selectedOrder = getCompetenceOrder(selectedCompetence);
+  
+    const previousClosures = accountClosures
+      .map((closure) => {
+        const closureCompetence = competences.find(
+          (competence) => competence.id === closure.competence_id
+        );
+  
+        return {
+          closure,
+          competence: closureCompetence,
+        };
+      })
+      .filter((item) => {
+        if (item.closure.account_id !== account.id) return false;
+        if (!item.competence) return false;
+  
+        return getCompetenceOrder(item.competence) < selectedOrder;
+      })
+      .sort((a, b) => {
+        if (!a.competence || !b.competence) return 0;
+  
+        return (
+          getCompetenceOrder(b.competence) -
+          getCompetenceOrder(a.competence)
+        );
+      });
+  
+    const previousClosure = previousClosures[0]?.closure;
+  
+    const previousBalance = previousClosure
+      ? getClosureBalance(previousClosure)
+      : null;
+  
+    return previousBalance ?? Number(account.current_balance ?? 0);
+  }
+
   function getCompetenceByDate(date: Date) {
     const month = date.getMonth() + 1;
     const year = date.getFullYear();
@@ -934,13 +991,57 @@ function TransactionsPageContent() {
     (transaction) => transaction.due_date > today
   );
 
-  const openingBalance = Number(selectedAccount?.current_balance ?? 0);
+  const openingBalance = selectedAccount
+  ? (() => {
+      const selectedCompetenceOrder = selectedCompetence
+        ? selectedCompetence.year * 100 + selectedCompetence.month
+        : 0;
+
+      const previousClosure = accountClosures
+        .map((closure) => {
+          const closureCompetence = competences.find(
+            (competence) => competence.id === closure.competence_id
+          );
+
+          return {
+            closure,
+            competence: closureCompetence,
+          };
+        })
+        .filter((item) => {
+          if (item.closure.account_id !== selectedAccount.id) return false;
+          if (!item.competence) return false;
+
+          const closureOrder = item.competence.year * 100 + item.competence.month;
+
+          return closureOrder < selectedCompetenceOrder;
+        })
+        .sort((a, b) => {
+          if (!a.competence || !b.competence) return 0;
+
+          const orderA = a.competence.year * 100 + a.competence.month;
+          const orderB = b.competence.year * 100 + b.competence.month;
+
+          return orderB - orderA;
+        })[0];
+
+      return Number(previousClosure?.closure.closing_balance ?? 0);
+    })()
+  : 0;
+
+  const selectedAccountTransactions = selectedAccount
+    ? transactions.filter(
+      (transaction) =>
+        transaction.account_id === selectedAccount.id ||
+        transaction.destination_account_id === selectedAccount.id
+    )
+    : [];
 
   const currentBalance = selectedAccount
     ? calculateAccountFinalBalance({
       accountId: selectedAccount.id,
       openingBalance,
-      transactions: filterTransactionsUntilDate(transactions, today),
+      transactions: filterTransactionsUntilDate(selectedAccountTransactions, today),
     })
     : 0;
 
