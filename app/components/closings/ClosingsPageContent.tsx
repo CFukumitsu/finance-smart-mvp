@@ -9,6 +9,11 @@ import {
 } from "@/src/services/closingService";
 import { supabase } from "@/src/lib/supabase";
 import type { CompetenceClosure } from "@/src/types/closing";
+import {
+  calculateAccountCredits,
+  calculateAccountDebits,
+  calculateAccountFinalBalance,
+} from "@/src/utils/balanceCalculations";
 
 type Account = {
   id: string;
@@ -18,8 +23,10 @@ type Account = {
 
 type Transaction = {
   account_id: string;
+  destination_account_id?: string | null;
   type: string;
   value: number;
+  description?: string | null;
 };
 
 type Competence = {
@@ -30,7 +37,9 @@ type Competence = {
 type AccountClosure = {
   id: string;
   account_id: string;
+  opening_balance: number | null;
   closing_balance: number | null;
+  status: string | null;
 };
 
 type CardStatement = {
@@ -38,6 +47,9 @@ type CardStatement = {
   account_id: string;
   statement_total: number | null;
   status: string | null;
+  payment_account_id?: string | null;
+  payment_due_date?: string | null;
+  payment_transaction_id?: string | null;
 };
 
 function formatCurrency(value: number) {
@@ -45,6 +57,21 @@ function formatCurrency(value: number) {
     style: "currency",
     currency: "BRL",
   }).format(value);
+}
+
+function formatInputCurrency(value: number | string) {
+  return Number(value || 0).toLocaleString("pt-BR", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
+
+function parseInputCurrency(value: string) {
+  return Number(
+    value
+      .replace(/\./g, "")
+      .replace(",", ".")
+  ) || 0;
 }
 
 function getCurrentCompetenceName() {
@@ -63,6 +90,18 @@ export default function ClosingsPageContent() {
     useState<CompetenceClosure | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isProcessingId, setIsProcessingId] = useState<string | null>(null);
+  const [accountBalanceInputs, setAccountBalanceInputs] = useState<
+    Record<string, { openingBalance: string; closingBalance: string }>
+  >({});
+  const [cardPaymentInputs, setCardPaymentInputs] = useState<
+    Record<
+      string,
+      {
+        paymentAccountId: string;
+        paymentDueDate: string;
+      }
+    >
+  >({});
 
   const selectedCompetence = useMemo(
     () => competences.find((competence) => competence.id === selectedCompetenceId),
@@ -118,18 +157,18 @@ export default function ClosingsPageContent() {
 
     const { data: accountClosuresData } = await supabase
       .from("account_closures")
-      .select("id, account_id, closing_balance")
+      .select("id, account_id, opening_balance, closing_balance, status")
       .eq("competence_id", resolvedCompetenceId)
       .eq("account_type", "Conta");
 
     const { data: cardStatementsData } = await supabase
       .from("credit_card_statements")
-      .select("id, account_id, statement_total, status")
+      .select("id, account_id, statement_total, status, payment_account_id, payment_due_date, payment_transaction_id")
       .eq("competence_id", resolvedCompetenceId);
 
     const { data: transactionsData, error: transactionsError } = await supabase
       .from("transactions")
-      .select("account_id, type, value")
+      .select("account_id, destination_account_id, type, value, description")
       .eq("competence_id", resolvedCompetenceId);
 
     if (transactionsError) {
@@ -142,6 +181,114 @@ export default function ClosingsPageContent() {
     setAccountClosures((accountClosuresData ?? []) as AccountClosure[]);
     setCardStatements((cardStatementsData ?? []) as CardStatement[]);
     setTransactions((transactionsData ?? []) as Transaction[]);
+    const nextAccountBalanceInputs: Record<
+      string,
+      { openingBalance: string; closingBalance: string }
+    > = {};
+
+    const currentCompetenceIndex = competenceList.findIndex(
+      (competence) => competence.id === resolvedCompetenceId
+    );
+
+    const previousCompetenceId =
+      currentCompetenceIndex >= 0
+        ? competenceList[currentCompetenceIndex + 1]?.id
+        : null;
+
+    let previousAccountClosuresData: AccountClosure[] = [];
+
+    if (previousCompetenceId) {
+      const { data: previousClosures } = await supabase
+        .from("account_closures")
+        .select("id, account_id, opening_balance, closing_balance, status")
+        .eq("competence_id", previousCompetenceId)
+        .eq("account_type", "Conta");
+
+      previousAccountClosuresData = (previousClosures ?? []) as AccountClosure[];
+    }
+
+    for (const account of accountsData ?? []) {
+      if (account.type !== "Conta") continue;
+
+      const existingClosure = (accountClosuresData ?? []).find(
+        (closure) => closure.account_id === account.id
+      );
+
+      const movement = ((transactionsData ?? []) as Transaction[])
+        .filter((transaction) => transaction.account_id === account.id)
+        .filter((transaction) => !isLegacyOpeningBalance(transaction))
+        .reduce((sum, transaction) => {
+          if (transaction.type === "Receita") {
+            return sum + Number(transaction.value);
+          }
+
+          if (
+            transaction.type === "Despesa" ||
+            transaction.type === "Pagamento de Fatura"
+          ) {
+            return sum - Number(transaction.value);
+          }
+
+          if (transaction.type === "Transferência") {
+            return sum + Number(transaction.value);
+          }
+
+          return sum;
+        }, 0);
+
+      const previousClosure = previousAccountClosuresData.find(
+        (closure) => closure.account_id === account.id
+      );
+
+      const openingBalance = Number(
+        existingClosure?.opening_balance ??
+        previousClosure?.closing_balance ??
+        0
+      );
+
+      const transactionsList = ((transactionsData ?? []) as Transaction[]);
+
+      const credits = calculateAccountCredits(account.id, transactionsList);
+      const debits = calculateAccountDebits(account.id, transactionsList);
+
+      const closingBalance = Number(
+        existingClosure?.closing_balance ??
+        calculateAccountFinalBalance({
+          accountId: account.id,
+          openingBalance,
+          transactions: transactionsList,
+        })
+      );
+
+      nextAccountBalanceInputs[account.id] = {
+        openingBalance: String(openingBalance),
+        closingBalance: String(closingBalance),
+      };
+    }
+
+    setAccountBalanceInputs(nextAccountBalanceInputs);
+    const nextCardPaymentInputs: Record<
+      string,
+      {
+        paymentAccountId: string;
+        paymentDueDate: string;
+      }
+    > = {};
+
+    for (const account of accountsData ?? []) {
+      if (account.type !== "Cartão") continue;
+
+      const statement = (cardStatementsData ?? []).find(
+        (statement) => statement.account_id === account.id
+      );
+
+      nextCardPaymentInputs[account.id] = {
+        paymentAccountId: statement?.payment_account_id ?? "",
+        paymentDueDate: statement?.payment_due_date ?? "",
+      };
+    }
+
+    setCardPaymentInputs(nextCardPaymentInputs);
     setCompetenceClosure(closure);
     setIsLoading(false);
   }
@@ -177,20 +324,46 @@ export default function ClosingsPageContent() {
   const canCloseCompetence = openAccountsCount === 0 && openCardsCount === 0;
   const isCompetenceClosed = competenceClosure?.status === "Fechada";
 
+  function getAccountOpeningBalance(accountId: string) {
+    return Number(accountBalanceInputs[accountId]?.openingBalance ?? 0);
+  }
+
+  function getAccountClosingBalance(accountId: string) {
+    return Number(accountBalanceInputs[accountId]?.closingBalance ?? 0);
+  }
+
+  function updateAccountBalanceInput(
+    accountId: string,
+    field: "openingBalance" | "closingBalance",
+    value: string
+  ) {
+    setAccountBalanceInputs((current) => ({
+      ...current,
+      [accountId]: {
+        openingBalance: current[accountId]?.openingBalance ?? "0",
+        closingBalance: current[accountId]?.closingBalance ?? "0",
+        [field]: value,
+      },
+    }));
+  }
+
   async function closeAccount(account: Account) {
     if (!selectedCompetenceId) return;
 
     setIsProcessingId(account.id);
 
     try {
+      const openingBalance = getAccountOpeningBalance(account.id);
+      const closingBalance = getAccountClosingBalance(account.id);
+
       const { error } = await supabase.from("account_closures").upsert(
         {
           competence_id: selectedCompetenceId,
           account_id: account.id,
           account_type: "Conta",
           status: "Fechada",
-          opening_balance: 0,
-          closing_balance: getAccountCurrentBalance(account.id),
+          opening_balance: openingBalance,
+          closing_balance: closingBalance,
           closed_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
         },
@@ -209,7 +382,159 @@ export default function ClosingsPageContent() {
       setIsProcessingId(null);
     }
   }
+  async function getOrCreateCompetenceByDate(date: string) {
+    const baseDate = new Date(date + "T00:00:00");
+    const month = baseDate.getMonth() + 1;
+    const year = baseDate.getFullYear();
+    const name = `${year}-${String(month).padStart(2, "0")}`;
 
+    const existingCompetence = competences.find(
+      (competence) => competence.name === name
+    );
+
+    if (existingCompetence) {
+      return existingCompetence.id;
+    }
+
+    const startDate = `${year}-${String(month).padStart(2, "0")}-01`;
+    const endDate = new Date(year, month, 0).toISOString().split("T")[0];
+
+    const { data, error } = await supabase
+      .from("competences")
+      .insert({
+        name,
+        month,
+        year,
+        start_date: startDate,
+        end_date: endDate,
+        closed: false,
+      })
+      .select("id, name")
+      .single();
+
+    if (error || !data) {
+      throw error ?? new Error("Erro ao criar competência do pagamento.");
+    }
+
+    setCompetences((current) => [data, ...current]);
+
+    return data.id;
+  }
+  async function closeCardStatement(account: Account) {
+    if (!selectedCompetenceId) return;
+
+    setIsProcessingId(account.id);
+
+    try {
+      const statementTotal = Math.abs(getAccountCurrentBalance(account.id));
+      const paymentAccountId =
+        cardPaymentInputs[account.id]?.paymentAccountId;
+
+      const paymentDueDate =
+        cardPaymentInputs[account.id]?.paymentDueDate;
+
+      const shouldCreatePayment =
+        paymentAccountId && paymentDueDate;
+
+      let paymentTransactionId = null;
+
+      if (shouldCreatePayment) {
+        const paymentCompetenceId =
+          await getOrCreateCompetenceByDate(paymentDueDate);
+
+        const paymentDescription = `Pagamento fatura ${account.name}`;
+
+        const { data: existingPayment } = await supabase
+          .from("transactions")
+          .select("id")
+          .eq("type", "Pagamento de Fatura")
+          .eq("competence_id", paymentCompetenceId)
+          .eq("account_id", paymentAccountId)
+          .eq("description", paymentDescription)
+          .maybeSingle();
+
+        if (existingPayment?.id) {
+          paymentTransactionId = existingPayment.id;
+        } else {
+
+          const { data: payment } = await supabase
+            .from("transactions")
+            .insert({
+              description: paymentDescription,
+              due_date: paymentDueDate,
+              value: statementTotal,
+              type: "Pagamento de Fatura",
+              status: "Pendente",
+              mode: "unico",
+              account_id: paymentAccountId,
+              competence_id: paymentCompetenceId,
+            })
+            .select("id")
+            .single();
+
+          paymentTransactionId = payment?.id ?? null;
+        }
+      }
+
+      const { error } = await supabase.from("credit_card_statements").upsert(
+        {
+          account_id: account.id,
+          competence_id: selectedCompetenceId,
+          statement_total: statementTotal,
+
+          payment_account_id: shouldCreatePayment
+            ? paymentAccountId
+            : null,
+
+          payment_due_date: shouldCreatePayment
+            ? paymentDueDate
+            : null,
+
+          payment_transaction_id: paymentTransactionId,
+
+          status: "Fechada",
+          closed_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        },
+        {
+          onConflict: "account_id,competence_id",
+        }
+      );
+
+      if (error) throw error;
+
+      await loadData(selectedCompetenceId);
+    } catch (error) {
+      console.error(error);
+      alert("Erro ao fechar fatura.");
+    } finally {
+      setIsProcessingId(null);
+    }
+  }
+
+  async function reopenCardStatement(statementId: string) {
+    if (!selectedCompetenceId) return;
+
+    if (!confirm("Deseja reabrir esta fatura?")) return;
+
+    setIsProcessingId(statementId);
+
+    try {
+      const { error } = await supabase
+        .from("credit_card_statements")
+        .delete()
+        .eq("id", statementId);
+
+      if (error) throw error;
+
+      await loadData(selectedCompetenceId);
+    } catch (error) {
+      console.error(error);
+      alert("Erro ao reabrir fatura.");
+    } finally {
+      setIsProcessingId(null);
+    }
+  }
   async function reopenAccount(accountId: string) {
     if (!selectedCompetenceId) return;
 
@@ -289,23 +614,34 @@ export default function ClosingsPageContent() {
     }
   }
 
+  function isLegacyOpeningBalance(transaction: Transaction) {
+    const description = String(transaction.description ?? "")
+      .trim()
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "");
+
+    return description === "saldo anterior";
+  }
+
+  function getAccountCredits(accountId: string) {
+    return calculateAccountCredits(accountId, transactions);
+  }
+  
+  function getAccountDebits(accountId: string) {
+    return calculateAccountDebits(accountId, transactions);
+  }
+  
+  function getAccountFinalBalance(accountId: string) {
+    return calculateAccountFinalBalance({
+      accountId,
+      openingBalance: getAccountOpeningBalance(accountId),
+      transactions,
+    });
+  }
+
   function getAccountCurrentBalance(accountId: string) {
-    return transactions
-      .filter((transaction) => transaction.account_id === accountId)
-      .reduce((sum, transaction) => {
-        if (transaction.type === "Receita") {
-          return sum + Number(transaction.value);
-        }
-  
-        if (
-          transaction.type === "Despesa" ||
-          transaction.type === "Pagamento de Fatura"
-        ) {
-          return sum - Number(transaction.value);
-        }
-  
-        return sum;
-      }, 0);
+    return getAccountCredits(accountId) - getAccountDebits(accountId);
   }
 
   return (
@@ -366,10 +702,10 @@ export default function ClosingsPageContent() {
 
         <div
           className={`rounded-2xl border p-5 ${isCompetenceClosed
-              ? "border-emerald-400/20 bg-emerald-400/10"
-              : canCloseCompetence
-                ? "border-blue-400/20 bg-blue-400/10"
-                : "border-yellow-400/20 bg-yellow-400/10"
+            ? "border-emerald-400/20 bg-emerald-400/10"
+            : canCloseCompetence
+              ? "border-blue-400/20 bg-blue-400/10"
+              : "border-yellow-400/20 bg-yellow-400/10"
             }`}
         >
           <p className="text-sm text-slate-300">Status</p>
@@ -395,44 +731,114 @@ export default function ClosingsPageContent() {
             return (
               <div
                 key={account.id}
-                className="flex items-center justify-between rounded-xl border border-white/10 bg-white/[0.03] p-4"
+                className="rounded-xl border border-white/10 bg-white/[0.03] p-4"
               >
-                <div>
-                  <p className="font-semibold text-white">{account.name}</p>
-                  <p className="text-sm text-slate-400">
-                  Saldo atual: {formatCurrency(getAccountCurrentBalance(account.id))}
-                  </p>
-                </div>
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                  <div className="w-full">
+                    <div className="mb-3 flex items-center gap-3">
+                      <p className="font-semibold text-white">{account.name}</p>
 
-                <div className="flex items-center gap-3">
-                  <span
-                    className={`rounded-full px-3 py-1 text-xs font-semibold ${isClosed
-                        ? "bg-emerald-500/10 text-emerald-300"
-                        : "bg-yellow-500/10 text-yellow-300"
-                      }`}
-                  >
-                    {isClosed ? "Fechada" : "Aberta"}
-                  </span>
+                      <span
+                        className={`rounded-full px-3 py-1 text-xs font-semibold ${isClosed
+                          ? "bg-emerald-500/10 text-emerald-300"
+                          : "bg-yellow-500/10 text-yellow-300"
+                          }`}
+                      >
+                        {isClosed ? "Fechada" : "Aberta"}
+                      </span>
+                    </div>
 
-                  {isClosed ? (
-                    <button
-                      type="button"
-                      disabled={isProcessing || isCompetenceClosed}
-                      onClick={() => reopenAccount(account.id)}
-                      className="rounded-xl border border-white/10 px-4 py-2 text-xs font-semibold text-slate-200 hover:bg-white/10 disabled:opacity-50"
-                    >
-                      Reabrir
-                    </button>
-                  ) : (
-                    <button
-                      type="button"
-                      disabled={isProcessing || isCompetenceClosed}
-                      onClick={() => closeAccount(account)}
-                      className="rounded-xl bg-emerald-500 px-4 py-2 text-xs font-bold text-slate-950 hover:bg-emerald-400 disabled:opacity-50"
-                    >
-                      {isProcessing ? "Fechando..." : "Fechar"}
-                    </button>
-                  )}
+                    <div className="grid gap-3 md:grid-cols-4">
+                      <label className="text-xs text-slate-400">
+                        Saldo inicial
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          disabled={isClosed || isCompetenceClosed}
+                          value={formatInputCurrency(
+                            accountBalanceInputs[account.id]?.openingBalance ?? 0
+                          )}
+                          onChange={(event) => {
+                            const openingBalance = parseInputCurrency(event.target.value);
+                            const finalBalance =
+                              openingBalance +
+                              getAccountCredits(account.id) -
+                              getAccountDebits(account.id);
+
+                            updateAccountBalanceInput(
+                              account.id,
+                              "openingBalance",
+                              String(openingBalance)
+                            );
+
+                            updateAccountBalanceInput(
+                              account.id,
+                              "closingBalance",
+                              String(finalBalance)
+                            );
+                          }}
+                          className="mt-1 w-full rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-sm text-white outline-none focus:border-emerald-400 disabled:opacity-60"
+                        />
+                      </label>
+
+                      <div className="text-xs text-slate-400">
+                        Créditos
+                        <p className="mt-3 text-sm font-semibold text-emerald-300">
+                          {formatCurrency(getAccountCredits(account.id))}
+                        </p>
+                      </div>
+
+                      <div className="text-xs text-slate-400">
+                        Débitos
+                        <p className="mt-3 text-sm font-semibold text-red-300">
+                          {formatCurrency(getAccountDebits(account.id))}
+                        </p>
+                      </div>
+
+                      <label className="text-xs text-slate-400">
+                        Saldo final
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          disabled={isClosed || isCompetenceClosed}
+                          value={formatInputCurrency(
+                            accountBalanceInputs[account.id]?.closingBalance ??
+                            getAccountFinalBalance(account.id)
+                          )}
+                          onChange={(event) =>
+                            updateAccountBalanceInput(
+                              account.id,
+                              "closingBalance",
+                              String(parseInputCurrency(event.target.value))
+                            )
+                          }
+                          className="mt-1 w-full rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-sm text-white outline-none focus:border-emerald-400 disabled:opacity-60"
+                        />
+                      </label>
+                    </div>
+                  </div>
+
+                  <div className="flex justify-end lg:min-w-[96px]">
+                    {isClosed ? (
+                      <button
+                        type="button"
+                        disabled={isProcessing || isCompetenceClosed}
+                        onClick={() => reopenAccount(account.id)}
+                        className="rounded-xl border border-white/10 px-4 py-2 text-xs font-semibold text-slate-200 hover:bg-white/10 disabled:opacity-50"
+                      >
+                        Reabrir
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        disabled={isProcessing || isCompetenceClosed}
+                        onClick={() => closeAccount(account)}
+                        className="rounded-xl bg-emerald-500 px-4 py-2 text-xs font-bold text-slate-950 hover:bg-emerald-400 disabled:opacity-50"
+                      >
+                        {isProcessing ? "Fechando..." : "Fechar"}
+                      </button>
+                    )}
+                  </div>
                 </div>
               </div>
             );
@@ -447,29 +853,128 @@ export default function ClosingsPageContent() {
           {cardAccounts.map((account) => {
             const statement = getCardStatement(account.id);
             const isClosed = !!statement;
+            const isProcessing =
+              isProcessingId === account.id || isProcessingId === statement?.id;
+
+            const statementTotal = isClosed
+              ? Number(statement.statement_total ?? 0)
+              : Math.abs(getAccountCurrentBalance(account.id));
+
+            const hasPaymentData =
+              Boolean(cardPaymentInputs[account.id]?.paymentAccountId) &&
+              Boolean(cardPaymentInputs[account.id]?.paymentDueDate);
 
             return (
               <div
                 key={account.id}
-                className="flex items-center justify-between rounded-xl border border-white/10 bg-white/[0.03] p-4"
+                className="rounded-xl border border-white/10 bg-white/[0.03] p-4"
               >
-                <div>
-                  <p className="font-semibold text-white">{account.name}</p>
-                  <p className="text-sm text-slate-400">
-                    {isClosed
-                      ? `Fatura: ${formatCurrency(Number(statement.statement_total ?? 0))}`
-                      : "Fatura ainda não fechada"}
-                  </p>
-                </div>
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                  <div className="w-full">
+                    <div className="mb-3 flex items-center gap-3">
+                      <p className="font-semibold text-white">{account.name}</p>
 
-                <span
-                  className={`rounded-full px-3 py-1 text-xs font-semibold ${isClosed
-                      ? "bg-emerald-500/10 text-emerald-300"
-                      : "bg-yellow-500/10 text-yellow-300"
-                    }`}
-                >
-                  {isClosed ? "Fechada" : "Aberta"}
-                </span>
+                      <span
+                        className={`rounded-full px-3 py-1 text-xs font-semibold ${isClosed
+                          ? "bg-emerald-500/10 text-emerald-300"
+                          : "bg-yellow-500/10 text-yellow-300"
+                          }`}
+                      >
+                        {isClosed ? "Fechada" : "Aberta"}
+                      </span>
+                    </div>
+
+                    <div className="grid gap-3 md:grid-cols-4">
+                      <div className="text-xs text-slate-400">
+                        {isClosed ? "Fatura fechada" : "Fatura calculada"}
+                        <p className="mt-3 text-sm font-semibold text-slate-200">
+                          {formatCurrency(statementTotal)}
+                        </p>
+                      </div>
+
+                      <label className="text-xs text-slate-400">
+                        Conta de pagamento opcional
+                        <select
+                          disabled={isClosed || isCompetenceClosed}
+                          value={cardPaymentInputs[account.id]?.paymentAccountId ?? ""}
+                          onChange={(event) =>
+                            setCardPaymentInputs((current) => ({
+                              ...current,
+                              [account.id]: {
+                                paymentAccountId: event.target.value,
+                                paymentDueDate:
+                                  current[account.id]?.paymentDueDate ?? "",
+                              },
+                            }))
+                          }
+                          className="mt-1 w-full rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-sm text-white outline-none focus:border-emerald-400 disabled:opacity-60"
+                        >
+                          <option value="">Não lançar pagamento</option>
+                          {cashAccounts.map((cashAccount) => (
+                            <option key={cashAccount.id} value={cashAccount.id}>
+                              {cashAccount.name}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+
+                      <label className="text-xs text-slate-400">
+                        Data de pagamento opcional
+                        <input
+                          type="date"
+                          disabled={isClosed || isCompetenceClosed}
+                          value={cardPaymentInputs[account.id]?.paymentDueDate ?? ""}
+                          onChange={(event) =>
+                            setCardPaymentInputs((current) => ({
+                              ...current,
+                              [account.id]: {
+                                paymentAccountId:
+                                  current[account.id]?.paymentAccountId ?? "",
+                                paymentDueDate: event.target.value,
+                              },
+                            }))
+                          }
+                          className="mt-1 w-full rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-sm text-white outline-none focus:border-emerald-400 disabled:opacity-60"
+                        />
+                      </label>
+
+                      <div className="text-xs text-slate-400">
+                        Ação do fechamento
+                        <p className="mt-3 text-sm font-semibold text-slate-200">
+                          {hasPaymentData
+                            ? "Fecha e lança pagamento"
+                            : "Fecha sem pagamento"}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex justify-end lg:min-w-[128px]">
+                    {isClosed && statement ? (
+                      <button
+                        type="button"
+                        disabled={isProcessing || isCompetenceClosed}
+                        onClick={() => reopenCardStatement(statement.id)}
+                        className="rounded-xl border border-white/10 px-4 py-2 text-xs font-semibold text-slate-200 hover:bg-white/10 disabled:opacity-50"
+                      >
+                        Reabrir
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        disabled={isProcessing || isCompetenceClosed}
+                        onClick={() => closeCardStatement(account)}
+                        className="rounded-xl bg-emerald-500 px-4 py-2 text-xs font-bold text-slate-950 hover:bg-emerald-400 disabled:opacity-50"
+                      >
+                        {isProcessing
+                          ? "Fechando..."
+                          : hasPaymentData
+                            ? "Fechar e lançar"
+                            : "Fechar fatura"}
+                      </button>
+                    )}
+                  </div>
+                </div>
               </div>
             );
           })}

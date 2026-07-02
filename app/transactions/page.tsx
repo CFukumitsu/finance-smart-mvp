@@ -6,7 +6,12 @@ import { useRouter, useSearchParams } from "next/navigation";
 import AppShell from "../components/layout/AppShell";
 import { supabase } from "@/src/lib/supabase";
 import { deleteTransaction as deleteTransactionService } from "@/src/services/transactionService";
-import { ensureCompetenceIsOpen } from "@/src/utils/competenceLock";
+import { ensureAccountIsOpen } from "@/src/utils/accountLock";
+import {
+  calculateAccountFinalBalance,
+  calculateAccountMovement,
+  filterTransactionsUntilDate,
+} from "@/src/utils/balanceCalculations";
 
 type Account = {
   id: string;
@@ -74,6 +79,14 @@ function TransactionsPageContent() {
   const [listMode, setListMode] = useState<"competence" | "latest">("latest");
   const [showFilters, setShowFilters] = useState(false);
   const [plannedCardLimit, setPlannedCardLimit] = useState(0);
+
+  const [accountClosures, setAccountClosures] = useState<
+    { account_id: string; competence_id: string }[]
+  >([]);
+
+  const [cardStatements, setCardStatements] = useState<
+    { account_id: string; competence_id: string }[]
+  >([]);
 
   const transactionDefaultsKey = "finance-smart-transaction-defaults";
 
@@ -156,7 +169,25 @@ function TransactionsPageContent() {
   }
 
   function isTransactionLocked(transaction: Transaction) {
-    return closedCompetenceIds.includes(transaction.competence_id);
+    const account = accounts.find((item) => item.id === transaction.account_id);
+
+    if (account?.type === "Conta") {
+      return accountClosures.some(
+        (closure) =>
+          closure.account_id === transaction.account_id &&
+          closure.competence_id === transaction.competence_id
+      );
+    }
+
+    if (account?.type === "Cartão") {
+      return cardStatements.some(
+        (statement) =>
+          statement.account_id === transaction.account_id &&
+          statement.competence_id === transaction.competence_id
+      );
+    }
+
+    return false;
   }
 
   function onlyDigits(value: string) {
@@ -370,6 +401,14 @@ function TransactionsPageContent() {
   async function loadReferenceData() {
     setIsLoading(true);
 
+    const [accountClosuresResponse, cardStatementsResponse] = await Promise.all([
+      supabase.from("account_closures").select("account_id, competence_id"),
+      supabase.from("credit_card_statements").select("account_id, competence_id"),
+    ]);
+
+    setAccountClosures(accountClosuresResponse.data ?? []);
+    setCardStatements(cardStatementsResponse.data ?? []);
+
     const [accountsResponse, categoriesResponse, competencesResponse] =
       await Promise.all([
         supabase
@@ -494,6 +533,12 @@ function TransactionsPageContent() {
   }
 
   function openEditDrawer(transaction: Transaction) {
+
+    if (isTransactionLocked(transaction)) {
+      alert("Esta conta/cartão já está fechado nesta competência.");
+      return;
+    }
+
     setEditingTransactionId(transaction.id);
 
     setForm({
@@ -590,7 +635,15 @@ function TransactionsPageContent() {
         ];
 
         for (const transaction of transferTransactions) {
-          const lock = await ensureCompetenceIsOpen(transaction.competence_id);
+          if (!transaction.account_id) {
+            alert("Conta/cartão inválido para validar fechamento.");
+            return;
+          }
+
+          const lock = await ensureAccountIsOpen({
+            accountId: transaction.account_id,
+            competenceId: transaction.competence_id,
+          });
 
           if (!lock.allowed) {
             alert(lock.message);
@@ -669,7 +722,7 @@ function TransactionsPageContent() {
           type: form.type,
           mode: form.mode,
           status: form.status,
-          account_id: form.account_id || null,
+          account_id: form.account_id,
           category_id:
             form.type === "Transferência" || form.type === "Pagamento de Fatura"
               ? null
@@ -686,7 +739,15 @@ function TransactionsPageContent() {
         }];
 
       for (const transaction of transactionsToSave) {
-        const lock = await ensureCompetenceIsOpen(transaction.competence_id);
+        if (!transaction.account_id) {
+          alert("Conta/cartão inválido para validar fechamento.");
+          return;
+        }
+
+        const lock = await ensureAccountIsOpen({
+          accountId: transaction.account_id,
+          competenceId: transaction.competence_id,
+        });
 
         if (!lock.allowed) {
           alert(lock.message);
@@ -727,15 +788,20 @@ function TransactionsPageContent() {
     }
   }
 
-  async function handleDeleteTransaction(transactionId: string) {
+  async function handleDeleteTransaction(transaction: Transaction) {
     const confirmed = window.confirm(
       "Tem certeza que deseja excluir este lançamento?"
     );
 
+    if (isTransactionLocked(transaction)) {
+      alert("Esta conta/cartão já está fechado nesta competência.");
+      return;
+    }
+
     if (!confirmed) return;
 
     try {
-      const result = await deleteTransactionService(transactionId);
+      const result = await deleteTransactionService(transaction.id);
 
       if (!result.success) {
         alert(result.message ?? "Erro ao excluir lançamento.");
@@ -868,39 +934,27 @@ function TransactionsPageContent() {
     (transaction) => transaction.due_date > today
   );
 
-  function calculateBalance(list: Transaction[]) {
-    return list.reduce((sum, transaction) => {
-      if (transaction.type === "Receita") {
-        return sum + Number(transaction.value);
-      }
+  const openingBalance = Number(selectedAccount?.current_balance ?? 0);
 
-      if (transaction.type === "Despesa") {
-        return sum - Number(transaction.value);
-      }
+  const currentBalance = selectedAccount
+    ? calculateAccountFinalBalance({
+      accountId: selectedAccount.id,
+      openingBalance,
+      transactions: filterTransactionsUntilDate(transactions, today),
+    })
+    : 0;
 
-      if (transaction.type === "Transferência" && selectedAccount) {
-        if (transaction.origin_account_id === selectedAccount.id) {
-          return sum - Number(transaction.value);
-        }
+  const estimatedBalance = selectedAccount
+    ? calculateAccountFinalBalance({
+      accountId: selectedAccount.id,
+      openingBalance,
+      transactions,
+    })
+    : 0;
 
-        if (transaction.destination_account_id === selectedAccount.id) {
-          return sum + Number(transaction.value);
-        }
-
-        return sum;
-      }
-
-      if (transaction.type === "Pagamento de Fatura") {
-        return sum - Number(transaction.value);
-      }
-
-      return sum;
-    }, 0);
-  }
-
-  const currentBalance = calculateBalance(currentTransactions);
-  const estimatedBalance = calculateBalance(transactions);
-  const futureBalance = calculateBalance(futureTransactions);
+  const futureBalance = selectedAccount
+    ? calculateAccountMovement(selectedAccount.id, futureTransactions)
+    : 0;
 
   const totalIncome = transactions
     .filter((transaction) => transaction.type === "Receita")
@@ -1321,7 +1375,7 @@ function TransactionsPageContent() {
                           </button>
 
                           <button
-                            onClick={() => handleDeleteTransaction(transaction.id)}
+                            onClick={() => handleDeleteTransaction(transaction)}
                             title="Excluir"
                             className="rounded-lg p-2 text-red-400 hover:bg-red-500/10 hover:text-red-300"
                           >
@@ -1370,7 +1424,7 @@ function TransactionsPageContent() {
                 value={form.due_date}
                 onChange={(event) => {
                   const newDate = event.target.value;
-                
+
                   setForm({
                     ...form,
                     due_date: newDate,
@@ -1450,7 +1504,7 @@ function TransactionsPageContent() {
                 value={form.type}
                 onChange={(event) => {
                   const newType = event.target.value;
-                
+
                   setForm({
                     ...form,
                     type: newType,
