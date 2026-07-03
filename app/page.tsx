@@ -66,6 +66,7 @@ type FinancialTarget = {
   target_type: "account" | "category";
   target_id: string;
   planned_value: number;
+  competence_id: string;
 };
 
 export default function DashboardPage() {
@@ -74,9 +75,19 @@ export default function DashboardPage() {
   );
   const [isLoading, setIsLoading] = useState(false);
   const [cashFlowTransactions, setCashFlowTransactions] = useState<Transaction[]>([]);
+  const [referenceTransactions, setReferenceTransactions] = useState<Transaction[]>([]);
+  const [cashFlowCompetence, setCashFlowCompetence] = useState<Competence | null>(null);
   const [previousCardTransactions, setPreviousCardTransactions] = useState<Transaction[]>([]);
   const [accountTargets, setAccountTargets] = useState<Record<string, number>>({});
   const [categoryTargets, setCategoryTargets] = useState<Record<string, number>>({});
+
+  function getNextMonth(month: number, year: number) {
+    if (month === 12) {
+      return { month: 1, year: year + 1 };
+    }
+
+    return { month: month + 1, year };
+  }
 
   function getPreviousMonth(month: number, year: number) {
     if (month === 1) {
@@ -109,10 +120,33 @@ export default function DashboardPage() {
 
     setCurrentCompetence(competenceData as Competence);
 
+    const cashFlowMonth = getNextMonth(currentMonth, currentYear);
+
+    const { data: cashFlowCompetenceData, error: cashFlowCompetenceError } =
+      await supabase
+        .from("competences")
+        .select("id, name, month, year, status")
+        .eq("month", cashFlowMonth.month)
+        .eq("year", cashFlowMonth.year)
+        .single();
+
+    if (cashFlowCompetenceError || !cashFlowCompetenceData) {
+      console.error(
+        "Erro ao carregar competência de fluxo de caixa:",
+        cashFlowCompetenceError
+      );
+      setCashFlowTransactions([]);
+      setPreviousCardTransactions([]);
+      setAccountTargets({});
+      setCategoryTargets({});
+      setIsLoading(false);
+      return;
+    }
+
     const { data: targetData, error: targetError } = await supabase
       .from("financial_targets")
-      .select("target_type, target_id, planned_value")
-      .eq("competence_id", competenceData.id)
+      .select("target_type, target_id, planned_value, competence_id")
+      .in("competence_id", [competenceData.id, cashFlowCompetenceData.id])
       .in("target_type", ["account", "category"]);
 
     if (targetError) {
@@ -123,14 +157,22 @@ export default function DashboardPage() {
       const targets = (targetData ?? []) as FinancialTarget[];
 
       const accountTargetMap = targets
-        .filter((target) => target.target_type === "account")
+        .filter(
+          (target) =>
+            target.target_type === "account" &&
+            target.competence_id === competenceData.id
+        )
         .reduce<Record<string, number>>((acc, target) => {
           acc[target.target_id] = Number(target.planned_value ?? 0);
           return acc;
         }, {});
 
       const categoryTargetMap = targets
-        .filter((target) => target.target_type === "category")
+        .filter(
+          (target) =>
+            target.target_type === "category" &&
+            target.competence_id === competenceData.id
+        )
         .reduce<Record<string, number>>((acc, target) => {
           acc[target.target_id] = Number(target.planned_value ?? 0);
           return acc;
@@ -139,15 +181,6 @@ export default function DashboardPage() {
       setAccountTargets(accountTargetMap);
       setCategoryTargets(categoryTargetMap);
     }
-
-    const previousMonth = getPreviousMonth(currentMonth, currentYear);
-
-    const { data: previousCompetenceData } = await supabase
-      .from("competences")
-      .select("id, name, month, year, status")
-      .eq("month", previousMonth.month)
-      .eq("year", previousMonth.year)
-      .single();
 
     const { data: cashFlowData, error: cashFlowError } = await supabase
       .from("transactions")
@@ -164,7 +197,9 @@ export default function DashboardPage() {
     category:categories!transactions_category_id_fkey(name, monthly_limit, monthly_goal, show_on_dashboard, dashboard_order, active),
     competence:competences!transactions_competence_id_fkey(name)
   `)
-      .eq("competence_id", competenceData.id);
+      .eq("competence_id", cashFlowCompetenceData.id);
+
+    setCashFlowCompetence(cashFlowCompetenceData as Competence);
 
     if (cashFlowError) {
       console.error("Erro ao carregar fluxo de caixa:", cashFlowError);
@@ -172,11 +207,9 @@ export default function DashboardPage() {
     } else {
       setCashFlowTransactions((cashFlowData ?? []) as unknown as Transaction[]);
     }
-
-    if (previousCompetenceData) {
-      const { data: previousCardData, error: previousCardError } = await supabase
-        .from("transactions")
-        .select(`
+    const { data: referenceCardData, error: referenceCardError } = await supabase
+      .from("transactions")
+      .select(`
       id,
       description,
       due_date,
@@ -189,22 +222,23 @@ export default function DashboardPage() {
       category:categories!transactions_category_id_fkey(name, monthly_limit, monthly_goal, show_on_dashboard, dashboard_order, active),
       competence:competences!transactions_competence_id_fkey(name)
     `)
-        .eq("competence_id", previousCompetenceData.id);
+      .eq("competence_id", competenceData.id);
 
-      if (previousCardError) {
-        console.error("Erro ao carregar faturas do mês anterior:", previousCardError);
-        setPreviousCardTransactions([]);
-      } else {
-        setPreviousCardTransactions(
-          ((previousCardData ?? []) as unknown as Transaction[]).filter(
-            (transaction) => transaction.account?.type === "Cartão"
-          )
-        );
-      }
-    } else {
+    if (referenceCardError) {
+      console.error("Erro ao carregar faturas da competência de referência:", referenceCardError);
       setPreviousCardTransactions([]);
-    }
+    } else {
+      const referenceTransactionsData =
+        (referenceCardData ?? []) as unknown as Transaction[];
 
+      setReferenceTransactions(referenceTransactionsData);
+
+      setPreviousCardTransactions(
+        referenceTransactionsData.filter(
+          (transaction) => transaction.account?.type === "Cartão"
+        )
+      );
+    }
     setIsLoading(false);
   }
 
@@ -216,10 +250,18 @@ export default function DashboardPage() {
 
     initDashboard();
   }, []);
-  
+
+  const cashFlowAccountTransactions = useMemo(
+    () =>
+      cashFlowTransactions.filter(
+        (transaction) => transaction.account?.type !== "Cartão"
+      ),
+    [cashFlowTransactions]
+  );
+
   const cashFlowTotals = useMemo(
-    () => calculateCashFlowTotals(cashFlowTransactions, previousCardTransactions),
-    [cashFlowTransactions, previousCardTransactions]
+    () => calculateCashFlowTotals(cashFlowAccountTransactions, previousCardTransactions),
+    [cashFlowAccountTransactions, previousCardTransactions]
   );
 
   const cardComparisonData = useMemo<ComparisonItem[]>(() => {
@@ -255,7 +297,7 @@ export default function DashboardPage() {
   }, [previousCardTransactions, accountTargets]);
 
   const categoryComparisonData = useMemo<ComparisonItem[]>(() => {
-    const grouped = cashFlowTransactions
+    const grouped = referenceTransactions
       .filter(
         (transaction) =>
           transaction.type === "Despesa" &&
@@ -275,7 +317,7 @@ export default function DashboardPage() {
         }
 
         acc[categoryName].realized = calculateCategoryRealizedValue(
-          cashFlowTransactions.filter(
+          referenceTransactions.filter(
             (item) => item.category_id === transaction.category_id
           )
         );
@@ -290,11 +332,11 @@ export default function DashboardPage() {
       }))
       .filter((item) => item.planned !== 0 || item.realized !== 0)
       .sort((a, b) => {
-        const categoryA = cashFlowTransactions.find(
+        const categoryA = referenceTransactions.find(
           (transaction) => transaction.category?.name === a.name
         )?.category;
-
-        const categoryB = cashFlowTransactions.find(
+        
+        const categoryB = referenceTransactions.find(
           (transaction) => transaction.category?.name === b.name
         )?.category;
 
@@ -307,7 +349,7 @@ export default function DashboardPage() {
 
         return b.planned - a.planned;
       });
-  }, [cashFlowTransactions, categoryTargets]);
+  }, [referenceTransactions, categoryTargets]);
 
 
   function goToPreviousCompetence() {
@@ -339,6 +381,22 @@ export default function DashboardPage() {
     });
   }
 
+  const referenceMonthName = currentCompetence
+    ? new Date(currentCompetence.year, currentCompetence.month - 1, 1)
+      .toLocaleDateString("pt-BR", { month: "long" })
+    : "";
+
+  const cashFlowMonthName = cashFlowCompetence
+    ? new Date(cashFlowCompetence.year, cashFlowCompetence.month - 1, 1)
+      .toLocaleDateString("pt-BR", { month: "long" })
+    : "";
+
+  const formattedReferenceMonth =
+    referenceMonthName.charAt(0).toUpperCase() + referenceMonthName.slice(1);
+
+  const formattedCashFlowMonth =
+    cashFlowMonthName.charAt(0).toUpperCase() + cashFlowMonthName.slice(1);
+
   return (
     <AppShell>
       <div className="space-y-8">
@@ -346,8 +404,8 @@ export default function DashboardPage() {
           <div>
             <h1 className="text-3xl font-bold text-white">Dashboard</h1>
             <p className="mt-1 text-sm text-slate-400">
-              Visão executiva do fluxo de caixa por competência.
-              {currentCompetence ? `: ${currentCompetence.name}` : "."}
+              Projeção do fluxo do mês seguinte com cartões da competência selecionada.
+              {currentCompetence ? ` Referência: ${currentCompetence.name}` : "."}
             </p>
           </div>
 
@@ -383,21 +441,21 @@ export default function DashboardPage() {
 
         <div className="grid gap-4 md:grid-cols-4">
           <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-5">
-            <p className="text-sm text-slate-400">Entradas previstas</p>
+            <p className="text-sm text-slate-400">{`Entradas Previstas ${formattedCashFlowMonth}`}</p>
             <p className="mt-2 text-2xl font-bold text-emerald-300">
               {formatCurrency(cashFlowTotals.income)}
             </p>
           </div>
 
           <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-5">
-            <p className="text-sm text-slate-400">Despesas da competência</p>
+            <p className="text-sm text-slate-400">{`Despesas ${formattedCashFlowMonth}`}</p>
             <p className="mt-2 text-2xl font-bold text-red-300">
               {formatCurrency(cashFlowTotals.accountExpenses)}
             </p>
           </div>
 
           <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-5">
-            <p className="text-sm text-slate-400">Faturas do mês anterior</p>
+            <p className="text-sm text-slate-400">{`Cartões de Crédito ${formattedReferenceMonth}`}</p>
             <p className="mt-2 text-2xl font-bold text-orange-300">
               {formatCurrency(cashFlowTotals.creditCardInvoices)}
             </p>
@@ -419,7 +477,7 @@ export default function DashboardPage() {
         <div className="grid gap-6 xl:grid-cols-2">
           <ComparisonBarChart
             title="Previsto x Realizado por Cartão"
-            description="Faturas do mês anterior que impactam o fluxo de caixa."
+            description="Competência atual."
             data={cardComparisonData}
             formatCurrency={formatCurrency}
             emptyMessage="Nenhuma fatura encontrada."
@@ -427,7 +485,7 @@ export default function DashboardPage() {
 
           <ComparisonBarChart
             title="Previsto x Realizado por Categoria"
-            description="Despesas da competência atual."
+            description="Competência atual."
             data={categoryComparisonData}
             formatCurrency={formatCurrency}
             emptyMessage="Nenhuma categoria encontrada."
@@ -548,6 +606,11 @@ function ComparisonBarChart({
             <div className="flex items-center gap-2">
               <div className="h-3 w-3 rounded-full bg-emerald-500" />
               <span className="text-slate-300">Dentro do previsto</span>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <div className="h-3 w-3 rounded-full bg-yellow-400" />
+              <span className="text-slate-300">Atenção: acima de 80% do previsto</span>
             </div>
 
             <div className="flex items-center gap-2">
