@@ -29,6 +29,30 @@ export async function deleteTransaction(id: string): Promise<ServiceResult> {
     };
   }
 
+  const { error: legacyReconciliationError } = await supabase
+    .from("transaction_reconciliations")
+    .delete()
+    .eq("transaction_id", id);
+
+  if (legacyReconciliationError) {
+    return {
+      success: false,
+      message: "Erro ao excluir conciliação antiga vinculada ao lançamento.",
+    };
+  }
+
+  const { error: statementReconciliationError } = await supabase
+    .from("credit_card_statement_item_transactions")
+    .delete()
+    .eq("transaction_id", id);
+
+  if (statementReconciliationError) {
+    return {
+      success: false,
+      message: "Erro ao excluir conciliação da fatura vinculada ao lançamento.",
+    };
+  }
+
   const { error } = await supabase.from("transactions").delete().eq("id", id);
 
   if (error) {

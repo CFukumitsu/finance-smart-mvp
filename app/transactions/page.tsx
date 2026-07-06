@@ -845,7 +845,7 @@ function TransactionsPageContent() {
 
   async function handleDeleteTransaction(transaction: Transaction) {
     const confirmed = window.confirm(
-      "Tem certeza que deseja excluir este lançamento?"
+      "Tem certeza que deseja excluir este lançamento? Se ele estiver conciliado, a conciliação será desfeita automaticamente."
     );
 
     if (isTransactionLocked(transaction)) {

@@ -450,7 +450,7 @@ function hasSameInstallment(
 
   return (
     statementInstallment.currentInstallment ===
-      financeInstallment.currentInstallment &&
+    financeInstallment.currentInstallment &&
     statementInstallment.totalInstallments === financeInstallment.totalInstallments
   );
 }
@@ -895,27 +895,6 @@ export default function ReconciliationPage() {
     loadCategories();
   }, []);
 
-  useEffect(() => {
-    if (!selectedAccountId || !selectedCompetenceId) {
-      return;
-    }
-
-    if (selectedFile) {
-      handleFileUpload(selectedFile);
-      return;
-    }
-
-    (async () => {
-      try {
-        await runAutoReconciliation(selectedAccountId, selectedCompetenceId);
-        await loadPersistedStatement(selectedAccountId, selectedCompetenceId);
-      } catch (error) {
-        console.error("Erro ao recarregar conferência:", error);
-        alert("Erro ao recarregar conferência.");
-      }
-    })();
-  }, [selectedAccountId, selectedCompetenceId]);
-
   async function loadTransactions(accountId: string, competenceId: string) {
     const { data, error } = await supabase
       .from("transactions")
@@ -976,8 +955,9 @@ export default function ReconciliationPage() {
       const { data, error } = await supabase
         .from("transactions")
         .select("id, description, due_date, value, type, status, category_id")
-        .in("id", linkedTransactionIds);
-
+        .in("id", linkedTransactionIds)
+        .eq("account_id", accountId)
+        .eq("competence_id", competenceId);
       if (error) {
         throw error;
       }
@@ -1055,18 +1035,18 @@ export default function ReconciliationPage() {
 
   async function runAutoReconciliation(accountId: string, competenceId: string) {
     const accountTransactions = await loadTransactions(accountId, competenceId);
-  
+
     const { data: pendingItems, error: pendingItemsError } = await supabase
       .from("credit_card_statement_items")
       .select("id, statement_date, statement_description, statement_value, source_hash, status")
       .eq("account_id", accountId)
       .eq("competence_id", competenceId)
       .eq("status", "Pendente");
-  
+
     if (pendingItemsError) {
       throw pendingItemsError;
     }
-  
+
     const importedPendingItems = (pendingItems ?? []).map((item) => ({
       id: item.id,
       importKey: item.source_hash,
@@ -1077,15 +1057,15 @@ export default function ReconciliationPage() {
       status: "Pendente" as const,
       matched: false,
     }));
-  
+
     const usedTransactionIds = new Set<string>();
     const usedStatementItemIds = new Set<string>();
-  
+
     for (const item of importedPendingItems) {
       if (!item.id || usedStatementItemIds.has(item.id)) {
         continue;
       }
-  
+
       const groupedMatch = findGroupedMatchingTransaction(
         item,
         importedPendingItems.filter(
@@ -1095,23 +1075,23 @@ export default function ReconciliationPage() {
         accountTransactions,
         usedTransactionIds
       );
-  
+
       if (groupedMatch) {
         for (const groupItem of groupedMatch.items) {
           if (!groupItem.id) continue;
-  
+
           const { error: insertLinkError } = await supabase
             .from("credit_card_statement_item_transactions")
             .insert({
               statement_item_id: groupItem.id,
               transaction_id: groupedMatch.transaction.id,
             });
-  
+
           if (insertLinkError) {
             console.warn("Vínculo automático agrupado ignorado:", insertLinkError);
             continue;
           }
-  
+
           const { error: updateItemError } = await supabase
             .from("credit_card_statement_items")
             .update({
@@ -1120,40 +1100,40 @@ export default function ReconciliationPage() {
               updated_at: new Date().toISOString(),
             })
             .eq("id", groupItem.id);
-  
+
           if (updateItemError) {
             throw updateItemError;
           }
-  
+
           usedStatementItemIds.add(groupItem.id);
         }
-  
+
         usedTransactionIds.add(groupedMatch.transaction.id);
         continue;
       }
-  
+
       const automaticMatch = findMatchingTransaction(
         item,
         accountTransactions,
         usedTransactionIds
       );
-  
+
       if (!automaticMatch) {
         continue;
       }
-  
+
       const { error: insertLinkError } = await supabase
         .from("credit_card_statement_item_transactions")
         .insert({
           statement_item_id: item.id,
           transaction_id: automaticMatch.id,
         });
-  
+
       if (insertLinkError) {
         console.warn("Sugestão automática ignorada:", insertLinkError);
         continue;
       }
-  
+
       const { error: updateItemError } = await supabase
         .from("credit_card_statement_items")
         .update({
@@ -1162,13 +1142,49 @@ export default function ReconciliationPage() {
           updated_at: new Date().toISOString(),
         })
         .eq("id", item.id);
-  
+
       if (updateItemError) {
         throw updateItemError;
       }
-  
+
       usedStatementItemIds.add(item.id);
       usedTransactionIds.add(automaticMatch.id);
+    }
+  }
+
+  async function loadSelectedReconciliation() {
+    if (!selectedAccountId || !selectedCompetenceId) {
+      alert("Selecione conta/cartão e competência.");
+      return;
+    }
+
+    const selectedCompetence = competences.find(
+      (competence) => competence.id === selectedCompetenceId
+    );
+
+    const confirmationMessage = selectedFile
+      ? `Você está conciliando o cartão/conta "${selectedAccount?.name}" na competência "${selectedCompetence?.name}" com o arquivo "${selectedFile.name}". Deseja continuar?`
+      : `Você está carregando a conferência salva do cartão/conta "${selectedAccount?.name}" na competência "${selectedCompetence?.name}". Deseja continuar?`;
+
+    if (!confirm(confirmationMessage)) {
+      return;
+    }
+
+    setIsProcessing(true);
+
+    try {
+      if (selectedFile) {
+        await handleFileUpload(selectedFile);
+        return;
+      }
+
+      await runAutoReconciliation(selectedAccountId, selectedCompetenceId);
+      await loadPersistedStatement(selectedAccountId, selectedCompetenceId);
+    } catch (error) {
+      console.error("Erro ao carregar conferência:", error);
+      alert("Erro ao carregar conferência.");
+    } finally {
+      setIsProcessing(false);
     }
   }
 
@@ -1199,7 +1215,6 @@ export default function ReconciliationPage() {
       );
 
       const extractedItems = extractItems(rows, layout, selectedCompetence?.year);
-
       const itemOccurrenceCounter = new Map<string, number>();
 
       const statementItemsPayload = extractedItems.map((item) => {
@@ -1231,9 +1246,9 @@ export default function ReconciliationPage() {
           selectedCompetenceId,
           statementItemsPayload as StatementItemPayload[]
         );
-      
+
         console.log("Sincronização da fatura:", syncResult);
-      
+
         await runAutoReconciliation(selectedAccountId, selectedCompetenceId);
       }
 
@@ -1287,8 +1302,9 @@ export default function ReconciliationPage() {
         const { data, error } = await supabase
           .from("transactions")
           .select("id, description, due_date, value, type, status, category_id")
-          .in("id", linkedTransactionIds);
-
+          .in("id", linkedTransactionIds)
+          .eq("account_id", selectedAccountId)
+          .eq("competence_id", selectedCompetenceId);
         if (error) {
           throw error;
         }
@@ -2120,16 +2136,25 @@ export default function ReconciliationPage() {
           <input
             type="file"
             accept=".xls,.xlsx"
-            disabled={!selectedAccountId || isProcessing}
+            disabled={!selectedAccountId || !selectedCompetenceId || isProcessing}
             onChange={(event) => {
               const file = event.target.files?.[0];
+
               if (file) {
                 setSelectedFile(file);
-                handleFileUpload(file);
+                setFileName(file.name);
               }
             }}
             className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-slate-300 outline-none file:mr-4 file:rounded-lg file:border-0 file:bg-blue-600 file:px-4 file:py-2 file:text-sm file:font-semibold file:text-white disabled:cursor-not-allowed disabled:opacity-50"
           />
+          <button
+            type="button"
+            onClick={loadSelectedReconciliation}
+            disabled={!selectedAccountId || !selectedCompetenceId || isProcessing}
+            className="rounded-xl bg-blue-600 px-4 py-3 font-bold text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50 md:col-span-2"
+          >
+            {isProcessing ? "Carregando..." : "Carregar conferência"}
+          </button>
         </div>
 
         {detectedLayout && (
