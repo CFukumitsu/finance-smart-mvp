@@ -118,6 +118,7 @@ function TransactionsPageContent() {
       return JSON.parse(saved) as {
         due_date?: string;
         account_id?: string;
+        category_id?: string;
         type?: string;
         competence_id?: string;
         status?: string;
@@ -125,6 +126,43 @@ function TransactionsPageContent() {
     } catch {
       return null;
     }
+  }
+
+  function updateTransactionDefaults(nextDefaults: {
+    due_date?: string;
+    account_id?: string;
+    category_id?: string;
+    type?: string;
+    competence_id?: string;
+    status?: string;
+  }) {
+    if (typeof window === "undefined") return;
+
+    const currentDefaults = getStoredTransactionDefaults() ?? {};
+
+    sessionStorage.setItem(
+      transactionDefaultsKey,
+      JSON.stringify({
+        ...currentDefaults,
+        ...nextDefaults,
+      })
+    );
+  }
+
+  function saveTransactionDefaults(nextForm: typeof form) {
+    if (typeof window === "undefined") return;
+
+    sessionStorage.setItem(
+      transactionDefaultsKey,
+      JSON.stringify({
+        due_date: nextForm.due_date,
+        account_id: nextForm.account_id,
+        category_id: nextForm.category_id,
+        type: nextForm.type,
+        competence_id: nextForm.competence_id,
+        status: nextForm.status,
+      })
+    );
   }
 
   const [form, setForm] = useState({
@@ -445,10 +483,25 @@ function TransactionsPageContent() {
 
       setCompetenceFilter(defaultCompetenceId);
 
+      const storedDefaults = getStoredTransactionDefaults();
+      const defaultDueDate =
+        storedDefaults?.due_date ?? new Date().toISOString().split("T")[0];
+
+      const defaultType = storedDefaults?.type ?? "Despesa";
+
       setForm((previousForm) => ({
         ...previousForm,
-        competence_id: defaultCompetenceId,
-        due_date: new Date().toISOString().split("T")[0],
+        due_date: defaultDueDate,
+        type: defaultType,
+        status:
+          storedDefaults?.status ??
+          getAutomaticStatus(defaultType, defaultDueDate),
+        account_id: storedDefaults?.account_id ?? "",
+        category_id: storedDefaults?.category_id ?? "",
+        competence_id:
+          storedDefaults?.competence_id ??
+          getCompetenceIdByDate(defaultDueDate) ??
+          defaultCompetenceId,
       }));
 
       await loadTransactions({
@@ -470,6 +523,7 @@ function TransactionsPageContent() {
 
   useEffect(() => {
     if (searchParams.get("new") === "true") {
+      resetForm();
       setIsDrawerOpen(true);
     }
   }, [searchParams]);
@@ -522,7 +576,7 @@ function TransactionsPageContent() {
       card_payment_account_id: "",
       origin_account_id: "",
       destination_account_id: "",
-      category_id: "",
+      category_id: storedDefaults?.category_id ?? "",
       competence_id:
         storedDefaults?.competence_id ??
         getCompetenceIdByDate(defaultDueDate),
@@ -662,18 +716,12 @@ function TransactionsPageContent() {
           throw new Error(error.message);
         }
 
-        sessionStorage.setItem(
-          transactionDefaultsKey,
-          JSON.stringify({
-            due_date: form.due_date,
-            account_id: form.account_id,
-            type: form.type,
-            competence_id: form.competence_id,
-            status: form.status,
-          })
-        );
+        if (!editingTransactionId) {
+          saveTransactionDefaults(form);
+        }
 
         closeDrawer();
+
         await loadDescriptionSuggestions();
 
         await loadTransactions({
@@ -769,6 +817,10 @@ function TransactionsPageContent() {
         throw new Error(error.message);
       }
 
+      if (!editingTransactionId) {
+        saveTransactionDefaults(form);
+      }
+
       closeDrawer();
       await loadDescriptionSuggestions();
 
@@ -842,7 +894,7 @@ function TransactionsPageContent() {
     if (closure.closing_balance === null || closure.closing_balance === undefined) {
       return null;
     }
-  
+
     return Number(closure.closing_balance);
   }
 
@@ -850,15 +902,15 @@ function TransactionsPageContent() {
     if (!selectedCompetence) {
       return Number(account.current_balance ?? 0);
     }
-  
+
     const selectedOrder = getCompetenceOrder(selectedCompetence);
-  
+
     const previousClosures = accountClosures
       .map((closure) => {
         const closureCompetence = competences.find(
           (competence) => competence.id === closure.competence_id
         );
-  
+
         return {
           closure,
           competence: closureCompetence,
@@ -867,24 +919,24 @@ function TransactionsPageContent() {
       .filter((item) => {
         if (item.closure.account_id !== account.id) return false;
         if (!item.competence) return false;
-  
+
         return getCompetenceOrder(item.competence) < selectedOrder;
       })
       .sort((a, b) => {
         if (!a.competence || !b.competence) return 0;
-  
+
         return (
           getCompetenceOrder(b.competence) -
           getCompetenceOrder(a.competence)
         );
       });
-  
+
     const previousClosure = previousClosures[0]?.closure;
-  
+
     const previousBalance = previousClosure
       ? getClosureBalance(previousClosure)
       : null;
-  
+
     return previousBalance ?? Number(account.current_balance ?? 0);
   }
 
@@ -992,7 +1044,7 @@ function TransactionsPageContent() {
   );
 
   const openingBalance = selectedAccount
-  ? (() => {
+    ? (() => {
       const selectedCompetenceOrder = selectedCompetence
         ? selectedCompetence.year * 100 + selectedCompetence.month
         : 0;
@@ -1027,7 +1079,7 @@ function TransactionsPageContent() {
 
       return Number(previousClosure?.closure.closing_balance ?? 0);
     })()
-  : 0;
+    : 0;
 
   const selectedAccountTransactions = selectedAccount
     ? transactions.filter(
@@ -1525,12 +1577,20 @@ function TransactionsPageContent() {
                 value={form.due_date}
                 onChange={(event) => {
                   const newDate = event.target.value;
-
+                  const newCompetenceId = getCompetenceIdByDate(newDate);
+                  const newStatus = getAutomaticStatus(form.type, newDate);
+                
                   setForm({
                     ...form,
                     due_date: newDate,
-                    competence_id: getCompetenceIdByDate(newDate),
-                    status: getAutomaticStatus(form.type, newDate),
+                    competence_id: newCompetenceId,
+                    status: newStatus,
+                  });
+                
+                  updateTransactionDefaults({
+                    due_date: newDate,
+                    competence_id: newCompetenceId,
+                    status: newStatus,
                   });
                 }}
                 type="date"
@@ -1565,9 +1625,12 @@ function TransactionsPageContent() {
 
               <select
                 value={form.account_id}
-                onChange={(event) =>
-                  setForm({ ...form, account_id: event.target.value })
-                }
+                onChange={(event) => {
+                  const accountId = event.target.value;
+
+                  setForm({ ...form, account_id: accountId });
+                  updateTransactionDefaults({ account_id: accountId });
+                }}
                 className="w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none"
               >
                 <option value="">Conta / Cartão</option>
@@ -1605,11 +1668,17 @@ function TransactionsPageContent() {
                 value={form.type}
                 onChange={(event) => {
                   const newType = event.target.value;
-
+                  const newStatus = getAutomaticStatus(newType, form.due_date);
+                
                   setForm({
                     ...form,
                     type: newType,
-                    status: getAutomaticStatus(newType, form.due_date),
+                    status: newStatus,
+                  });
+                
+                  updateTransactionDefaults({
+                    type: newType,
+                    status: newStatus,
                   });
                 }}
                 className="w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none"
@@ -1676,9 +1745,12 @@ function TransactionsPageContent() {
               {form.type !== "Pagamento de Fatura" && form.type !== "Transferência" && (
                 <select
                   value={form.category_id}
-                  onChange={(event) =>
-                    setForm({ ...form, category_id: event.target.value })
-                  }
+                  onChange={(event) => {
+                    const categoryId = event.target.value;
+
+                    setForm({ ...form, category_id: categoryId });
+                    updateTransactionDefaults({ category_id: categoryId });
+                  }}
                   className="w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none"
                 >
                   <option value="">Categoria</option>
