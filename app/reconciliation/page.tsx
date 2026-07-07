@@ -1,5 +1,7 @@
 "use client";
 
+import { loadActiveImportLayout } from "@/src/lib/importLayout";
+import { normalizeRowsByImportLayout } from "@/src/lib/reconciliation/importNormalizer";
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx";
 import AppShell from "../components/layout/AppShell";
@@ -44,6 +46,15 @@ type Category = {
   active?: boolean | null;
 };
 
+type HeaderOption = {
+  label: string;
+  value: string;
+};
+
+type HeaderRowCandidate = {
+  rowIndex: number;
+  cells: string[];
+};
 
 type DetectedLayout = {
   headerRowIndex: number;
@@ -261,18 +272,11 @@ function parseWorksheetRowsFromXml(sheetXml: string) {
 }
 
 async function readWorkbookRows(buffer: ArrayBuffer) {
-  try {
-    const sheetXml = await unzipXlsxEntry(buffer, "xl/worksheets/sheet1.xml");
-    const rows = parseWorksheetRowsFromXml(sheetXml);
+  const workbook = XLSX.read(buffer, {
+    type: "array",
+    cellDates: true,
+  });
 
-    if (rows.length > 0) {
-      return rows;
-    }
-  } catch (error) {
-    console.warn("Leitor alternativo do XLSX falhou. Tentando leitor padrão.", error);
-  }
-
-  const workbook = XLSX.read(buffer, { type: "array" });
   const firstSheetName = workbook.SheetNames[0];
   const sheet = workbook.Sheets[firstSheetName];
 
@@ -280,9 +284,9 @@ async function readWorkbookRows(buffer: ArrayBuffer) {
     header: 1,
     raw: true,
     blankrows: false,
+    defval: "",
   });
 }
-
 
 function detectLayout(rows: unknown[][]): DetectedLayout | null {
   for (let rowIndex = 0; rowIndex < Math.min(rows.length, 80); rowIndex++) {
@@ -684,6 +688,19 @@ export default function ReconciliationPage() {
   const [paymentDueDate, setPaymentDueDate] = useState("");
   const [isClosingStatement, setIsClosingStatement] = useState(false);
   const isClosingStatementRef = useRef(false);
+  const [layoutHeaders, setLayoutHeaders] = useState<HeaderOption[]>([]);
+  const [headerRowCandidates, setHeaderRowCandidates] = useState<HeaderRowCandidate[]>([]);
+  const [selectedHeaderRowIndex, setSelectedHeaderRowIndex] = useState<number | null>(null);
+  const [showLayoutMapping, setShowLayoutMapping] = useState(false);
+  const [pendingLayoutRows, setPendingLayoutRows] = useState<unknown[][]>([]);
+  const [layoutForm, setLayoutForm] = useState({
+    header_row_index: "1",
+    date_header: "",
+    description_header: "",
+    value_header: "",
+    installment_header: "",
+    amount_sign: "auto" as "auto" | "positive" | "negative",
+  });
   const [closedStatement, setClosedStatement] = useState<{
     id: string;
     payment_transaction_id: string | null;
@@ -1188,6 +1205,130 @@ export default function ReconciliationPage() {
     }
   }
 
+  function extractHeaderOptions(rows: unknown[][], headerRowIndex: number) {
+    const headerRow = rows[headerRowIndex] ?? [];
+
+    return headerRow
+      .map((header) => String(header ?? "").trim())
+      .filter(Boolean)
+      .map((header) => ({
+        label: header,
+        value: header,
+      }));
+  }
+
+  function findBestHeaderRowIndex(rows: unknown[][]) {
+    for (let index = 0; index < Math.min(rows.length, 80); index++) {
+      const normalizedCells = rows[index]
+        .map((cell) => normalizeText(cell))
+        .filter(Boolean);
+
+      if (normalizedCells.length < 3) {
+        continue;
+      }
+
+      const hasDate = normalizedCells.includes("data");
+
+      const hasDescription =
+        normalizedCells.includes("lancamento") ||
+        normalizedCells.includes("descricao") ||
+        normalizedCells.includes("estabelecimento") ||
+        normalizedCells.includes("historico");
+
+      const hasValue =
+        normalizedCells.includes("valor") ||
+        normalizedCells.includes("valor parcial") ||
+        normalizedCells.includes("r$") ||
+        normalizedCells.includes("valor r$") ||
+        normalizedCells.includes("vlr");
+
+      if (hasDate && hasDescription && hasValue) {
+        return index;
+      }
+    }
+
+    return -1;
+  }
+
+  function suggestHeader(headers: HeaderOption[], candidates: string[]) {
+    const normalizedCandidates = candidates.map(normalizeText);
+
+    return (
+      headers.find((header) =>
+        normalizedCandidates.includes(normalizeText(header.value))
+      )?.value ?? ""
+    );
+  }
+
+  function findFirstUsefulRowIndex(rows: unknown[][]) {
+    const index = rows.findIndex((row) => {
+      const cells = row
+        .map((cell) => String(cell ?? "").trim())
+        .filter(Boolean);
+
+      return cells.length >= 3;
+    });
+
+    return index >= 0 ? index : 0;
+  }
+
+  function getHeaderRowCandidates(rows: unknown[][]): HeaderRowCandidate[] {
+    return rows
+      .map((row, rowIndex) => ({
+        rowIndex,
+        cells: row
+          .map((cell) => String(cell ?? "").trim())
+          .filter(Boolean),
+      }))
+      .filter((row) => row.cells.length >= 2)
+      .slice(0, 20);
+  }
+
+  function chooseHeaderRow(rows: unknown[][], rowIndex: number) {
+    const headers = extractHeaderOptions(rows, rowIndex);
+
+    setSelectedHeaderRowIndex(rowIndex);
+    setLayoutHeaders(headers);
+
+    setLayoutForm({
+      header_row_index: String(rowIndex),
+      date_header: suggestHeader(headers, ["data", "dt compra", "data compra"]),
+      description_header: suggestHeader(headers, [
+        "lançamento",
+        "lancamento",
+        "descrição",
+        "descricao",
+        "histórico",
+        "historico",
+      ]),
+      value_header: suggestHeader(headers, ["valor", "valor parcial", "r$", "vlr"]),
+      installment_header: suggestHeader(headers, [
+        "parcelamento",
+        "parcela",
+        "parcelas",
+      ]),
+      amount_sign: "auto" as "auto" | "positive" | "negative",
+    });
+  }
+
+  function openLayoutMapping(rows: unknown[][]) {
+    const candidates = getHeaderRowCandidates(rows);
+
+    setPendingLayoutRows(rows);
+    setHeaderRowCandidates(candidates);
+    setLayoutHeaders([]);
+    setSelectedHeaderRowIndex(null);
+    setLayoutForm({
+      header_row_index: "",
+      date_header: "",
+      description_header: "",
+      value_header: "",
+      installment_header: "",
+      amount_sign: "auto" as "auto" | "positive" | "negative",
+    });
+    setShowLayoutMapping(true);
+  }
+
   async function handleFileUpload(file: File) {
     if (!selectedAccountId || !selectedCompetenceId) {
       alert("Selecione uma conta/cartão e uma competência antes de importar a fatura.");
@@ -1203,18 +1344,56 @@ export default function ReconciliationPage() {
     try {
       const buffer = await file.arrayBuffer();
       const rows = await readWorkbookRows(buffer);
-      const layout = detectLayout(rows);
-
-      if (!layout) {
-        alert("Não consegui identificar automaticamente as colunas de data, lançamento e valor.");
-        return;
-      }
 
       const selectedCompetence = competences.find(
         (competence) => competence.id === selectedCompetenceId
       );
 
-      const extractedItems = extractItems(rows, layout, selectedCompetence?.year);
+      const savedLayout = await loadActiveImportLayout(selectedAccountId);
+
+      let detectedImportLayout: DetectedLayout | null = null;
+      let extractedItems: ImportedItem[] = [];
+
+      if (savedLayout) {
+        console.clear();
+        console.log("LAYOUT SALVO:", savedLayout);
+        console.log("HEADER ROW INDEX:", savedLayout.header_row_index);
+        console.log("LINHA DO CABEÇALHO LIDA:", rows[savedLayout.header_row_index]);
+        console.log("PRIMEIRAS 5 LINHAS APÓS CABEÇALHO:", rows.slice(savedLayout.header_row_index + 1, savedLayout.header_row_index + 6));
+      
+        const normalizedItems = normalizeRowsByImportLayout(
+          rows,
+          savedLayout,
+          selectedCompetence?.year
+        );
+      
+        console.log("NORMALIZED ITEMS:", normalizedItems);
+
+        extractedItems = normalizedItems.map((item) => ({
+          importKey: getStatementSourceHash(item.description, item.value),
+          sourceHash: getStatementSourceHash(item.description, item.value),
+          date: item.date,
+          description: item.description,
+          value: item.value,
+          matched: false,
+        }));
+
+        detectedImportLayout = {
+          headerRowIndex: savedLayout.header_row_index,
+          dateColumnIndex: 0,
+          descriptionColumnIndex: 0,
+          valueColumnIndex: 0,
+          layoutType: "standard",
+          signature: `saved-layout-${savedLayout.id}`,
+        };
+      } else {
+        openLayoutMapping(rows);
+        alert(
+          "Não encontrei um modelo salvo para este cartão. Faça o mapeamento das colunas uma vez e eu salvo para as próximas importações."
+        );
+        return;
+      }
+
       const itemOccurrenceCounter = new Map<string, number>();
 
       const statementItemsPayload = extractedItems.map((item) => {
@@ -1365,10 +1544,11 @@ export default function ReconciliationPage() {
         .maybeSingle();
 
       setClosedStatement(existingStatement ?? null);
-      setDetectedLayout(layout);
+      setDetectedLayout(detectedImportLayout);
       setTransactions(allAvailableTransactions);
       setItems(reconciledItems);
       setShowOnlyUnmatched(true);
+
       if (statementItemsPayload.length > 0) {
         console.log("Fatura carregada:", {
           itensNaPlanilha: statementItemsPayload.length,
@@ -1382,6 +1562,64 @@ export default function ReconciliationPage() {
       alert(error instanceof Error ? error.message : "Erro ao processar fatura.");
     } finally {
       setIsProcessing(false);
+    }
+  }
+
+  async function saveImportLayout() {
+    if (!selectedAccountId) {
+      alert("Selecione uma conta/cartão.");
+      return;
+    }
+
+    if (
+      !layoutForm.date_header ||
+      !layoutForm.description_header ||
+      !layoutForm.value_header
+    ) {
+      alert("Mapeie Data, Descrição e Valor.");
+      return;
+    }
+
+    try {
+      const { error: deactivateError } = await supabase
+        .from("import_layouts")
+        .update({
+          active: false,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("account_id", selectedAccountId);
+
+      if (deactivateError) {
+        throw deactivateError;
+      }
+
+      const { error: insertError } = await supabase.from("import_layouts").insert({
+        account_id: selectedAccountId,
+        name: `Modelo ${selectedAccount?.name ?? ""}`.trim(),
+        header_row_index: Math.max(0, Number(layoutForm.header_row_index) - 1),
+        date_header: layoutForm.date_header,
+        description_header: layoutForm.description_header,
+        value_header: layoutForm.value_header,
+        installment_header: layoutForm.installment_header || null,
+        amount_sign: layoutForm.amount_sign,
+        active: true,
+        updated_at: new Date().toISOString(),
+      });
+
+      if (insertError) {
+        throw insertError;
+      }
+
+      setShowLayoutMapping(false);
+
+      if (selectedFile) {
+        await handleFileUpload(selectedFile);
+      } else if (pendingLayoutRows.length > 0) {
+        alert("Modelo salvo. Agora carregue novamente a conferência.");
+      }
+    } catch (error) {
+      console.error("Erro ao salvar modelo de importação:", error);
+      alert("Erro ao salvar modelo de importação.");
     }
   }
 
@@ -2926,6 +3164,163 @@ export default function ReconciliationPage() {
             <p className="mt-2 text-sm text-slate-400">
               Gerando pagamento e salvando a conferência.
             </p>
+          </div>
+        </div>
+      )}
+      {showLayoutMapping && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+          <div className="max-h-[90vh] w-full max-w-4xl overflow-y-auto rounded-2xl border border-white/10 bg-slate-950 p-6 shadow-2xl">
+            <div className="mb-5">
+              <h2 className="text-xl font-bold text-white">
+                Configurar modelo de importação
+              </h2>
+              <p className="mt-1 text-sm text-slate-400">
+                Primeiro escolha qual linha da planilha contém os nomes das colunas.
+              </p>
+            </div>
+
+            {selectedHeaderRowIndex === null ? (
+              <div className="space-y-3">
+                {headerRowCandidates.map((candidate) => (
+                  <div
+                    key={candidate.rowIndex}
+                    className="rounded-xl border border-white/10 bg-slate-900/70 p-4"
+                  >
+                    <div className="mb-3 flex items-center justify-between gap-3">
+                      <p className="text-sm font-semibold text-slate-300">
+                        Linha candidata {candidate.rowIndex + 1}
+                      </p>
+
+                      <button
+                        type="button"
+                        onClick={() => chooseHeaderRow(pendingLayoutRows, candidate.rowIndex)}
+                        className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-bold text-white hover:bg-blue-500"
+                      >
+                        Usar esta linha
+                      </button>
+                    </div>
+
+                    <div className="flex flex-wrap gap-2">
+                      {candidate.cells.map((cell, index) => (
+                        <span
+                          key={`${candidate.rowIndex}-${index}`}
+                          className="rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-sm text-slate-200"
+                        >
+                          {cell}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <>
+                <div className="mb-5 rounded-xl border border-emerald-400/20 bg-emerald-400/10 p-4">
+                  <p className="text-sm text-emerald-200">
+                    Cabeçalho selecionado
+                  </p>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {layoutHeaders.map((header) => (
+                      <span
+                        key={header.value}
+                        className="rounded-lg border border-emerald-400/20 bg-slate-950 px-3 py-2 text-sm text-white"
+                      >
+                        {header.label}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="grid gap-4 md:grid-cols-2">
+                  {[
+                    ["Data Finance", "date_header"],
+                    ["Descrição Finance", "description_header"],
+                    ["Valor Finance", "value_header"],
+                    ["Parcela opcional", "installment_header"],
+                  ].map(([label, field]) => (
+                    <label key={field} className="space-y-2">
+                      <span className="text-sm text-slate-300">{label}</span>
+                      <select
+                        value={layoutForm[field as keyof typeof layoutForm]}
+                        onChange={(event) =>
+                          setLayoutForm((previous) => ({
+                            ...previous,
+                            [field]: event.target.value,
+                          }))
+                        }
+                        className="w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none"
+                      >
+                        <option value="">
+                          {field === "installment_header"
+                            ? "Não usar"
+                            : "Selecione a coluna"}
+                        </option>
+
+                        {layoutHeaders.map((header) => (
+                          <option key={header.value} value={header.value}>
+                            {header.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  ))}
+
+                  <label className="space-y-2 md:col-span-2">
+                    <span className="text-sm text-slate-300">Sinal do valor</span>
+                    <select
+                      value={layoutForm.amount_sign}
+                      onChange={(event) =>
+                        setLayoutForm((previous) => ({
+                          ...previous,
+                          amount_sign: event.target.value as
+                            | "auto"
+                            | "positive"
+                            | "negative",
+                        }))
+                      }
+                      className="w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none"
+                    >
+                      <option value="auto">Automático</option>
+                      <option value="positive">Sempre positivo</option>
+                      <option value="negative">Sempre negativo</option>
+                    </select>
+                  </label>
+                </div>
+              </>
+            )}
+
+            <div className="mt-6 flex justify-end gap-3">
+              {selectedHeaderRowIndex !== null && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedHeaderRowIndex(null);
+                    setLayoutHeaders([]);
+                  }}
+                  className="rounded-xl border border-white/10 px-4 py-3 font-bold text-slate-300 hover:bg-white/5"
+                >
+                  Voltar
+                </button>
+              )}
+
+              <button
+                type="button"
+                onClick={() => setShowLayoutMapping(false)}
+                className="rounded-xl border border-white/10 px-4 py-3 font-bold text-slate-300 hover:bg-white/5"
+              >
+                Cancelar
+              </button>
+
+              {selectedHeaderRowIndex !== null && (
+                <button
+                  type="button"
+                  onClick={saveImportLayout}
+                  className="rounded-xl bg-blue-600 px-4 py-3 font-bold text-white hover:bg-blue-500"
+                >
+                  Salvar modelo
+                </button>
+              )}
+            </div>
           </div>
         </div>
       )}

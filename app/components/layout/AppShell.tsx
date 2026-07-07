@@ -1,5 +1,5 @@
 "use client";
-
+import UserMenu from "@/src/components/auth/UserMenu";
 import { useState } from "react";
 import FinanceSidebar from "./financeSidebar";
 
@@ -41,9 +41,15 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         )}
 
         <main className="min-w-0 flex-1 overflow-x-hidden">
-          <section className="w-full max-w-full px-4 pb-6 pt-20 sm:px-5 md:pt-6 lg:px-8">
-            {children}
-          </section>
+          <main className="min-w-0 flex-1 overflow-x-hidden">
+            <div className="sticky top-0 z-30 flex justify-end border-b border-white/10 bg-slate-950/80 px-4 py-3 backdrop-blur sm:px-5 lg:px-8">
+              <UserMenu />
+            </div>
+
+            <section className="w-full max-w-full px-4 pb-6 pt-6 sm:px-5 lg:px-8">
+              {children}
+            </section>
+          </main>
         </main>
       </div>
     </div>
