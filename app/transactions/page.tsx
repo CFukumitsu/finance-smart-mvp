@@ -4,7 +4,7 @@ import { Suspense, useEffect, useState } from "react";
 import { ChevronLeft, ChevronRight, SlidersHorizontal } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import AppShell from "../components/layout/AppShell";
-import { supabase } from "@/src/lib/supabase";
+import { getCurrentUserId, supabase } from "@/src/lib/supabase";
 import { deleteTransaction as deleteTransactionService } from "@/src/services/transactionService";
 import { ensureAccountIsOpen } from "@/src/utils/accountLock";
 import {
@@ -194,10 +194,11 @@ function TransactionsPageContent() {
     return currentCompetence?.id ?? list[0]?.id ?? "";
   }
 
-  async function loadClosedCompetences() {
+  async function loadClosedCompetences(ownerId: string) {
     const { data, error } = await supabase
       .from("competence_closures")
       .select("competence_id")
+      .eq("owner_id", ownerId)
       .eq("status", "Fechada");
 
     if (error) {
@@ -286,6 +287,7 @@ function TransactionsPageContent() {
   }
 
   async function loadPlannedCardLimit(accountId: string, competenceId: string) {
+    const ownerId = await getCurrentUserId();
     if (!accountId || !competenceId) {
       setPlannedCardLimit(0);
       return;
@@ -297,6 +299,7 @@ function TransactionsPageContent() {
       .eq("target_type", "account")
       .eq("target_id", accountId)
       .eq("competence_id", competenceId)
+      .eq("owner_id", ownerId)
       .maybeSingle();
 
     if (error) {
@@ -308,13 +311,12 @@ function TransactionsPageContent() {
     setPlannedCardLimit(Number(data?.planned_value ?? 0));
   }
 
-  async function loadDescriptionSuggestions() {
+  async function loadDescriptionSuggestions(ownerId: string) {
     const { data, error } = await supabase
       .from("transactions")
       .select("description, created_at")
+      .eq("owner_id", ownerId)
       .eq("type", "Despesa")
-      .order("created_at", { ascending: false })
-      .limit(300);
 
     if (error) {
       console.error("Erro ao carregar sugestões de despesas:", error);
@@ -343,6 +345,8 @@ function TransactionsPageContent() {
   }) {
     setIsLoading(true);
 
+    const ownerId = await getCurrentUserId();
+
     let query = supabase
       .from("transactions")
       .select(`
@@ -363,6 +367,7 @@ function TransactionsPageContent() {
         category:categories!transactions_category_id_fkey(name),
         competence:competences!transactions_competence_id_fkey(name)
       `)
+      .eq("owner_id", ownerId)
 
     if (filters?.listMode === "latest") {
       query = query
@@ -442,9 +447,17 @@ function TransactionsPageContent() {
   async function loadReferenceData() {
     setIsLoading(true);
 
+    const ownerId = await getCurrentUserId();
+
     const [accountClosuresResponse, cardStatementsResponse] = await Promise.all([
-      supabase.from("account_closures").select("*"),
-      supabase.from("credit_card_statements").select("account_id, competence_id"),
+      supabase
+        .from("account_closures")
+        .select("*")
+        .eq("owner_id", ownerId),
+      supabase
+        .from("credit_card_statements")
+        .select("account_id, competence_id")
+        .eq("owner_id", ownerId),
     ]);
 
     setAccountClosures(accountClosuresResponse.data ?? []);
@@ -455,26 +468,27 @@ function TransactionsPageContent() {
         supabase
           .from("accounts")
           .select("id, name, type, closing_day, due_day, limit_amount, current_balance")
+          .eq("owner_id", ownerId)
           .eq("active", true)
           .order("name", { ascending: true }),
         supabase
           .from("categories")
           .select("id, name, type")
+          .eq("owner_id", ownerId)
           .eq("active", true)
           .order("type", { ascending: false })
           .order("name", { ascending: true }),
         supabase
           .from("competences")
           .select("id, month, year, name, status")
-          .order("year", { ascending: false })
-          .order("month", { ascending: false }),
+          .eq("owner_id", ownerId)
       ]);
 
     if (accountsResponse.data) setAccounts(accountsResponse.data);
     if (categoriesResponse.data) setCategories(categoriesResponse.data);
 
-    await loadClosedCompetences();
-    await loadDescriptionSuggestions();
+    await loadClosedCompetences(ownerId);
+    await loadDescriptionSuggestions(ownerId);
 
     if (competencesResponse.data) {
       setCompetences(competencesResponse.data);
@@ -653,6 +667,8 @@ function TransactionsPageContent() {
     }
 
     try {
+      const ownerId = await getCurrentUserId();
+
       if (form.type === "Transferência" && !editingTransactionId) {
         const originAccount = accounts.find(
           (account) => account.id === form.account_id
@@ -675,6 +691,7 @@ function TransactionsPageContent() {
             competence_id: form.competence_id,
             origin_account_id: form.account_id,
             destination_account_id: form.destination_account_id,
+            owner_id: ownerId,
           },
           {
             description: form.description || `Transferência recebida de ${originAccount?.name ?? "conta origem"}`,
@@ -688,6 +705,7 @@ function TransactionsPageContent() {
             competence_id: form.competence_id,
             origin_account_id: form.account_id,
             destination_account_id: form.destination_account_id,
+            owner_id: ownerId,
           },
         ];
 
@@ -722,7 +740,7 @@ function TransactionsPageContent() {
 
         closeDrawer();
 
-        await loadDescriptionSuggestions();
+        await loadDescriptionSuggestions(ownerId);
 
         await loadTransactions({
           competenceId: competenceFilter,
@@ -764,6 +782,7 @@ function TransactionsPageContent() {
                 : null,
             parcel_number: index + 1,
             total_parcels: installmentCount,
+            owner_id: ownerId,
           };
         })
         : [{
@@ -787,6 +806,7 @@ function TransactionsPageContent() {
             form.type === "Transferência"
               ? form.destination_account_id || null
               : null,
+          owner_id: ownerId,
         }];
 
       for (const transaction of transactionsToSave) {
@@ -811,6 +831,7 @@ function TransactionsPageContent() {
           .from("transactions")
           .update(transactionsToSave[0])
           .eq("id", editingTransactionId)
+          .eq("owner_id", ownerId)
         : await supabase.from("transactions").insert(transactionsToSave);
 
       if (error) {
@@ -822,7 +843,7 @@ function TransactionsPageContent() {
       }
 
       closeDrawer();
-      await loadDescriptionSuggestions();
+      await loadDescriptionSuggestions(ownerId);
 
       await loadTransactions({
         competenceId: competenceFilter,
@@ -1579,14 +1600,14 @@ function TransactionsPageContent() {
                   const newDate = event.target.value;
                   const newCompetenceId = getCompetenceIdByDate(newDate);
                   const newStatus = getAutomaticStatus(form.type, newDate);
-                
+
                   setForm({
                     ...form,
                     due_date: newDate,
                     competence_id: newCompetenceId,
                     status: newStatus,
                   });
-                
+
                   updateTransactionDefaults({
                     due_date: newDate,
                     competence_id: newCompetenceId,
@@ -1669,13 +1690,13 @@ function TransactionsPageContent() {
                 onChange={(event) => {
                   const newType = event.target.value;
                   const newStatus = getAutomaticStatus(newType, form.due_date);
-                
+
                   setForm({
                     ...form,
                     type: newType,
                     status: newStatus,
                   });
-                
+
                   updateTransactionDefaults({
                     type: newType,
                     status: newStatus,

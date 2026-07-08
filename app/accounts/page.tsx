@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import AppShell from "../components/layout/AppShell";
-import { supabase } from "@/src/lib/supabase";
+import { getCurrentUserId, supabase } from "@/src/lib/supabase";
 import {
   Pencil,
   TrendingUp,
@@ -57,9 +57,12 @@ export default function AccountsPage() {
   async function loadAccounts() {
     setIsLoading(true);
 
+    const ownerId = await getCurrentUserId();
+
     const { data, error } = await supabase
       .from("accounts")
       .select("id, name, type, closing_day, due_day, limit_amount, current_balance, active")
+      .eq("owner_id", ownerId)
       .order("active", { ascending: false })
       .order("type", { ascending: true })
       .order("name", { ascending: true });
@@ -76,9 +79,11 @@ export default function AccountsPage() {
   }
 
   async function loadCompetences() {
+    const ownerId = await getCurrentUserId();
     const { data } = await supabase
       .from("competences")
       .select("id, name")
+      .eq("owner_id", ownerId)
       .order("year", { ascending: false })
       .order("month", { ascending: false });
 
@@ -118,6 +123,8 @@ export default function AccountsPage() {
   }
 
   async function openPlanningModal(account: Account) {
+
+    const ownerId = await getCurrentUserId();
     setPlanningAccount(account);
     setIsPlanningOpen(true);
 
@@ -125,6 +132,7 @@ export default function AccountsPage() {
       .from("financial_targets")
       .select("competence_id, planned_value")
       .eq("target_type", "account")
+      .eq("owner_id", ownerId)
       .eq("target_id", account.id);
 
     if (error) {
@@ -158,11 +166,14 @@ export default function AccountsPage() {
   }
 
   async function savePlanning() {
+
+    const ownerId = await getCurrentUserId();
     if (!planningAccount) return;
 
     const rows = Object.entries(planningValues)
       .filter(([, value]) => value !== "")
       .map(([competenceId, value]) => ({
+        owner_id: ownerId,
         competence_id: competenceId,
         target_type: "account",
         target_id: planningAccount.id,
@@ -189,12 +200,15 @@ export default function AccountsPage() {
   }
 
   async function saveAccount() {
+
+    const ownerId = await getCurrentUserId();
     if (!form.name || !form.type) {
       alert("Preencha nome e tipo.");
       return;
     }
 
     const payload = {
+      owner_id: ownerId,
       name: form.name.trim(),
       type: form.type,
       closing_day: form.closing_day ? Number(form.closing_day) : null,
@@ -209,6 +223,7 @@ export default function AccountsPage() {
         .from("accounts")
         .update(payload)
         .eq("id", editingAccountId)
+        .eq("owner_id", ownerId)
         .select("id")
         .single()
       : await supabase
@@ -228,6 +243,7 @@ export default function AccountsPage() {
         .from("financial_targets")
         .upsert(
           {
+            owner_id: ownerId,
             competence_id: selectedCompetenceId,
             target_type: "account",
             target_id: savedAccount.id,
@@ -251,13 +267,16 @@ export default function AccountsPage() {
   }
 
   async function toggleActive(account: Account) {
+
+    const ownerId = await getCurrentUserId();
     const { error } = await supabase
       .from("accounts")
       .update({
         active: !account.active,
         updated_at: new Date().toISOString(),
       })
-      .eq("id", account.id);
+      .eq("id", account.id)
+      .eq("owner_id", ownerId);
 
     if (error) {
       console.error("Erro ao alterar status:", error);
@@ -269,13 +288,17 @@ export default function AccountsPage() {
   }
 
   async function deleteAccount(account: Account) {
+
+    const ownerId = await getCurrentUserId();
     const confirmed = window.confirm(
       `Tem certeza que deseja excluir "${account.name}"? Se já existir lançamento usando essa conta/cartão, o banco pode bloquear.`
     );
 
     if (!confirmed) return;
 
-    const { error } = await supabase.from("accounts").delete().eq("id", account.id);
+    const { error } = await supabase.from("accounts").delete()
+      .eq("id", account.id)
+      .eq("owner_id", ownerId);
 
     if (error) {
       console.error("Erro ao excluir conta/cartão:", error);
@@ -358,21 +381,19 @@ export default function AccountsPage() {
 
                     <div className="mt-2 flex flex-wrap gap-2">
                       <span
-                        className={`rounded-full px-3 py-1 text-xs font-bold ${
-                          account.type === "Conta"
-                            ? "bg-blue-500/10 text-blue-300"
-                            : "bg-purple-500/10 text-purple-300"
-                        }`}
+                        className={`rounded-full px-3 py-1 text-xs font-bold ${account.type === "Conta"
+                          ? "bg-blue-500/10 text-blue-300"
+                          : "bg-purple-500/10 text-purple-300"
+                          }`}
                       >
                         {account.type}
                       </span>
 
                       <span
-                        className={`rounded-full px-3 py-1 text-xs font-bold ${
-                          account.active
-                            ? "bg-emerald-500/10 text-emerald-300"
-                            : "bg-slate-500/10 text-slate-400"
-                        }`}
+                        className={`rounded-full px-3 py-1 text-xs font-bold ${account.active
+                          ? "bg-emerald-500/10 text-emerald-300"
+                          : "bg-slate-500/10 text-slate-400"
+                          }`}
                       >
                         {account.active ? "Ativa" : "Inativa"}
                       </span>
@@ -667,54 +688,54 @@ export default function AccountsPage() {
       {isPlanningOpen && planningAccount && (
         <div className="fixed inset-0 z-50 flex justify-end bg-black/60">
           <div className="flex h-full w-full max-w-xl flex-col border-l border-white/10 bg-slate-950 shadow-2xl">
-          <div className="flex-1 overflow-y-auto p-6">
-            <div className="mb-6 flex items-start justify-between">
-              <div>
-                <h2 className="text-2xl font-bold text-white">
-                  Planejamento mensal
-                </h2>
+            <div className="flex-1 overflow-y-auto p-6">
+              <div className="mb-6 flex items-start justify-between">
+                <div>
+                  <h2 className="text-2xl font-bold text-white">
+                    Planejamento mensal
+                  </h2>
 
-                <p className="mt-1 text-sm text-slate-400">
-                  {planningAccount.name}
-                </p>
+                  <p className="mt-1 text-sm text-slate-400">
+                    {planningAccount.name}
+                  </p>
+                </div>
+
+                <button
+                  onClick={closePlanningModal}
+                  className="rounded-xl px-3 py-2 text-sm text-slate-400 hover:bg-white/10 hover:text-white"
+                >
+                  Fechar
+                </button>
               </div>
 
-              <button
-                onClick={closePlanningModal}
-                className="rounded-xl px-3 py-2 text-sm text-slate-400 hover:bg-white/10 hover:text-white"
-              >
-                Fechar
-              </button>
-            </div>
+              <div className="space-y-3">
+                {competences.map((competence) => (
+                  <div
+                    key={competence.id}
+                    ref={competence.name === currentCompetenceName ? currentCompetenceRef : null}
+                    className={`grid grid-cols-1 gap-3 rounded-2xl border p-4 md:grid-cols-[1fr_220px] ${competence.name === currentCompetenceName
+                      ? "border-cyan-500/40 bg-cyan-500/10"
+                      : "border-white/10 bg-slate-900/70"
+                      }`}
+                  >
+                    <div>
+                      <p className="font-semibold text-white">{competence.name}</p>
+                      <p className="text-xs text-slate-500">Valor planejado</p>
+                    </div>
 
-            <div className="space-y-3">
-              {competences.map((competence) => (
-                <div
-                  key={competence.id}
-                  ref={competence.name === currentCompetenceName ? currentCompetenceRef : null}
-                  className={`grid grid-cols-1 gap-3 rounded-2xl border p-4 md:grid-cols-[1fr_220px] ${competence.name === currentCompetenceName
-                    ? "border-cyan-500/40 bg-cyan-500/10"
-                    : "border-white/10 bg-slate-900/70"
-                    }`}
-                >
-                  <div>
-                    <p className="font-semibold text-white">{competence.name}</p>
-                    <p className="text-xs text-slate-500">Valor planejado</p>
+                    <input
+                      value={planningValues[competence.id] ?? ""}
+                      onChange={(event) =>
+                        handlePlanningValueChange(competence.id, event.target.value)
+                      }
+                      type="text"
+                      inputMode="numeric"
+                      placeholder="R$ 0,00"
+                      className="w-full rounded-xl border border-white/10 bg-slate-950 px-4 py-3 text-right text-white outline-none focus:border-cyan-400/50"
+                    />
                   </div>
-
-                  <input
-                    value={planningValues[competence.id] ?? ""}
-                    onChange={(event) =>
-                      handlePlanningValueChange(competence.id, event.target.value)
-                    }
-                    type="text"
-                    inputMode="numeric"
-                    placeholder="R$ 0,00"
-                    className="w-full rounded-xl border border-white/10 bg-slate-950 px-4 py-3 text-right text-white outline-none focus:border-cyan-400/50"
-                  />
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
             </div>
 
             <div className="border-t border-white/10 bg-slate-950 p-6">

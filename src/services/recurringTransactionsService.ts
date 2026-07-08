@@ -1,4 +1,4 @@
-import { supabase } from "@/src/lib/supabase";
+import { getCurrentUserId, supabase } from "@/src/lib/supabase";
 import { ensureCompetenceIsOpen } from "@/src/utils/competenceLock";
 import {
   RecurringTransaction,
@@ -6,12 +6,15 @@ import {
 } from "@/src/types/recurrence";
 
 export async function getRecurringTransactions() {
+  const ownerId = await getCurrentUserId();
+
   const { data, error } = await supabase
     .from("recurring_transactions")
     .select(`
       *,
       account:accounts(name)
-    `);
+    `)
+    .eq("owner_id", ownerId);
 
   if (error) {
     throw new Error(error.message);
@@ -31,10 +34,10 @@ export async function getRecurringTransactions() {
       income: 0,
       expense: 1,
     };
-    
+
     const typeCompare =
       (typeOrder[a.type] ?? 99) - (typeOrder[b.type] ?? 99);
-    
+
     if (typeCompare !== 0) {
       return typeCompare;
     }
@@ -46,6 +49,7 @@ export async function getRecurringTransactions() {
 export async function createRecurringTransaction(
   formData: RecurringTransactionFormData
 ) {
+  const ownerId = await getCurrentUserId();
   if (formData.endCompetenceId) {
     const lock = await ensureCompetenceIsOpen(
       formData.endCompetenceId
@@ -59,6 +63,7 @@ export async function createRecurringTransaction(
     }
   }
   const { error } = await supabase.from("recurring_transactions").insert({
+    owner_id: ownerId,
     description: formData.description,
     type: formData.type,
     amount: Number(formData.amount),
@@ -80,6 +85,7 @@ export async function updateRecurringTransaction(
   id: string,
   formData: RecurringTransactionFormData
 ) {
+  const ownerId = await getCurrentUserId();
   const { error } = await supabase
     .from("recurring_transactions")
     .update({
@@ -93,7 +99,8 @@ export async function updateRecurringTransaction(
       end_competence_id: formData.endCompetenceId || null,
       updated_at: new Date().toISOString(),
     })
-    .eq("id", id);
+    .eq("id", id)
+    .eq("owner_id", ownerId);
 
   if (error) {
     throw new Error(error.message);
@@ -101,13 +108,16 @@ export async function updateRecurringTransaction(
 }
 
 export async function cancelRecurringTransaction(id: string) {
+  const ownerId = await getCurrentUserId();
+
   const { error } = await supabase
     .from("recurring_transactions")
     .update({
       status: "cancelled",
       updated_at: new Date().toISOString(),
     })
-    .eq("id", id);
+    .eq("id", id)
+    .eq("owner_id", ownerId);
 
   if (error) {
     throw new Error(error.message);

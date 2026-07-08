@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useModalShortcuts } from "@/src/hooks/useModalShortcuts";
 import AppShell from "../components/layout/AppShell";
-import { supabase } from "@/src/lib/supabase";
+import { getCurrentUserId, supabase } from "@/src/lib/supabase";
 import {
   Pencil,
   CircleOff,
@@ -60,6 +60,8 @@ export default function CategoriesPage() {
   async function loadCategories() {
     setIsLoading(true);
 
+    const ownerId = await getCurrentUserId();
+
     let query = supabase
       .from("categories")
       .select(`
@@ -71,7 +73,8 @@ export default function CategoriesPage() {
         show_on_dashboard,
         dashboard_order,
         active
-        `);
+        `)
+      .eq("owner_id", ownerId);
 
     if (statusFilter === "Ativas") {
       query = query.eq("active", true);
@@ -102,9 +105,12 @@ export default function CategoriesPage() {
   }
 
   async function loadCompetences() {
+    const ownerId = await getCurrentUserId();
+
     const { data } = await supabase
       .from("competences")
       .select("id, name")
+      .eq("owner_id", ownerId)
       .order("year", { ascending: false })
       .order("month", { ascending: false });
 
@@ -136,12 +142,15 @@ export default function CategoriesPage() {
   }
 
   async function openPlanningModal(category: Category) {
+    const ownerId = await getCurrentUserId();
+
     setPlanningCategory(category);
     setIsPlanningOpen(true);
 
     const { data, error } = await supabase
       .from("financial_targets")
       .select("competence_id, planned_value")
+      .eq("owner_id", ownerId)
       .eq("target_type", "category")
       .eq("target_id", category.id);
 
@@ -178,9 +187,12 @@ export default function CategoriesPage() {
   async function savePlanning() {
     if (!planningCategory) return;
 
+    const ownerId = await getCurrentUserId();
+
     const rows = Object.entries(planningValues)
       .filter(([, value]) => value !== "")
       .map(([competenceId, value]) => ({
+        owner_id: ownerId,
         competence_id: competenceId,
         target_type: "category",
         target_id: planningCategory.id,
@@ -242,13 +254,14 @@ export default function CategoriesPage() {
   }
 
   async function saveCategory() {
+    const ownerId = await getCurrentUserId();
+
     if (!form.name || !form.type) {
       alert("Preencha nome e tipo.");
       return;
     }
 
     const payload = {
-      name: form.name.trim(),
       type: form.type,
       monthly_limit: form.monthly_limit ? Number(form.monthly_limit) : 0,
       monthly_goal: form.monthly_goal ? Number(form.monthly_goal) : 0,
@@ -263,7 +276,11 @@ export default function CategoriesPage() {
     console.log("Payload categoria:", payload);
 
     const { error } = editingCategoryId
-      ? await supabase.from("categories").update(payload).eq("id", editingCategoryId)
+      ? await supabase
+        .from("categories")
+        .update(payload)
+        .eq("id", editingCategoryId)
+        .eq("owner_id", ownerId)
       : await supabase.from("categories").insert(payload);
 
     if (error) {
@@ -277,13 +294,16 @@ export default function CategoriesPage() {
   }
 
   async function toggleShowOnDashboard(category: Category) {
+    const ownerId = await getCurrentUserId();
+
     const { error } = await supabase
       .from("categories")
       .update({
         show_on_dashboard: !category.show_on_dashboard,
         updated_at: new Date().toISOString(),
       })
-      .eq("id", category.id);
+      .eq("id", category.id)
+      .eq("owner_id", ownerId);
 
     if (error) {
       console.error("Erro ao alterar exibição no dashboard:", error);
@@ -295,13 +315,16 @@ export default function CategoriesPage() {
   }
 
   async function toggleActive(category: Category) {
+    const ownerId = await getCurrentUserId();
+
     const { error } = await supabase
       .from("categories")
       .update({
         active: !category.active,
         updated_at: new Date().toISOString(),
       })
-      .eq("id", category.id);
+      .eq("id", category.id)
+      .eq("owner_id", ownerId);
 
     if (error) {
       console.error("Erro ao alterar status:", error);
@@ -313,13 +336,18 @@ export default function CategoriesPage() {
   }
 
   async function deleteCategory(category: Category) {
+    const ownerId = await getCurrentUserId();
     const confirmed = window.confirm(
       `Tem certeza que deseja excluir "${category.name}"? Se já existir lançamento usando essa categoria, o banco pode bloquear.`
     );
 
     if (!confirmed) return;
 
-    const { error } = await supabase.from("categories").delete().eq("id", category.id);
+    const { error } = await supabase
+      .from("categories")
+      .delete()
+      .eq("id", category.id)
+      .eq("owner_id", ownerId);
 
     if (error) {
       console.error("Erro ao excluir categoria:", error);

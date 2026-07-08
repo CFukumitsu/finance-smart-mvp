@@ -2,4 +2,4 @@ import RecurrencesPageContent from "../../components/recurrences/RecurrencesPage
 
 export default function RecurrencesPage() {
   return <RecurrencesPageContent />;
-}
+} 

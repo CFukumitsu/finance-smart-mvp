@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import AppShell from "../../components/layout/AppShell";
-import { supabase } from "@/src/lib/supabase";
+import { getCurrentUserId, supabase } from "@/src/lib/supabase";
 import {
     cancelRecurringTransaction,
     createRecurringTransaction,
@@ -86,11 +86,27 @@ export default function RecurrencesPageContent() {
     }
 
     async function loadAuxiliaryData() {
+        const ownerId = await getCurrentUserId();
+    
         const [accountsResult, categoriesResult, competencesResult] =
             await Promise.all([
-                supabase.from("accounts").select("id, name").order("name"),
-                supabase.from("categories").select("id, name").order("name"),
-                supabase.from("competences").select("id, name").order("name"),
+                supabase
+                    .from("accounts")
+                    .select("id, name")
+                    .eq("owner_id", ownerId)
+                    .eq("active", true)
+                    .order("name"),
+                supabase
+                    .from("categories")
+                    .select("id, name")
+                    .eq("owner_id", ownerId)
+                    .eq("active", true)
+                    .order("name"),
+                supabase
+                    .from("competences")
+                    .select("id, name")
+                    .eq("owner_id", ownerId)
+                    .order("name"),
             ]);
 
         setAccounts((accountsResult.data ?? []) as SelectOption[]);

@@ -7,7 +7,7 @@ import {
   getClosureByCompetenceId,
   reopenCompetence,
 } from "@/src/services/closingService";
-import { supabase } from "@/src/lib/supabase";
+import { getCurrentUserId, supabase } from "@/src/lib/supabase";
 import type { CompetenceClosure } from "@/src/types/closing";
 import {
   calculateAccountCredits,
@@ -114,9 +114,12 @@ export default function ClosingsPageContent() {
   async function loadData(competenceId?: string) {
     setIsLoading(true);
 
+    const ownerId = await getCurrentUserId();
+
     const { data: competenceData, error: competenceError } = await supabase
       .from("competences")
       .select("id, name")
+      .eq("owner_id", ownerId)
       .order("name", { ascending: false });
 
     if (competenceError) {
@@ -145,9 +148,8 @@ export default function ClosingsPageContent() {
     const { data: accountsData, error: accountsError } = await supabase
       .from("accounts")
       .select("id, name, type")
+      .eq("owner_id", ownerId)
       .eq("active", true)
-      .order("type", { ascending: true })
-      .order("name", { ascending: true });
 
     if (accountsError) {
       alert("Erro ao carregar contas/cartões.");
@@ -158,17 +160,19 @@ export default function ClosingsPageContent() {
     const { data: accountClosuresData } = await supabase
       .from("account_closures")
       .select("id, account_id, opening_balance, closing_balance, status")
+      .eq("owner_id", ownerId)
       .eq("competence_id", resolvedCompetenceId)
-      .eq("account_type", "Conta");
 
     const { data: cardStatementsData } = await supabase
       .from("credit_card_statements")
       .select("id, account_id, statement_total, status, payment_account_id, payment_due_date, payment_transaction_id")
+      .eq("owner_id", ownerId)
       .eq("competence_id", resolvedCompetenceId);
 
     const { data: transactionsData, error: transactionsError } = await supabase
       .from("transactions")
       .select("account_id, destination_account_id, type, value, description")
+      .eq("owner_id", ownerId)
       .eq("competence_id", resolvedCompetenceId);
 
     if (transactionsError) {
@@ -350,6 +354,8 @@ export default function ClosingsPageContent() {
   async function closeAccount(account: Account) {
     if (!selectedCompetenceId) return;
 
+    const ownerId = await getCurrentUserId();
+
     setIsProcessingId(account.id);
 
     try {
@@ -360,6 +366,7 @@ export default function ClosingsPageContent() {
         {
           competence_id: selectedCompetenceId,
           account_id: account.id,
+          owner_id: ownerId,
           account_type: "Conta",
           status: "Fechada",
           opening_balance: openingBalance,
@@ -382,7 +389,7 @@ export default function ClosingsPageContent() {
       setIsProcessingId(null);
     }
   }
-  async function getOrCreateCompetenceByDate(date: string) {
+  async function getOrCreateCompetenceByDate(date: string, ownerId: string) {
     const baseDate = new Date(date + "T00:00:00");
     const month = baseDate.getMonth() + 1;
     const year = baseDate.getFullYear();
@@ -408,6 +415,7 @@ export default function ClosingsPageContent() {
         start_date: startDate,
         end_date: endDate,
         closed: false,
+        owner_id: ownerId,
       })
       .select("id, name")
       .single();
@@ -422,6 +430,8 @@ export default function ClosingsPageContent() {
   }
   async function closeCardStatement(account: Account) {
     if (!selectedCompetenceId) return;
+
+    const ownerId = await getCurrentUserId();
 
     setIsProcessingId(account.id);
 
@@ -440,13 +450,14 @@ export default function ClosingsPageContent() {
 
       if (shouldCreatePayment) {
         const paymentCompetenceId =
-          await getOrCreateCompetenceByDate(paymentDueDate);
+          await getOrCreateCompetenceByDate(paymentDueDate, ownerId);
 
         const paymentDescription = `Pagamento fatura ${account.name}`;
 
         const { data: existingPayment } = await supabase
           .from("transactions")
           .select("id")
+          .eq("owner_id", ownerId)
           .eq("type", "Pagamento de Fatura")
           .eq("competence_id", paymentCompetenceId)
           .eq("account_id", paymentAccountId)
@@ -460,6 +471,7 @@ export default function ClosingsPageContent() {
           const { data: payment } = await supabase
             .from("transactions")
             .insert({
+              owner_id: ownerId,
               description: paymentDescription,
               due_date: paymentDueDate,
               value: statementTotal,
@@ -480,6 +492,7 @@ export default function ClosingsPageContent() {
         {
           account_id: account.id,
           competence_id: selectedCompetenceId,
+          owner_id: ownerId,
           statement_total: statementTotal,
 
           payment_account_id: shouldCreatePayment
@@ -515,6 +528,8 @@ export default function ClosingsPageContent() {
   async function reopenCardStatement(statementId: string) {
     if (!selectedCompetenceId) return;
 
+    const ownerId = await getCurrentUserId();
+
     if (!confirm("Deseja reabrir esta fatura?")) return;
 
     setIsProcessingId(statementId);
@@ -523,7 +538,8 @@ export default function ClosingsPageContent() {
       const { error } = await supabase
         .from("credit_card_statements")
         .delete()
-        .eq("id", statementId);
+        .eq("id", statementId)
+        .eq("owner_id", ownerId);
 
       if (error) throw error;
 
@@ -538,6 +554,8 @@ export default function ClosingsPageContent() {
   async function reopenAccount(accountId: string) {
     if (!selectedCompetenceId) return;
 
+    const ownerId = await getCurrentUserId();
+
     if (!confirm("Deseja reabrir esta conta nesta competência?")) return;
 
     setIsProcessingId(accountId);
@@ -546,6 +564,7 @@ export default function ClosingsPageContent() {
       const { error } = await supabase
         .from("account_closures")
         .delete()
+        .eq("owner_id", ownerId)
         .eq("competence_id", selectedCompetenceId)
         .eq("account_id", accountId);
 
@@ -627,11 +646,11 @@ export default function ClosingsPageContent() {
   function getAccountCredits(accountId: string) {
     return calculateAccountCredits(accountId, transactions);
   }
-  
+
   function getAccountDebits(accountId: string) {
     return calculateAccountDebits(accountId, transactions);
   }
-  
+
   function getAccountFinalBalance(accountId: string) {
     return calculateAccountFinalBalance({
       accountId,

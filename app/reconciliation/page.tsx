@@ -5,7 +5,7 @@ import { normalizeRowsByImportLayout } from "@/src/lib/reconciliation/importNorm
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx";
 import AppShell from "../components/layout/AppShell";
-import { supabase } from "@/src/lib/supabase";
+import { getCurrentUserId, supabase } from "@/src/lib/supabase";
 
 type Account = {
   id: string;
@@ -573,6 +573,7 @@ function findGroupedMatchingTransaction(
 }
 
 type StatementItemPayload = {
+  owner_id: string;
   account_id: string;
   competence_id: string;
   statement_date: string;
@@ -607,6 +608,7 @@ function getStableStatementKey(item: {
 }
 
 async function syncStatementItems(
+  ownerId: string,
   accountId: string,
   competenceId: string,
   payloads: StatementItemPayload[]
@@ -616,6 +618,7 @@ async function syncStatementItems(
     .select(
       "id, statement_date, statement_description, normalized_description, statement_value, source_hash, status"
     )
+    .eq("owner_id", ownerId)
     .eq("account_id", accountId)
     .eq("competence_id", competenceId);
 
@@ -851,10 +854,11 @@ export default function ReconciliationPage() {
   }
 
   useEffect(() => {
-    async function loadAccounts() {
+    async function loadAccounts(ownerId: string) {
       const { data, error } = await supabase
         .from("accounts")
         .select("id, name, type, due_day")
+        .eq("owner_id", ownerId)
         .eq("active", true)
         .order("name", { ascending: true });
 
@@ -874,10 +878,11 @@ export default function ReconciliationPage() {
       setSelectedAccountId(defaultAccount?.id ?? "");
     }
 
-    async function loadCompetences() {
+    async function loadCompetences(ownerId: string) {
       const { data, error } = await supabase
         .from("competences")
         .select("id, name, month, year, start_date, end_date")
+        .eq("owner_id", ownerId)
         .order("year", { ascending: false })
         .order("month", { ascending: false });
 
@@ -892,10 +897,11 @@ export default function ReconciliationPage() {
       setSelectedCompetenceId(getCurrentCompetenceId(competenceList));
     }
 
-    async function loadCategories() {
+    async function loadCategories(ownerId: string) {
       const { data, error } = await supabase
         .from("categories")
         .select("id, name, type, active")
+        .eq("owner_id", ownerId)
         .eq("active", true)
         .order("name", { ascending: true });
 
@@ -907,15 +913,25 @@ export default function ReconciliationPage() {
       setCategories((data ?? []) as Category[]);
     }
 
-    loadAccounts();
-    loadCompetences();
-    loadCategories();
+    async function loadInitialData() {
+      const ownerId = await getCurrentUserId();
+
+      await Promise.all([
+        loadAccounts(ownerId),
+        loadCompetences(ownerId),
+        loadCategories(ownerId),
+      ]);
+    }
+
+    loadInitialData();
   }, []);
 
   async function loadTransactions(accountId: string, competenceId: string) {
+    const ownerId = await getCurrentUserId();
     const { data, error } = await supabase
       .from("transactions")
       .select("id, description, due_date, value, type, status, category_id")
+      .eq("owner_id", ownerId)
       .eq("account_id", accountId)
       .eq("competence_id", competenceId);
 
@@ -927,11 +943,14 @@ export default function ReconciliationPage() {
   }
 
   async function loadPersistedStatement(accountId: string, competenceId: string) {
+    const ownerId = await getCurrentUserId();
+
     const persistedTransactions = await loadTransactions(accountId, competenceId);
 
     const { data: persistedItems, error: persistedItemsError } = await supabase
       .from("credit_card_statement_items")
       .select("id, statement_date, statement_description, statement_value, source_hash, status")
+      .eq("owner_id", ownerId)
       .eq("account_id", accountId)
       .eq("competence_id", competenceId)
       .neq("status", "Ignorado")
@@ -953,6 +972,7 @@ export default function ReconciliationPage() {
       const { data: links, error: linksError } = await supabase
         .from("credit_card_statement_item_transactions")
         .select("statement_item_id, transaction_id")
+        .eq("owner_id", ownerId)
         .in("statement_item_id", statementItemIds);
 
       if (linksError) {
@@ -973,6 +993,7 @@ export default function ReconciliationPage() {
         .from("transactions")
         .select("id, description, due_date, value, type, status, category_id")
         .in("id", linkedTransactionIds)
+        .eq("owner_id", await getCurrentUserId())
         .eq("account_id", accountId)
         .eq("competence_id", competenceId);
       if (error) {
@@ -1030,6 +1051,7 @@ export default function ReconciliationPage() {
     const { data: existingStatement } = await supabase
       .from("credit_card_statements")
       .select("id, payment_transaction_id")
+      .eq("owner_id", ownerId)
       .eq("account_id", accountId)
       .eq("competence_id", competenceId)
       .maybeSingle();
@@ -1051,11 +1073,14 @@ export default function ReconciliationPage() {
   }
 
   async function runAutoReconciliation(accountId: string, competenceId: string) {
+    const ownerId = await getCurrentUserId();
+
     const accountTransactions = await loadTransactions(accountId, competenceId);
 
     const { data: pendingItems, error: pendingItemsError } = await supabase
       .from("credit_card_statement_items")
       .select("id, statement_date, statement_description, statement_value, source_hash, status")
+      .eq("owner_id", ownerId)
       .eq("account_id", accountId)
       .eq("competence_id", competenceId)
       .eq("status", "Pendente");
@@ -1100,6 +1125,7 @@ export default function ReconciliationPage() {
           const { error: insertLinkError } = await supabase
             .from("credit_card_statement_item_transactions")
             .insert({
+              owner_id: ownerId,
               statement_item_id: groupItem.id,
               transaction_id: groupedMatch.transaction.id,
             });
@@ -1116,7 +1142,8 @@ export default function ReconciliationPage() {
               ignored_reason: null,
               updated_at: new Date().toISOString(),
             })
-            .eq("id", groupItem.id);
+            .eq("id", groupItem.id)
+            .eq("owner_id", ownerId);
 
           if (updateItemError) {
             throw updateItemError;
@@ -1142,6 +1169,7 @@ export default function ReconciliationPage() {
       const { error: insertLinkError } = await supabase
         .from("credit_card_statement_item_transactions")
         .insert({
+          owner_id: ownerId,
           statement_item_id: item.id,
           transaction_id: automaticMatch.id,
         });
@@ -1158,7 +1186,8 @@ export default function ReconciliationPage() {
           ignored_reason: null,
           updated_at: new Date().toISOString(),
         })
-        .eq("id", item.id);
+        .eq("id", item.id)
+        .eq("owner_id", await getCurrentUserId());
 
       if (updateItemError) {
         throw updateItemError;
@@ -1360,13 +1389,13 @@ export default function ReconciliationPage() {
         console.log("HEADER ROW INDEX:", savedLayout.header_row_index);
         console.log("LINHA DO CABEÇALHO LIDA:", rows[savedLayout.header_row_index]);
         console.log("PRIMEIRAS 5 LINHAS APÓS CABEÇALHO:", rows.slice(savedLayout.header_row_index + 1, savedLayout.header_row_index + 6));
-      
+
         const normalizedItems = normalizeRowsByImportLayout(
           rows,
           savedLayout,
           selectedCompetence?.year
         );
-      
+
         console.log("NORMALIZED ITEMS:", normalizedItems);
 
         extractedItems = normalizedItems.map((item) => ({
@@ -1395,6 +1424,7 @@ export default function ReconciliationPage() {
       }
 
       const itemOccurrenceCounter = new Map<string, number>();
+      const ownerId = await getCurrentUserId();
 
       const statementItemsPayload = extractedItems.map((item) => {
         const baseHash = `${item.date}|${normalizeText(item.description)}|${Number(
@@ -1407,6 +1437,7 @@ export default function ReconciliationPage() {
         const sourceHash = `${baseHash}|${occurrence}`;
 
         return {
+          owner_id: ownerId,
           account_id: selectedAccountId,
           competence_id: selectedCompetenceId,
           statement_date: item.date,
@@ -1421,6 +1452,7 @@ export default function ReconciliationPage() {
 
       if (statementItemsPayload.length > 0) {
         const syncResult = await syncStatementItems(
+          ownerId,
           selectedAccountId,
           selectedCompetenceId,
           statementItemsPayload as StatementItemPayload[]
@@ -1436,6 +1468,7 @@ export default function ReconciliationPage() {
         .select(
           "id, statement_date, statement_description, statement_value, source_hash, status"
         )
+        .eq("owner_id", ownerId)
         .eq("account_id", selectedAccountId)
         .eq("competence_id", selectedCompetenceId)
         .neq("status", "Ignorado")
@@ -1462,6 +1495,7 @@ export default function ReconciliationPage() {
         const { data: links, error: linksError } = await supabase
           .from("credit_card_statement_item_transactions")
           .select("statement_item_id, transaction_id")
+          .eq("owner_id", ownerId)
           .in("statement_item_id", statementItemIds);
 
         if (linksError) {
@@ -1539,6 +1573,7 @@ export default function ReconciliationPage() {
       const { data: existingStatement } = await supabase
         .from("credit_card_statements")
         .select("id, payment_transaction_id")
+        .eq("owner_id", ownerId)
         .eq("account_id", selectedAccountId)
         .eq("competence_id", selectedCompetenceId)
         .maybeSingle();
@@ -1639,6 +1674,8 @@ export default function ReconciliationPage() {
   async function createTransactionFromImportedItem() {
     if (!itemToCreateTransaction) return;
 
+    const ownerId = await getCurrentUserId();
+
     if (!selectedAccountId || !selectedCompetenceId) {
       alert("Selecione conta/cartão e competência.");
       return;
@@ -1655,6 +1692,7 @@ export default function ReconciliationPage() {
     }
 
     const payload = {
+      owner_id: ownerId,
       description: createForm.description,
       value: Number(createForm.value),
       due_date: createForm.due_date,
@@ -1728,6 +1766,8 @@ export default function ReconciliationPage() {
   async function updateTransactionFromReconciliation() {
     if (!itemToEditTransaction?.matchedTransaction) return;
 
+    const ownerId = await getCurrentUserId();
+
     const transactionId = itemToEditTransaction.matchedTransaction.id;
 
     const { data: updatedTransaction, error } = await supabase
@@ -1738,6 +1778,7 @@ export default function ReconciliationPage() {
         due_date: editForm.due_date,
       })
       .eq("id", transactionId)
+      .eq("owner_id", ownerId)
       .select("id, description, due_date, value, type, status, category_id")
       .single();
 
@@ -1825,6 +1866,7 @@ export default function ReconciliationPage() {
     transactionId: string | null,
     ignored = false
   ) {
+    const ownerId = await getCurrentUserId();
     if (!item.id) {
       throw new Error("Item da fatura ainda não foi persistido.");
     }
@@ -1832,6 +1874,7 @@ export default function ReconciliationPage() {
     const { error: deleteLinksError } = await supabase
       .from("credit_card_statement_item_transactions")
       .delete()
+      .eq("owner_id", ownerId)
       .eq("statement_item_id", item.id);
 
     if (deleteLinksError) {
@@ -1846,7 +1889,8 @@ export default function ReconciliationPage() {
           ignored_reason: "Ignorado manualmente",
           updated_at: new Date().toISOString(),
         })
-        .eq("id", item.id);
+        .eq("id", item.id)
+        .eq("owner_id", await getCurrentUserId());
 
       if (ignoreError) {
         throw ignoreError;
@@ -1863,7 +1907,8 @@ export default function ReconciliationPage() {
           ignored_reason: null,
           updated_at: new Date().toISOString(),
         })
-        .eq("id", item.id);
+        .eq("id", item.id)
+        .eq("owner_id", await getCurrentUserId());
 
       if (pendingError) {
         throw pendingError;
@@ -1875,6 +1920,7 @@ export default function ReconciliationPage() {
     const { error: insertLinkError } = await supabase
       .from("credit_card_statement_item_transactions")
       .insert({
+        owner_id: ownerId,
         statement_item_id: item.id,
         transaction_id: transactionId,
       });
@@ -1890,7 +1936,8 @@ export default function ReconciliationPage() {
         ignored_reason: null,
         updated_at: new Date().toISOString(),
       })
-      .eq("id", item.id);
+      .eq("id", item.id)
+      .eq("owner_id", await getCurrentUserId());
 
     if (updateItemError) {
       throw updateItemError;
@@ -1941,6 +1988,8 @@ export default function ReconciliationPage() {
     item: ImportedItem,
     transaction: Transaction
   ) {
+    const ownerId = await getCurrentUserId();
+
     const correctedValue = Math.abs(Number(item.value));
 
     const { data: updatedTransaction, error } = await supabase
@@ -1949,6 +1998,7 @@ export default function ReconciliationPage() {
         value: correctedValue,
       })
       .eq("id", transaction.id)
+      .eq("owner_id", ownerId)
       .select("id, description, due_date, value, type, status, category_id")
       .single();
 
@@ -2049,7 +2099,7 @@ export default function ReconciliationPage() {
     setClosedStatement(null);
   }
 
-  async function getOrCreateCompetenceByDate(date: string) {
+  async function getOrCreateCompetenceByDate(date: string, ownerId: string) {
     const baseDate = new Date(date + "T00:00:00");
     const month = baseDate.getMonth() + 1;
     const year = baseDate.getFullYear();
@@ -2069,6 +2119,7 @@ export default function ReconciliationPage() {
     const { data, error } = await supabase
       .from("competences")
       .insert({
+        owner_id: ownerId,
         name,
         month,
         year,
@@ -2089,6 +2140,7 @@ export default function ReconciliationPage() {
   }
 
   async function reopenStatement() {
+    const ownerId = await getCurrentUserId();
     if (!closedStatement?.id) {
       alert("Nenhuma fatura fechada encontrada.");
       return;
@@ -2104,7 +2156,8 @@ export default function ReconciliationPage() {
       const { error: statementError } = await supabase
         .from("credit_card_statements")
         .delete()
-        .eq("id", closedStatement.id);
+        .eq("id", closedStatement.id)
+        .eq("owner_id", ownerId);
 
       if (statementError) {
         throw statementError;
@@ -2114,7 +2167,8 @@ export default function ReconciliationPage() {
         const { error: paymentError } = await supabase
           .from("transactions")
           .delete()
-          .eq("id", paymentTransactionId);
+          .eq("id", paymentTransactionId)
+          .eq("owner_id", ownerId);
 
         if (paymentError) {
           throw paymentError;
@@ -2134,6 +2188,8 @@ export default function ReconciliationPage() {
 
   async function closeStatementAndCreatePayment() {
     if (isClosingStatementRef.current) return;
+
+    const ownerId = await getCurrentUserId();
 
     isClosingStatementRef.current = true;
     setIsClosingStatement(true);
@@ -2188,6 +2244,8 @@ export default function ReconciliationPage() {
     setIsClosingStatement(true);
 
     try {
+      const ownerId = await getCurrentUserId();
+
       const selectedCompetence = competences.find(
         (competence) => competence.id === selectedCompetenceId
       );
@@ -2195,12 +2253,13 @@ export default function ReconciliationPage() {
       const description = `Pagamento de fatura ${selectedAccount?.name ?? ""} - ${selectedCompetence?.name ?? ""
         }`;
 
-      const paymentCompetenceId = await getOrCreateCompetenceByDate(paymentDueDate);
+      const paymentCompetenceId = await getOrCreateCompetenceByDate(paymentDueDate, ownerId);
 
       const { data: existingStatement, error: existingStatementError } =
         await supabase
           .from("credit_card_statements")
           .select("id, payment_transaction_id")
+          .eq("owner_id", ownerId)
           .eq("account_id", selectedAccountId)
           .eq("competence_id", selectedCompetenceId)
           .maybeSingle();
@@ -2226,7 +2285,8 @@ export default function ReconciliationPage() {
             account_id: paymentAccountId,
             competence_id: paymentCompetenceId,
           })
-          .eq("id", paymentTransactionId);
+          .eq("id", paymentTransactionId)
+          .eq("owner_id", ownerId);
 
         if (updatePaymentError) {
           throw updatePaymentError;
@@ -2235,6 +2295,7 @@ export default function ReconciliationPage() {
         const { data: paymentTransaction, error: paymentError } = await supabase
           .from("transactions")
           .insert({
+            owner_id: ownerId,
             description,
             value: statementTotal,
             due_date: paymentDueDate,
@@ -2272,7 +2333,8 @@ export default function ReconciliationPage() {
           ignored_reason: null,
           updated_at: new Date().toISOString(),
         })
-        .in("id", reconciledItemIds);
+        .in("id", reconciledItemIds)
+        .eq("owner_id", ownerId);
 
       if (confirmItemsError) {
         throw confirmItemsError;
@@ -2282,6 +2344,7 @@ export default function ReconciliationPage() {
         .from("credit_card_statements")
         .upsert(
           {
+            owner_id: ownerId,
             account_id: selectedAccountId,
             competence_id: selectedCompetenceId,
             payment_account_id: paymentAccountId,

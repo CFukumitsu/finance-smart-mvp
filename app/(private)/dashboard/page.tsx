@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import AppShell from "../../components/layout/AppShell";
-import { supabase } from "@/src/lib/supabase";
+import { getCurrentUserId, supabase } from "@/src/lib/supabase";
 import { updateOverduePaymentStatusesOncePerDay } from "@/src/services/paymentStatusService";
 import {
   calculateCardRealizedValue,
@@ -100,6 +100,8 @@ export default function DashboardPage() {
   async function loadDashboardData(targetMonth?: number, targetYear?: number) {
     setIsLoading(true);
 
+    const ownerId = await getCurrentUserId();
+
     const today = new Date();
     const currentMonth = targetMonth ?? today.getMonth() + 1;
     const currentYear = targetYear ?? today.getFullYear();
@@ -107,13 +109,26 @@ export default function DashboardPage() {
     const { data: competenceData, error: competenceError } = await supabase
       .from("competences")
       .select("id, name, month, year, status")
+      .eq("owner_id", ownerId)
       .eq("month", currentMonth)
       .eq("year", currentYear)
-      .single();
+      .maybeSingle();
 
-    if (competenceError || !competenceData) {
+    if (competenceError) {
       console.error("Erro ao carregar competência atual:", competenceError);
       setCurrentCompetence(null);
+      setIsLoading(false);
+      return;
+    }
+
+    if (!competenceData) {
+      setCurrentCompetence(null);
+      setCashFlowCompetence(null);
+      setCashFlowTransactions([]);
+      setReferenceTransactions([]);
+      setPreviousCardTransactions([]);
+      setAccountTargets({});
+      setCategoryTargets({});
       setIsLoading(false);
       return;
     }
@@ -126,9 +141,10 @@ export default function DashboardPage() {
       await supabase
         .from("competences")
         .select("id, name, month, year, status")
+        .eq("owner_id", ownerId)
         .eq("month", cashFlowMonth.month)
         .eq("year", cashFlowMonth.year)
-        .single();
+        .maybeSingle();
 
     if (cashFlowCompetenceError || !cashFlowCompetenceData) {
       console.error(
@@ -146,6 +162,7 @@ export default function DashboardPage() {
     const { data: targetData, error: targetError } = await supabase
       .from("financial_targets")
       .select("target_type, target_id, planned_value, competence_id")
+      .eq("owner_id", ownerId)
       .in("competence_id", [competenceData.id, cashFlowCompetenceData.id])
       .in("target_type", ["account", "category"]);
 
@@ -197,6 +214,7 @@ export default function DashboardPage() {
     category:categories!transactions_category_id_fkey(name, monthly_limit, monthly_goal, show_on_dashboard, dashboard_order, active),
     competence:competences!transactions_competence_id_fkey(name)
   `)
+      .eq("owner_id", ownerId)
       .eq("competence_id", cashFlowCompetenceData.id);
 
     setCashFlowCompetence(cashFlowCompetenceData as Competence);
@@ -222,6 +240,7 @@ export default function DashboardPage() {
       category:categories!transactions_category_id_fkey(name, monthly_limit, monthly_goal, show_on_dashboard, dashboard_order, active),
       competence:competences!transactions_competence_id_fkey(name)
     `)
+      .eq("owner_id", ownerId)
       .eq("competence_id", competenceData.id);
 
     if (referenceCardError) {
@@ -335,7 +354,7 @@ export default function DashboardPage() {
         const categoryA = referenceTransactions.find(
           (transaction) => transaction.category?.name === a.name
         )?.category;
-        
+
         const categoryB = referenceTransactions.find(
           (transaction) => transaction.category?.name === b.name
         )?.category;

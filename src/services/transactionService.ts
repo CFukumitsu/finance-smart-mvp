@@ -1,4 +1,4 @@
-import { supabase } from "@/src/lib/supabase";
+import { getCurrentUserId, supabase } from "@/src/lib/supabase";
 import { ensureCompetenceIsOpen } from "@/src/utils/competenceLock";
 
 type ServiceResult = {
@@ -7,10 +7,13 @@ type ServiceResult = {
 };
 
 export async function deleteTransaction(id: string): Promise<ServiceResult> {
+  const ownerId = await getCurrentUserId();
+
   const { data: existingTransaction, error: findError } = await supabase
     .from("transactions")
     .select("competence_id")
     .eq("id", id)
+    .eq("owner_id", ownerId)
     .single();
 
   if (findError) {
@@ -30,9 +33,9 @@ export async function deleteTransaction(id: string): Promise<ServiceResult> {
   }
 
   const { error: legacyReconciliationError } = await supabase
-    .from("transaction_reconciliations")
-    .delete()
-    .eq("transaction_id", id);
+  .from("transaction_reconciliations")
+  .delete()
+  .eq("transaction_id", id);
 
   if (legacyReconciliationError) {
     return {
@@ -44,7 +47,8 @@ export async function deleteTransaction(id: string): Promise<ServiceResult> {
   const { error: statementReconciliationError } = await supabase
     .from("credit_card_statement_item_transactions")
     .delete()
-    .eq("transaction_id", id);
+    .eq("transaction_id", id)
+    .eq("owner_id", ownerId);
 
   if (statementReconciliationError) {
     return {
@@ -53,7 +57,11 @@ export async function deleteTransaction(id: string): Promise<ServiceResult> {
     };
   }
 
-  const { error } = await supabase.from("transactions").delete().eq("id", id);
+  const { error } = await supabase
+    .from("transactions")
+    .delete()
+    .eq("id", id)
+    .eq("owner_id", ownerId);
 
   if (error) {
     return {
