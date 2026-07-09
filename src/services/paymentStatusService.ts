@@ -1,36 +1,28 @@
-import { supabase } from "@/src/lib/supabase";
+import { getCurrentUserId, supabase } from "@/src/lib/supabase";
 
 export async function updateOverduePaymentStatusesOncePerDay() {
+  const ownerId = await getCurrentUserId();
   const today = new Date().toISOString().slice(0, 10);
-  const routineId = "update_overdue_payment_statuses";
-
-  const { data: routine } = await supabase
-    .from("system_routines")
-    .select("last_run_date")
-    .eq("id", routineId)
-    .maybeSingle();
-
-  if (routine?.last_run_date === today) {
-    return;
-  }
 
   await supabase
     .from("transactions")
-    .update({ status: "Pago" })
+    .update({
+      status: "Pago",
+      updated_at: new Date().toISOString(),
+    })
+    .eq("owner_id", ownerId)
     .eq("type", "Despesa")
     .eq("status", "Pendente")
     .lte("due_date", today);
 
   await supabase
     .from("transactions")
-    .update({ status: "Recebido" })
+    .update({
+      status: "Recebido",
+      updated_at: new Date().toISOString(),
+    })
+    .eq("owner_id", ownerId)
     .eq("type", "Receita")
     .eq("status", "Pendente")
     .lte("due_date", today);
-
-  await supabase.from("system_routines").upsert({
-    id: routineId,
-    last_run_date: today,
-    updated_at: new Date().toISOString(),
-  });
 }

@@ -1,4 +1,4 @@
-import { supabase } from "@/src/lib/supabase";
+import { getCurrentUserId, supabase } from "@/src/lib/supabase";
 
 export type ImportLayout = {
   id: string;
@@ -14,9 +14,12 @@ export type ImportLayout = {
 };
 
 export async function loadActiveImportLayout(accountId: string) {
+  const ownerId = await getCurrentUserId();
+
   const { data, error } = await supabase
     .from("import_layouts")
     .select("*")
+    .eq("owner_id", ownerId)
     .eq("account_id", accountId)
     .eq("active", true)
     .order("created_at", { ascending: false })

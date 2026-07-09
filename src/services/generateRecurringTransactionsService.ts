@@ -1,4 +1,4 @@
-import { supabase } from "@/src/lib/supabase";
+import { getCurrentUserId, supabase } from "@/src/lib/supabase";
 
 type GenerateRecurringTransactionsParams = {
   competenceId: string;
@@ -28,10 +28,13 @@ export async function generateRecurringTransactions({
     throw new Error("Competência não informada.");
   }
 
+  const ownerId = await getCurrentUserId();
+
   const { data: competenceData, error: competenceError } = await supabase
     .from("competences")
     .select("id, name, month, year")
     .eq("id", competenceId)
+    .eq("owner_id", ownerId)
     .single();
 
   if (competenceError || !competenceData) {
@@ -43,6 +46,7 @@ export async function generateRecurringTransactions({
   const { data: recurringData, error: recurringError } = await supabase
     .from("recurring_transactions")
     .select("id, description, type, amount, account_id, category_id, day_of_month")
+    .eq("owner_id", ownerId)
     .eq("status", "active");
 
   if (recurringError) {
@@ -61,6 +65,7 @@ export async function generateRecurringTransactions({
   const { data: existingTransactions, error: existingError } = await supabase
     .from("transactions")
     .select("id, recurring_transaction_id")
+    .eq("owner_id", ownerId)
     .eq("competence_id", competenceId)
     .not("recurring_transaction_id", "is", null);
 
@@ -93,6 +98,7 @@ export async function generateRecurringTransactions({
   const transactionsToCreate = recurringTransactions
     .filter((item) => !alreadyGeneratedIds.has(item.id))
     .map((item) => ({
+      owner_id: ownerId,
       description: item.description,
       type: item.type === "income" ? "Receita" : "Despesa",
       value: item.amount,

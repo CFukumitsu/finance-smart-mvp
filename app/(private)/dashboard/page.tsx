@@ -102,6 +102,11 @@ export default function DashboardPage() {
 
     const ownerId = await getCurrentUserId();
 
+    if (!ownerId) {
+      setIsLoading(false);
+      return;
+    }
+
     const today = new Date();
     const currentMonth = targetMonth ?? today.getMonth() + 1;
     const currentYear = targetYear ?? today.getFullYear();

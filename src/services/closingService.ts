@@ -1,12 +1,15 @@
-import { supabase } from "@/src/lib/supabase";
+import { getCurrentUserId, supabase } from "@/src/lib/supabase";
 import type { CompetenceClosure, ClosingSnapshot } from "@/src/types/closing";
 
 export async function getClosureByCompetenceId(
   competenceId: string
 ): Promise<CompetenceClosure | null> {
+  const ownerId = await getCurrentUserId();
+
   const { data, error } = await supabase
     .from("competence_closures")
     .select("*")
+    .eq("owner_id", ownerId)
     .eq("competence_id", competenceId)
     .maybeSingle();
 
@@ -20,9 +23,12 @@ export async function getClosureByCompetenceId(
 export async function calculateClosingSnapshot(
   competenceId: string
 ): Promise<ClosingSnapshot> {
+  const ownerId = await getCurrentUserId();
+
   const { data, error } = await supabase
     .from("transactions")
     .select("type, status, value")
+    .eq("owner_id", ownerId)
     .eq("competence_id", competenceId);
 
   if (error) {
@@ -73,10 +79,12 @@ export async function calculateClosingSnapshot(
 }
 
 export async function closeCompetence(competenceId: string) {
+  const ownerId = await getCurrentUserId();
   const snapshot = await calculateClosingSnapshot(competenceId);
 
   const { error } = await supabase.from("competence_closures").upsert(
     {
+      owner_id: ownerId,
       competence_id: competenceId,
       status: "Fechada",
       closed_at: new Date().toISOString(),
@@ -91,7 +99,7 @@ export async function closeCompetence(competenceId: string) {
       updated_at: new Date().toISOString(),
     },
     {
-      onConflict: "competence_id",
+      onConflict: "owner_id,competence_id",
     }
   );
 
@@ -101,6 +109,8 @@ export async function closeCompetence(competenceId: string) {
 }
 
 export async function reopenCompetence(competenceId: string) {
+  const ownerId = await getCurrentUserId();
+
   const { error } = await supabase
     .from("competence_closures")
     .update({
@@ -108,6 +118,7 @@ export async function reopenCompetence(competenceId: string) {
       reopened_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     })
+    .eq("owner_id", ownerId)
     .eq("competence_id", competenceId);
 
   if (error) {

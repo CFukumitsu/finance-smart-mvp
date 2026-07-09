@@ -33,9 +33,10 @@ export async function deleteTransaction(id: string): Promise<ServiceResult> {
   }
 
   const { error: legacyReconciliationError } = await supabase
-  .from("transaction_reconciliations")
-  .delete()
-  .eq("transaction_id", id);
+    .from("transaction_reconciliations")
+    .delete()
+    .eq("transaction_id", id)
+    .eq("owner_id", ownerId);
 
   if (legacyReconciliationError) {
     return {

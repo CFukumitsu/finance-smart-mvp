@@ -1,15 +1,18 @@
-import { supabase } from "@/src/lib/supabase";
+import { getCurrentUserId, supabase } from "@/src/lib/supabase";
 
 export async function ensureAccountIsOpen(params: {
   accountId: string;
   competenceId: string;
 }) {
+
   const { accountId, competenceId } = params;
+  const ownerId = await getCurrentUserId();
 
   const { data: account } = await supabase
     .from("accounts")
     .select("type")
     .eq("id", accountId)
+    .eq("owner_id", ownerId)
     .maybeSingle();
 
   if (!account) {
@@ -23,6 +26,7 @@ export async function ensureAccountIsOpen(params: {
     const { data } = await supabase
       .from("account_closures")
       .select("id")
+      .eq("owner_id", ownerId)
       .eq("account_id", accountId)
       .eq("competence_id", competenceId)
       .maybeSingle();
@@ -39,6 +43,7 @@ export async function ensureAccountIsOpen(params: {
     const { data } = await supabase
       .from("credit_card_statements")
       .select("id")
+      .eq("owner_id", ownerId)
       .eq("account_id", accountId)
       .eq("competence_id", competenceId)
       .maybeSingle();

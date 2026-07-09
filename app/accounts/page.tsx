@@ -182,7 +182,7 @@ export default function AccountsPage() {
       }));
 
     const { error } = await supabase.from("financial_targets").upsert(rows, {
-      onConflict: "competence_id,target_type,target_id",
+      onConflict: "owner_id,competence_id,target_type,target_id",
     });
 
     if (error) {
@@ -251,7 +251,7 @@ export default function AccountsPage() {
             updated_at: new Date().toISOString(),
           },
           {
-            onConflict: "competence_id,target_type,target_id",
+            onConflict: "owner_id,competence_id,target_type,target_id",
           }
         );
 

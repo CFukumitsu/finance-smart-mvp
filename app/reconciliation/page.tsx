@@ -928,6 +928,7 @@ export default function ReconciliationPage() {
 
   async function loadTransactions(accountId: string, competenceId: string) {
     const ownerId = await getCurrentUserId();
+
     const { data, error } = await supabase
       .from("transactions")
       .select("id, description, due_date, value, type, status, category_id")
@@ -1616,12 +1617,15 @@ export default function ReconciliationPage() {
     }
 
     try {
+      const ownerId = await getCurrentUserId();
+
       const { error: deactivateError } = await supabase
         .from("import_layouts")
         .update({
           active: false,
           updated_at: new Date().toISOString(),
         })
+        .eq("owner_id", ownerId)
         .eq("account_id", selectedAccountId);
 
       if (deactivateError) {
@@ -1629,6 +1633,7 @@ export default function ReconciliationPage() {
       }
 
       const { error: insertError } = await supabase.from("import_layouts").insert({
+        owner_id: ownerId,
         account_id: selectedAccountId,
         name: `Modelo ${selectedAccount?.name ?? ""}`.trim(),
         header_row_index: Math.max(0, Number(layoutForm.header_row_index) - 1),
@@ -2356,7 +2361,7 @@ export default function ReconciliationPage() {
             updated_at: new Date().toISOString(),
           },
           {
-            onConflict: "account_id,competence_id",
+            onConflict: "owner_id,account_id,competence_id",
           }
         )
         .select("id, payment_transaction_id")
@@ -2659,9 +2664,12 @@ export default function ReconciliationPage() {
                     return;
                   }
 
+                  const ownerId = await getCurrentUserId();
+
                   const { error: deleteLinksError } = await supabase
                     .from("credit_card_statement_item_transactions")
                     .delete()
+                    .eq("owner_id", ownerId)
                     .in("statement_item_id", statementItemIds);
 
                   if (deleteLinksError) {
@@ -2676,6 +2684,7 @@ export default function ReconciliationPage() {
                       ignored_reason: null,
                       updated_at: new Date().toISOString(),
                     })
+                    .eq("owner_id", ownerId)
                     .in("id", statementItemIds);
 
                   if (error) {

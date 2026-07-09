@@ -40,9 +40,15 @@ export default function LoginForm() {
       onSubmit={handleSubmit}
       className="w-full max-w-md rounded-3xl border border-white/10 bg-slate-950/80 p-8 shadow-2xl"
     >
-      <div className="mb-8">
-        <p className="text-sm font-semibold uppercase tracking-[0.3em] text-blue-300">
-          Framework FKT
+      <div className="mb-8 flex flex-col items-center text-center">
+        <img
+          src="/logo-fkt.png"
+          alt="FKT Systems"
+          className="h-28 w-28 rounded-full object-cover shadow-xl shadow-black/40"
+        />
+
+        <p className="mt-5 text-sm font-semibold uppercase tracking-[0.3em] text-blue-300">
+          Finance Smart
         </p>
 
         <h1 className="mt-3 text-3xl font-bold text-white">
@@ -50,7 +56,7 @@ export default function LoginForm() {
         </h1>
 
         <p className="mt-2 text-sm text-slate-400">
-          Entre para acessar o Finance Smart.
+          Powered by FKT Systems
         </p>
       </div>
 
