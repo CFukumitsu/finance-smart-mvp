@@ -32,19 +32,6 @@ export async function deleteTransaction(id: string): Promise<ServiceResult> {
     };
   }
 
-  const { error: legacyReconciliationError } = await supabase
-    .from("transaction_reconciliations")
-    .delete()
-    .eq("transaction_id", id)
-    .eq("owner_id", ownerId);
-
-  if (legacyReconciliationError) {
-    return {
-      success: false,
-      message: "Erro ao excluir conciliação antiga vinculada ao lançamento.",
-    };
-  }
-
   const { error: statementReconciliationError } = await supabase
     .from("credit_card_statement_item_transactions")
     .delete()
@@ -54,7 +41,7 @@ export async function deleteTransaction(id: string): Promise<ServiceResult> {
   if (statementReconciliationError) {
     return {
       success: false,
-      message: "Erro ao excluir conciliação da fatura vinculada ao lançamento.",
+      message: statementReconciliationError.message,
     };
   }
 

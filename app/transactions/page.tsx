@@ -82,6 +82,7 @@ function TransactionsPageContent() {
   const [statusFilter, setStatusFilter] = useState("");
   const [competenceFilter, setCompetenceFilter] = useState("");
   const [accountFilter, setAccountFilter] = useState("");
+  const [categoryFilter, setCategoryFilter] = useState("");
   const [listMode, setListMode] = useState<"competence" | "latest">("latest");
   const [showFilters, setShowFilters] = useState(false);
   const [plannedCardLimit, setPlannedCardLimit] = useState(0);
@@ -340,6 +341,7 @@ function TransactionsPageContent() {
     accountId?: string;
     type?: string;
     status?: string;
+    categoryId?: string;
     search?: string;
     listMode?: "competence" | "latest";
   }) {
@@ -392,6 +394,10 @@ function TransactionsPageContent() {
 
     if (filters?.status) {
       query = query.eq("status", filters.status);
+    }
+
+    if (filters?.categoryId) {
+      query = query.eq("category_id", filters.categoryId);
     }
 
     if (filters?.search) {
@@ -482,6 +488,8 @@ function TransactionsPageContent() {
           .from("competences")
           .select("id, month, year, name, status")
           .eq("owner_id", ownerId)
+          .order("year", { ascending: false })
+          .order("month", { ascending: false })
       ]);
 
     if (accountsResponse.data) setAccounts(accountsResponse.data);
@@ -512,10 +520,7 @@ function TransactionsPageContent() {
           getAutomaticStatus(defaultType, defaultDueDate),
         account_id: storedDefaults?.account_id ?? "",
         category_id: storedDefaults?.category_id ?? "",
-        competence_id:
-          storedDefaults?.competence_id ??
-          getCompetenceIdByDate(defaultDueDate) ??
-          defaultCompetenceId,
+        competence_id: defaultCompetenceId,
       }));
 
       await loadTransactions({
@@ -561,10 +566,11 @@ function TransactionsPageContent() {
       accountId: accountFilter,
       type: typeFilter,
       status: statusFilter,
+      categoryId: categoryFilter,
       search: searchTerm,
       listMode,
     });
-  }, [competenceFilter, accountFilter, typeFilter, statusFilter, listMode]);
+  }, [competenceFilter, accountFilter, typeFilter, statusFilter, categoryFilter, listMode]);
 
   function resetForm() {
     const storedDefaults = getStoredTransactionDefaults();
@@ -591,9 +597,7 @@ function TransactionsPageContent() {
       origin_account_id: "",
       destination_account_id: "",
       category_id: storedDefaults?.category_id ?? "",
-      competence_id:
-        storedDefaults?.competence_id ??
-        getCompetenceIdByDate(defaultDueDate),
+      competence_id: getCurrentCompetenceId(competences),
     });
   }
 
@@ -747,6 +751,7 @@ function TransactionsPageContent() {
           accountId: accountFilter,
           type: typeFilter,
           status: statusFilter,
+          categoryId: categoryFilter,
           search: searchTerm,
           listMode,
         });
@@ -850,6 +855,7 @@ function TransactionsPageContent() {
         accountId: accountFilter,
         type: typeFilter,
         status: statusFilter,
+        categoryId: categoryFilter,
         search: searchTerm,
         listMode,
       });
@@ -889,6 +895,7 @@ function TransactionsPageContent() {
         accountId: accountFilter,
         type: typeFilter,
         status: statusFilter,
+        categoryId: categoryFilter,
         search: searchTerm,
         listMode,
       });
@@ -1042,6 +1049,16 @@ function TransactionsPageContent() {
     }
   }
 
+  function formatShortDate(date: string) {
+    return new Date(date + "T00:00:00").toLocaleDateString("pt-BR", {
+      day: "2-digit",
+      month: "2-digit",
+    });
+  }
+
+  function formatFullDate(date: string) {
+    return new Date(date + "T00:00:00").toLocaleDateString("pt-BR");
+  }
 
   function formatCurrency(value: number) {
     return Number(value).toLocaleString("pt-BR", {
@@ -1194,146 +1211,165 @@ function TransactionsPageContent() {
           </button>
         </div>
 
-        <div className="grid gap-3 md:grid-cols-7">
-          <div className="min-w-0 rounded-xl border border-white/10 bg-slate-900 p-2 md:col-span-2">
-            <div className="flex items-center justify-between gap-2">
-              <button
-                type="button"
-                onClick={goToPreviousCompetence}
-                className="flex h-9 w-9 items-center justify-center rounded-lg text-slate-400 hover:bg-white/10 hover:text-white"
-                title="Competência anterior"
-              >
-                <ChevronLeft size={18} />
-              </button>
+        <div className="space-y-3">
+          <div className="w-full">
+            <div className="w-full rounded-xl border border-white/10 bg-slate-900 p-2">
+              <div className="flex items-center justify-between gap-2">
+                <button
+                  type="button"
+                  onClick={goToPreviousCompetence}
+                  className="flex h-9 w-9 items-center justify-center rounded-lg text-slate-400 hover:bg-white/10 hover:text-white"
+                  title="Competência anterior"
+                >
+                  <ChevronLeft size={18} />
+                </button>
 
-              <div className="flex min-w-0 flex-1 items-center justify-center gap-1 overflow-hidden">
-                {getVisibleMonthDates().map((date) => {
-                  const foundCompetence = getCompetenceByDate(date);
-                  const isSelected =
-                    foundCompetence?.id === selectedCompetence?.id;
+                <div className="flex min-w-0 flex-1 items-center justify-center gap-2 overflow-hidden">
+                  {getVisibleMonthDates().map((date) => {
+                    const foundCompetence = getCompetenceByDate(date);
+                    const isSelected =
+                      foundCompetence?.id === selectedCompetence?.id;
 
-                  const today = new Date();
-                  const isCurrentMonth =
-                    date.getMonth() === today.getMonth() &&
-                    date.getFullYear() === today.getFullYear();
+                    const today = new Date();
+                    const isCurrentMonth =
+                      date.getMonth() === today.getMonth() &&
+                      date.getFullYear() === today.getFullYear();
 
-                  return (
-                    <button
-                      key={`${date.getFullYear()}-${date.getMonth()}`}
-                      type="button"
-                      disabled={!foundCompetence}
-                      onClick={() => selectCompetenceByDate(date)}
-                      className={`shrink-0 whitespace-nowrap rounded-full px-3 py-2 text-xs font-semibold transition ${isSelected
-                        ? "bg-blue-600 text-white"
-                        : isCurrentMonth
-                          ? "bg-cyan-500/10 text-cyan-300"
-                          : foundCompetence
-                            ? "bg-white/[0.03] text-slate-400 hover:bg-white/10 hover:text-white"
-                            : "cursor-not-allowed bg-white/[0.02] text-slate-700"
-                        }`}
-                    >
-                      {formatMonthLabel(date)}
-                    </button>
-                  );
-                })}
+                    return (
+                      <button
+                        key={`${date.getFullYear()}-${date.getMonth()}`}
+                        type="button"
+                        disabled={!foundCompetence}
+                        onClick={() => selectCompetenceByDate(date)}
+                        className={`shrink-0 whitespace-nowrap rounded-full px-5 py-2 text-xs font-semibold transition ${isSelected
+                          ? "bg-blue-600 text-white"
+                          : isCurrentMonth
+                            ? "bg-cyan-500/10 text-cyan-300"
+                            : foundCompetence
+                              ? "bg-white/[0.03] text-slate-400 hover:bg-white/10 hover:text-white"
+                              : "cursor-not-allowed bg-white/[0.02] text-slate-700"
+                          }`}
+                      >
+                        {formatMonthLabel(date)}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <button
+                  type="button"
+                  onClick={goToNextCompetence}
+                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-slate-400 hover:bg-white/10 hover:text-white"
+                  title="Próxima competência"
+                >
+                  <ChevronRight size={18} />
+                </button>
               </div>
 
               <button
                 type="button"
-                onClick={goToNextCompetence}
-                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-slate-400 hover:bg-white/10 hover:text-white"
-                title="Próxima competência"
+                onClick={goToCurrentCompetence}
+                className="mt-2 w-full rounded-lg py-1 text-xs font-medium text-slate-400 hover:bg-white/10 hover:text-white"
               >
-                <ChevronRight size={18} />
+                Voltar para mês atual
               </button>
             </div>
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-6">
+
+            <select
+              value={listMode}
+              onChange={(event) =>
+                setListMode(event.target.value as "competence" | "latest")
+              }
+              className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-white outline-none"
+            >
+              <option value="competence">Por data do lançamento</option>
+              <option value="latest">Últimos 20 cadastrados</option>
+            </select>
+
+            <input
+              value={searchTerm}
+              onChange={(event) => setSearchTerm(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  loadTransactions({
+                    competenceId: competenceFilter,
+                    accountId: accountFilter,
+                    type: typeFilter,
+                    status: statusFilter,
+                    categoryId: categoryFilter,
+                    search: searchTerm,
+                    listMode,
+                  });
+                }
+              }}
+              placeholder="Buscar por descrição..."
+              className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-white outline-none"
+            />
 
             <button
               type="button"
-              onClick={goToCurrentCompetence}
-              className="mt-2 w-full rounded-lg py-1 text-xs font-medium text-slate-400 hover:bg-white/10 hover:text-white"
+              onClick={() => setShowFilters(!showFilters)}
+              className="flex items-center justify-center gap-2 rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm font-semibold text-white hover:bg-white/10 md:hidden"
             >
-              Voltar para mês atual
+              <SlidersHorizontal size={16} />
+              Filtros
             </button>
-          </div>
 
-          <select
-            value={listMode}
-            onChange={(event) =>
-              setListMode(event.target.value as "competence" | "latest")
-            }
-            className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-white outline-none"
-          >
-            <option value="competence">Por data do lançamento</option>
-            <option value="latest">Últimos 20 cadastrados</option>
-          </select>
+            <div className={`${showFilters ? "grid" : "hidden"} gap-3 md:contents`}>
 
-          <input
-            value={searchTerm}
-            onChange={(event) => setSearchTerm(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") {
-                loadTransactions({
-                  competenceId: competenceFilter,
-                  accountId: accountFilter,
-                  type: typeFilter,
-                  status: statusFilter,
-                  search: searchTerm,
-                  listMode,
-                });
-              }
-            }}
-            placeholder="Buscar por descrição..."
-            className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-white outline-none"
-          />
+              <select
+                value={accountFilter}
+                onChange={(event) => setAccountFilter(event.target.value)}
+                className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-white outline-none"
+              >
+                <option value="">Todas as contas</option>
+                {accounts.map((account) => (
+                  <option key={account.id} value={account.id}>
+                    {account.name}
+                  </option>
+                ))}
+              </select>
 
-          <button
-            type="button"
-            onClick={() => setShowFilters(!showFilters)}
-            className="flex items-center justify-center gap-2 rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm font-semibold text-white hover:bg-white/10 md:hidden"
-          >
-            <SlidersHorizontal size={16} />
-            Filtros
-          </button>
+              <select
+                value={categoryFilter}
+                onChange={(event) => setCategoryFilter(event.target.value)}
+                className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-white outline-none"
+              >
+                <option value="">Todas as categorias</option>
+                {categories.map((category) => (
+                  <option key={category.id} value={category.id}>
+                    {category.name}
+                  </option>
+                ))}
+              </select>
 
-          <div className={`${showFilters ? "grid" : "hidden"} gap-3 md:contents`}>
+              <select
+                value={typeFilter}
+                onChange={(event) => setTypeFilter(event.target.value)}
+                className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-white outline-none"
+              >
+                <option value="">Todos os tipos</option>
+                <option value="Despesa">Despesa</option>
+                <option value="Receita">Receita</option>
+                <option value="Transferência">Transferência</option>
+                <option value="Pagamento de Fatura">Pagamento de Fatura</option>
+              </select>
 
-            <select
-              value={accountFilter}
-              onChange={(event) => setAccountFilter(event.target.value)}
-              className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-white outline-none"
-            >
-              <option value="">Todas as contas</option>
-              {accounts.map((account) => (
-                <option key={account.id} value={account.id}>
-                  {account.name}
-                </option>
-              ))}
-            </select>
-
-            <select
-              value={typeFilter}
-              onChange={(event) => setTypeFilter(event.target.value)}
-              className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-white outline-none"
-            >
-              <option value="">Todos os tipos</option>
-              <option value="Despesa">Despesa</option>
-              <option value="Receita">Receita</option>
-              <option value="Transferência">Transferência</option>
-              <option value="Pagamento de Fatura">Pagamento de Fatura</option>
-            </select>
-
-            <select
-              value={statusFilter}
-              onChange={(event) => setStatusFilter(event.target.value)}
-              className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-white outline-none"
-            >
-              <option value="">Todos os status</option>
-              <option value="Pendente">Pendente</option>
-              <option value="Pendente">Pendente</option>
-              <option value="Pago">Pago</option>
-              <option value="Recebido">Recebido</option>
-            </select>
+              <select
+                value={statusFilter}
+                onChange={(event) => setStatusFilter(event.target.value)}
+                className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-white outline-none"
+              >
+                <option value="">Todos os status</option>
+                <option value="Pendente">Pendente</option>
+                <option value="Pendente">Pendente</option>
+                <option value="Pago">Pago</option>
+                <option value="Recebido">Recebido</option>
+              </select>
+            </div>
           </div>
         </div>
 
@@ -1458,15 +1494,15 @@ function TransactionsPageContent() {
         </div>
 
         <div className="w-full overflow-x-auto rounded-2xl border border-white/10 bg-slate-950/60">
-          <table className="min-w-[1200px] w-full text-left text-sm">
+          <table className="min-w-[520px] w-full table-fixed text-left text-sm md:min-w-[1040px]">
             <thead className="sticky top-0 z-10 bg-slate-900 text-slate-300">
               <tr>
-                <th className="px-5 py-4">Data</th>
-                <th className="px-5 py-4">Descrição</th>
-                <th className="px-5 py-4">Conta / Cartão</th>
-                <th className="px-5 py-4">Categoria</th>
-                <th className="px-5 py-4 text-right">Valor</th>
-                <th className="px-5 py-4 text-right">Ações</th>
+                <th className="w-[70px] px-3 py-4 md:w-[110px] md:px-4">Data</th>
+                <th className="px-3 py-4 md:px-4">Descrição</th>
+                <th className="hidden w-[180px] px-4 py-4 md:table-cell">Conta / Cartão</th>
+                <th className="hidden w-[110px] px-3 py-4 md:table-cell">Categoria</th>
+                <th className="w-[95px] px-2 py-4 text-right md:w-[120px] md:px-3">Valor</th>
+                <th className="w-[76px] px-2 py-4 text-right md:w-[90px] md:px-3">Ações</th>
               </tr>
             </thead>
 
@@ -1483,13 +1519,12 @@ function TransactionsPageContent() {
                 transactions.map((transaction, index) => (
                   <tr key={`${transaction.id}-${index}`} className="hover:bg-white/[0.03]">
 
-                    <td className="px-5 py-4 text-slate-300">
-                      {new Date(
-                        transaction.due_date + "T00:00:00"
-                      ).toLocaleDateString("pt-BR")}
+                    <td className="w-[70px] px-3 py-4 text-slate-300 md:w-[110px] md:px-4">
+                      <span className="md:hidden">{formatShortDate(transaction.due_date)}</span>
+                      <span className="hidden md:inline">{formatFullDate(transaction.due_date)}</span>
                     </td>
 
-                    <td className="px-5 py-4">
+                    <td className="min-w-0 px-3 py-4 md:px-4">
                       <div className="font-medium text-white">
                         {transaction.description}
                       </div>
@@ -1514,32 +1549,32 @@ function TransactionsPageContent() {
                       </div>
                     </td>
 
-                    <td className="px-5 py-4 text-slate-300">
+                    <td className="hidden w-[180px] max-w-[180px] truncate px-4 py-4 text-slate-300 md:table-cell">
                       {transaction.account?.name ?? "-"}
                     </td>
 
-                    <td className="px-5 py-4 text-slate-300">
+                    <td className="hidden w-[110px] max-w-[110px] truncate px-3 py-4 text-slate-300 md:table-cell">
                       {transaction.category?.name ?? "-"}
                     </td>
 
                     <td
-                      className={`px-5 py-4 text-right font-semibold ${transaction.type === "Receita"
-                        ? "text-emerald-300"
-                        : transaction.type === "Transferência"
-                          ? "text-blue-300"
-                          : "text-red-300"
+                      className={`w-[95px] px-2 py-4 text-right text-xs font-semibold md:w-[120px] md:px-3 md:text-sm ${transaction.type === "Receita"
+                          ? "text-emerald-300"
+                          : transaction.type === "Transferência"
+                            ? "text-blue-300"
+                            : "text-red-300"
                         }`}
                     >
                       {formatCurrency(transaction.value)}
                     </td>
 
-                    <td className="px-5 py-4 text-right">
+                    <td className="w-[76px] px-2 py-4 text-right md:w-[90px] md:px-3">
                       {isTransactionLocked(transaction) ? (
                         <span className="rounded-full bg-emerald-500/10 px-3 py-1 text-xs font-medium text-emerald-300">
                           Fechada
                         </span>
                       ) : (
-                        <div className="flex justify-end gap-2">
+                        <div className="flex justify-end gap-1 md:gap-2">
                           <button
                             onClick={() => openEditDrawer(transaction)}
                             title="Editar"

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 import AppShell from "../../components/layout/AppShell";
 import { getCurrentUserId, supabase } from "@/src/lib/supabase";
 import { updateOverduePaymentStatusesOncePerDay } from "@/src/services/paymentStatusService";
@@ -375,6 +376,50 @@ export default function DashboardPage() {
       });
   }, [referenceTransactions, categoryTargets]);
 
+  function getVisibleMonthDates() {
+    if (!currentCompetence) {
+      return [];
+    }
+
+    const centerDate = new Date(
+      currentCompetence.year,
+      currentCompetence.month - 1,
+      1
+    );
+
+    const dates: Date[] = [];
+
+    for (let offset = -3; offset <= 3; offset++) {
+      dates.push(
+        new Date(centerDate.getFullYear(), centerDate.getMonth() + offset, 1)
+      );
+    }
+
+    return dates;
+  }
+
+  function formatMonthLabel(date: Date) {
+    return new Intl.DateTimeFormat("pt-BR", {
+      month: "short",
+      year: "2-digit",
+    })
+      .format(date)
+      .replace(".", "");
+  }
+
+  function selectCompetenceByDate(date: Date) {
+    if (isLoading) return;
+
+    loadDashboardData(date.getMonth() + 1, date.getFullYear());
+  }
+
+  function goToCurrentCompetence() {
+    if (isLoading) return;
+
+    const today = new Date();
+
+    loadDashboardData(today.getMonth() + 1, today.getFullYear());
+  }
 
   function goToPreviousCompetence() {
     if (!currentCompetence || isLoading) return;
@@ -424,7 +469,7 @@ export default function DashboardPage() {
   return (
     <AppShell>
       <div className="space-y-8">
-        <div className="flex items-center justify-between">
+        <div className="space-y-4">
           <div>
             <h1 className="text-3xl font-bold text-white">Dashboard</h1>
             <p className="mt-1 text-sm text-slate-400">
@@ -433,32 +478,66 @@ export default function DashboardPage() {
             </p>
           </div>
 
-          <div className="flex items-center gap-3 rounded-2xl border border-white/10 bg-slate-950/60 p-2">
-            <button
-              type="button"
-              onClick={goToPreviousCompetence}
-              disabled={isLoading || !currentCompetence}
-              className="rounded-xl px-4 py-2 text-sm font-semibold text-slate-300 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              ← Anterior
-            </button>
+          <div className="w-full rounded-xl border border-white/10 bg-slate-900 p-2">
+            <div className="flex items-center justify-between gap-2">
+              <button
+                type="button"
+                onClick={goToPreviousCompetence}
+                disabled={isLoading || !currentCompetence}
+                className="flex h-9 w-9 items-center justify-center rounded-lg text-slate-400 hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+                title="Competência anterior"
+              >
+                <ChevronLeft size={18} />
+              </button>
 
-            <div className="min-w-32 text-center">
-              <p className="text-xs uppercase tracking-[0.2em] text-slate-500">
-                Competência
-              </p>
-              <p className="text-sm font-bold text-white">
-                {currentCompetence?.name ?? "Carregando..."}
-              </p>
+              <div className="flex min-w-0 flex-1 items-center justify-center gap-2 overflow-hidden">
+                {getVisibleMonthDates().map((date) => {
+                  const isSelected =
+                    currentCompetence?.month === date.getMonth() + 1 &&
+                    currentCompetence?.year === date.getFullYear();
+
+                  const today = new Date();
+                  const isCurrentMonth =
+                    date.getMonth() === today.getMonth() &&
+                    date.getFullYear() === today.getFullYear();
+
+                  return (
+                    <button
+                      key={`${date.getFullYear()}-${date.getMonth()}`}
+                      type="button"
+                      disabled={isLoading}
+                      onClick={() => selectCompetenceByDate(date)}
+                      className={`shrink-0 whitespace-nowrap rounded-full px-5 py-2 text-xs font-semibold transition ${isSelected
+                          ? "bg-blue-600 text-white"
+                          : isCurrentMonth
+                            ? "bg-cyan-500/10 text-cyan-300"
+                            : "bg-white/[0.03] text-slate-400 hover:bg-white/10 hover:text-white"
+                        } disabled:cursor-not-allowed disabled:opacity-40`}
+                    >
+                      {formatMonthLabel(date)}
+                    </button>
+                  );
+                })}
+              </div>
+
+              <button
+                type="button"
+                onClick={goToNextCompetence}
+                disabled={isLoading || !currentCompetence}
+                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-slate-400 hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+                title="Próxima competência"
+              >
+                <ChevronRight size={18} />
+              </button>
             </div>
 
             <button
               type="button"
-              onClick={goToNextCompetence}
-              disabled={isLoading || !currentCompetence}
-              className="rounded-xl px-4 py-2 text-sm font-semibold text-slate-300 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
+              onClick={goToCurrentCompetence}
+              disabled={isLoading}
+              className="mt-2 w-full rounded-lg py-1 text-xs font-medium text-slate-400 hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
             >
-              Próxima →
+              Voltar para mês atual
             </button>
           </div>
         </div>
