@@ -187,7 +187,11 @@ export default function AccountsPage() {
 
     if (error) {
       console.error("Erro ao salvar planejamento:", error);
-      alert("Erro ao salvar planejamento mensal.");
+    
+      alert(
+        `Erro ao salvar planejamento:\n\n${error.message}\n\n${error.details ?? ""}`
+      );
+    
       return;
     }
 

@@ -81,6 +81,7 @@ export default function DashboardPage() {
   const [previousCardTransactions, setPreviousCardTransactions] = useState<Transaction[]>([]);
   const [accountTargets, setAccountTargets] = useState<Record<string, number>>({});
   const [categoryTargets, setCategoryTargets] = useState<Record<string, number>>({});
+  const [cardAccountIds, setCardAccountIds] = useState<string[]>([]);
 
   function getNextMonth(month: number, year: number) {
     if (month === 12) {
@@ -135,11 +136,28 @@ export default function DashboardPage() {
       setPreviousCardTransactions([]);
       setAccountTargets({});
       setCategoryTargets({});
+      setCardAccountIds([]);
       setIsLoading(false);
       return;
     }
 
     setCurrentCompetence(competenceData as Competence);
+
+    const { data: cardAccountsData, error: cardAccountsError } = await supabase
+      .from("accounts")
+      .select("id")
+      .eq("owner_id", ownerId)
+      .eq("type", "Cartão")
+      .eq("active", true);
+
+    if (cardAccountsError) {
+      console.error("Erro ao carregar cartões:", cardAccountsError);
+      setCardAccountIds([]);
+    } else {
+      setCardAccountIds(
+        (cardAccountsData ?? []).map((account) => String(account.id))
+      );
+    }
 
     const cashFlowMonth = getNextMonth(currentMonth, currentYear);
 
@@ -285,9 +303,31 @@ export default function DashboardPage() {
   );
 
   const cashFlowTotals = useMemo(
-    () => calculateCashFlowTotals(cashFlowAccountTransactions, previousCardTransactions),
+    () =>
+      calculateCashFlowTotals(
+        cashFlowAccountTransactions,
+        previousCardTransactions
+      ),
     [cashFlowAccountTransactions, previousCardTransactions]
   );
+
+  const plannedCreditCardTotal = useMemo(() => {
+    return cardAccountIds.reduce((total, accountId) => {
+      return total + Number(accountTargets[accountId] ?? 0);
+    }, 0);
+  }, [cardAccountIds, accountTargets]);
+
+  const projectedBalanceUsingTargets = useMemo(() => {
+    return (
+      cashFlowTotals.income -
+      cashFlowTotals.accountExpenses -
+      plannedCreditCardTotal
+    );
+  }, [
+    cashFlowTotals.income,
+    cashFlowTotals.accountExpenses,
+    plannedCreditCardTotal,
+  ]);
 
   const cardComparisonData = useMemo<ComparisonItem[]>(() => {
     const grouped = previousCardTransactions.reduce<
@@ -508,10 +548,10 @@ export default function DashboardPage() {
                       disabled={isLoading}
                       onClick={() => selectCompetenceByDate(date)}
                       className={`shrink-0 whitespace-nowrap rounded-full px-5 py-2 text-xs font-semibold transition ${isSelected
-                          ? "bg-blue-600 text-white"
-                          : isCurrentMonth
-                            ? "bg-cyan-500/10 text-cyan-300"
-                            : "bg-white/[0.03] text-slate-400 hover:bg-white/10 hover:text-white"
+                        ? "bg-blue-600 text-white"
+                        : isCurrentMonth
+                          ? "bg-cyan-500/10 text-cyan-300"
+                          : "bg-white/[0.03] text-slate-400 hover:bg-white/10 hover:text-white"
                         } disabled:cursor-not-allowed disabled:opacity-40`}
                     >
                       {formatMonthLabel(date)}
@@ -542,37 +582,86 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        <div className="grid gap-4 md:grid-cols-4">
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-5">
-            <p className="text-sm text-slate-400">{`Entradas Previstas ${formattedCashFlowMonth}`}</p>
+            <p className="text-sm text-slate-400">
+              {`Receitas Previstas ${formattedCashFlowMonth}`}
+            </p>
+
             <p className="mt-2 text-2xl font-bold text-emerald-300">
               {formatCurrency(cashFlowTotals.income)}
             </p>
           </div>
 
           <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-5">
-            <p className="text-sm text-slate-400">{`Despesas ${formattedCashFlowMonth}`}</p>
+            <p className="text-sm text-slate-400">
+              {`Despesas Previstas ${formattedCashFlowMonth}`}
+            </p>
+
             <p className="mt-2 text-2xl font-bold text-red-300">
               {formatCurrency(cashFlowTotals.accountExpenses)}
             </p>
           </div>
 
           <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-5">
-            <p className="text-sm text-slate-400">{`Cartões de Crédito ${formattedReferenceMonth}`}</p>
+            <p className="text-sm text-slate-400">
+              {`Faturas dos Cartões ${formattedReferenceMonth}`}
+            </p>
+
             <p className="mt-2 text-2xl font-bold text-orange-300">
               {formatCurrency(cashFlowTotals.creditCardInvoices)}
             </p>
           </div>
 
           <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-5">
-            <p className="text-sm text-slate-400">Saldo projetado</p>
+            <p className="text-sm text-slate-400">
+              {`Saldo Projetado ${formattedCashFlowMonth}`}
+            </p>
+
             <p
               className={`mt-2 text-2xl font-bold ${cashFlowTotals.projectedBalance >= 0
-                ? "text-emerald-300"
-                : "text-red-300"
+                  ? "text-emerald-300"
+                  : "text-red-300"
                 }`}
             >
               {formatCurrency(cashFlowTotals.projectedBalance)}
+            </p>
+
+            <p className="mt-2 text-xs text-slate-500">
+              Considera as faturas já realizadas.
+            </p>
+          </div>
+
+          <div className="rounded-2xl border border-cyan-400/20 bg-cyan-500/[0.06] p-5">
+            <p className="text-sm text-cyan-200">
+              {`Meta dos Cartões ${formattedReferenceMonth}`}
+            </p>
+
+            <p className="mt-2 text-2xl font-bold text-cyan-300">
+              {formatCurrency(plannedCreditCardTotal)}
+            </p>
+
+            <p className="mt-2 text-xs text-cyan-200/60">
+              Soma do planejamento mensal dos cartões.
+            </p>
+          </div>
+
+          <div className="rounded-2xl border border-cyan-400/20 bg-cyan-500/[0.06] p-5">
+            <p className="text-sm text-cyan-200">
+              {`Saldo Projetado ${formattedCashFlowMonth} (Meta)`}
+            </p>
+
+            <p
+              className={`mt-2 text-2xl font-bold ${projectedBalanceUsingTargets >= 0
+                  ? "text-emerald-300"
+                  : "text-red-300"
+                }`}
+            >
+              {formatCurrency(projectedBalanceUsingTargets)}
+            </p>
+
+            <p className="mt-2 text-xs text-cyan-200/60">
+              Considera a meta planejada dos cartões.
             </p>
           </div>
         </div>
