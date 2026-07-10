@@ -9,7 +9,6 @@ import { deleteTransaction as deleteTransactionService } from "@/src/services/tr
 import { ensureAccountIsOpen } from "@/src/utils/accountLock";
 import {
   calculateAccountFinalBalance,
-  calculateAccountMovement,
   filterTransactionsUntilDate,
 } from "@/src/utils/balanceCalculations";
 
@@ -83,7 +82,7 @@ function TransactionsPageContent() {
   const [competenceFilter, setCompetenceFilter] = useState("");
   const [accountFilter, setAccountFilter] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("");
-  const [listMode, setListMode] = useState<"competence" | "latest">("latest");
+  const [listMode, setListMode] = useState<"competence" | "latest">("competence");
   const [showFilters, setShowFilters] = useState(false);
   const [plannedCardLimit, setPlannedCardLimit] = useState(0);
   const [accountClosures, setAccountClosures] = useState<AccountClosure[]>([]);
@@ -352,23 +351,23 @@ function TransactionsPageContent() {
     let query = supabase
       .from("transactions")
       .select(`
-        id,
-        description,
-        due_date,
-        created_at,
-        type,
-        mode,
-        value,
-        status,
-        account_id,
-        category_id,
-        competence_id,
-        origin_account_id,
-        destination_account_id,
-        account:accounts!transactions_account_id_fkey(name, type),
-        category:categories!transactions_category_id_fkey(name),
-        competence:competences!transactions_competence_id_fkey(name)
-      `)
+          id,
+          description,
+          due_date,
+          created_at,
+          type,
+          mode,
+          value,
+          status,
+          account_id,
+          category_id,
+          competence_id,
+          origin_account_id,
+          destination_account_id,
+          account:accounts!transactions_account_id_fkey(name, type),
+          category:categories!transactions_category_id_fkey(name),
+          competence:competences!transactions_competence_id_fkey(name)
+        `)
       .eq("owner_id", ownerId)
 
     if (filters?.listMode === "latest") {
@@ -529,7 +528,7 @@ function TransactionsPageContent() {
         type: "",
         status: "",
         search: "",
-        listMode: "latest",
+        listMode: "competence",
       });
     }
 
@@ -1077,10 +1076,6 @@ function TransactionsPageContent() {
     (transaction) => transaction.due_date <= today
   );
 
-  const futureTransactions = transactions.filter(
-    (transaction) => transaction.due_date > today
-  );
-
   const openingBalance = selectedAccount
     ? (() => {
       const selectedCompetenceOrder = selectedCompetence
@@ -1135,16 +1130,12 @@ function TransactionsPageContent() {
     })
     : 0;
 
-  const estimatedBalance = selectedAccount
+  const futureBalance = selectedAccount
     ? calculateAccountFinalBalance({
       accountId: selectedAccount.id,
       openingBalance,
       transactions,
     })
-    : 0;
-
-  const futureBalance = selectedAccount
-    ? calculateAccountMovement(selectedAccount.id, futureTransactions)
     : 0;
 
   const totalIncome = transactions
@@ -1275,9 +1266,7 @@ function TransactionsPageContent() {
               </button>
             </div>
           </div>
-
           <div className="grid gap-3 md:grid-cols-6">
-
             <select
               value={listMode}
               onChange={(event) =>
@@ -1287,6 +1276,20 @@ function TransactionsPageContent() {
             >
               <option value="competence">Por data do lançamento</option>
               <option value="latest">Últimos 20 cadastrados</option>
+            </select>
+
+            <select
+              value={accountFilter}
+              onChange={(event) => setAccountFilter(event.target.value)}
+              className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-white outline-none"
+            >
+              <option value="">Todas as contas</option>
+
+              {accounts.map((account) => (
+                <option key={account.id} value={account.id}>
+                  {account.name}
+                </option>
+              ))}
             </select>
 
             <input
@@ -1319,26 +1322,13 @@ function TransactionsPageContent() {
             </button>
 
             <div className={`${showFilters ? "grid" : "hidden"} gap-3 md:contents`}>
-
-              <select
-                value={accountFilter}
-                onChange={(event) => setAccountFilter(event.target.value)}
-                className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-white outline-none"
-              >
-                <option value="">Todas as contas</option>
-                {accounts.map((account) => (
-                  <option key={account.id} value={account.id}>
-                    {account.name}
-                  </option>
-                ))}
-              </select>
-
               <select
                 value={categoryFilter}
                 onChange={(event) => setCategoryFilter(event.target.value)}
                 className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-white outline-none"
               >
                 <option value="">Todas as categorias</option>
+
                 {categories.map((category) => (
                   <option key={category.id} value={category.id}>
                     {category.name}
@@ -1364,7 +1354,6 @@ function TransactionsPageContent() {
                 className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-white outline-none"
               >
                 <option value="">Todos os status</option>
-                <option value="Pendente">Pendente</option>
                 <option value="Pendente">Pendente</option>
                 <option value="Pago">Pago</option>
                 <option value="Recebido">Recebido</option>
@@ -1419,22 +1408,22 @@ function TransactionsPageContent() {
               </div>
 
               <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-5">
+                <p className="text-sm text-slate-400">Saldo anterior</p>
+                <p
+                  className={`mt-2 text-2xl font-bold ${openingBalance >= 0 ? "text-blue-300" : "text-red-300"
+                    }`}
+                >
+                  {formatCurrency(openingBalance)}
+                </p>
+              </div>
+
+              <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-5">
                 <p className="text-sm text-slate-400">Saldo atual</p>
                 <p
                   className={`mt-2 text-2xl font-bold ${currentBalance >= 0 ? "text-emerald-300" : "text-red-300"
                     }`}
                 >
                   {formatCurrency(currentBalance)}
-                </p>
-              </div>
-
-              <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-5">
-                <p className="text-sm text-slate-400">Saldo estimado</p>
-                <p
-                  className={`mt-2 text-2xl font-bold ${estimatedBalance >= 0 ? "text-blue-300" : "text-red-300"
-                    }`}
-                >
-                  {formatCurrency(estimatedBalance)}
                 </p>
               </div>
 
@@ -1559,10 +1548,10 @@ function TransactionsPageContent() {
 
                     <td
                       className={`w-[95px] px-2 py-4 text-right text-xs font-semibold md:w-[120px] md:px-3 md:text-sm ${transaction.type === "Receita"
-                          ? "text-emerald-300"
-                          : transaction.type === "Transferência"
-                            ? "text-blue-300"
-                            : "text-red-300"
+                        ? "text-emerald-300"
+                        : transaction.type === "Transferência"
+                          ? "text-blue-300"
+                          : "text-red-300"
                         }`}
                     >
                       {formatCurrency(transaction.value)}
