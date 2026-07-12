@@ -10,9 +10,10 @@ const protectedRoutes = [
   "/competences",
   "/recurrences",
   "/closings",
+  "/vehicles",
+  "/fuel",
   "/settings",
 ];
-
 const authRoutes = ["/login"];
 
 export async function middleware(request: NextRequest) {
@@ -82,6 +83,8 @@ export const config = {
     "/competences/:path*",
     "/recurrences/:path*",
     "/closings/:path*",
+    "/vehicles/:path*",
+    "/fuel/:path*",
     "/settings/:path*",
     "/login",
   ],

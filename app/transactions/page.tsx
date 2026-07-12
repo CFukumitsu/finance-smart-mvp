@@ -6,6 +6,9 @@ import { useRouter, useSearchParams } from "next/navigation";
 import AppShell from "../components/layout/AppShell";
 import { getCurrentUserId, supabase } from "@/src/lib/supabase";
 import { deleteTransaction as deleteTransactionService } from "@/src/services/transactionService";
+import FuelTransactionFields, { emptyFuelForm, type FuelForm } from "@/src/components/fuel/FuelTransactionFields";
+import { parsePtBrNumber } from "@/src/utils/fuelCalculations";
+import { removeFuelRecordForTransaction } from "@/src/services/fuelService";
 import { ensureAccountIsOpen } from "@/src/utils/accountLock";
 import {
   calculateAccountFinalBalance,
@@ -26,6 +29,7 @@ type Category = {
   id: string;
   name: string;
   type: string | null;
+  special_type: string | null;
 };
 
 type Competence = {
@@ -72,6 +76,7 @@ function TransactionsPageContent() {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
+  const [fuelForm, setFuelForm] = useState<FuelForm>(emptyFuelForm);
   const [competences, setCompetences] = useState<Competence[]>([]);
   const [closedCompetenceIds, setClosedCompetenceIds] = useState<string[]>([]);
   const [descriptionSuggestions, setDescriptionSuggestions] = useState<string[]>([]);
@@ -478,7 +483,7 @@ function TransactionsPageContent() {
           .order("name", { ascending: true }),
         supabase
           .from("categories")
-          .select("id, name, type")
+          .select("id, name, type, special_type")
           .eq("owner_id", ownerId)
           .eq("active", true)
           .order("type", { ascending: false })
@@ -540,11 +545,21 @@ function TransactionsPageContent() {
   }, []);
 
   useEffect(() => {
-    if (searchParams.get("new") === "true") {
+    if (searchParams.get("new") === "true" || searchParams.get("new") === "fuel") {
       resetForm();
+      if (searchParams.get("new") === "fuel") {
+        const fuelCategory = categories.find((category) => category.special_type === "fuel");
+        if (fuelCategory) setForm((current) => ({ ...current, category_id: fuelCategory.id, type: "Despesa", mode: "unico" }));
+      }
       setIsDrawerOpen(true);
     }
-  }, [searchParams]);
+  }, [searchParams, categories]);
+
+  useEffect(() => {
+    const editId = searchParams.get("edit");
+    const transaction = transactions.find((item) => item.id === editId);
+    if (transaction && !isDrawerOpen) void openEditDrawer(transaction);
+  }, [searchParams, transactions, isDrawerOpen]);
 
   useEffect(() => {
     const selected = accounts.find((account) => account.id === accountFilter);
@@ -580,6 +595,7 @@ function TransactionsPageContent() {
     const defaultType = storedDefaults?.type ?? "Despesa";
 
     setEditingTransactionId(null);
+    setFuelForm(emptyFuelForm);
 
     setForm({
       description: "",
@@ -606,7 +622,7 @@ function TransactionsPageContent() {
     router.replace("/transactions");
   }
 
-  function openEditDrawer(transaction: Transaction) {
+  async function openEditDrawer(transaction: Transaction) {
 
     if (isTransactionLocked(transaction)) {
       alert("Esta conta/cartão já está fechado nesta competência.");
@@ -631,12 +647,17 @@ function TransactionsPageContent() {
       competence_id: transaction.competence_id ?? "",
     });
 
+    const ownerId = await getCurrentUserId();
+    const { data: fuel } = await supabase.from("fuel_records").select("vehicle_id,station_id,fuel_type,odometer,liters,price_per_liter,full_tank,latitude,longitude,notes").eq("transaction_id", transaction.id).eq("owner_id", ownerId).maybeSingle();
+    if (fuel) setFuelForm({ vehicle_id:fuel.vehicle_id, station_id:fuel.station_id, fuel_type:fuel.fuel_type, odometer:String(fuel.odometer).replace(".",","), liters:String(fuel.liters).replace(".",","), price_per_liter:String(fuel.price_per_liter).replace(".",","), full_tank:fuel.full_tank, latitude:String(fuel.latitude??""), longitude:String(fuel.longitude??""), notes:fuel.notes??"" });
+
     setIsDrawerOpen(true);
   }
 
   async function saveTransaction() {
     const numericValue = parseCurrencyInput(form.value);
     const installmentCount = Number(form.installments);
+    const isFuel = categories.find((category) => category.id === form.category_id)?.special_type === "fuel";
 
     if (
       !form.description ||
@@ -671,6 +692,18 @@ function TransactionsPageContent() {
 
     try {
       const ownerId = await getCurrentUserId();
+
+      if (isFuel) {
+        const liters = parsePtBrNumber(fuelForm.liters), price = parsePtBrNumber(fuelForm.price_per_liter), odometer = parsePtBrNumber(fuelForm.odometer);
+        if (!fuelForm.vehicle_id || !fuelForm.station_id || !fuelForm.fuel_type || odometer < 0 || liters <= 0 || price <= 0 || numericValue <= 0) { alert("Preencha todos os dados obrigatórios do abastecimento."); return; }
+        const { data: last } = await supabase.from("fuel_records").select("odometer").eq("owner_id", ownerId).eq("vehicle_id", fuelForm.vehicle_id).order("odometer", { ascending: false }).limit(1).maybeSingle();
+        if (last && odometer < Number(last.odometer) && !window.confirm(`O hodômetro é inferior ao último registro (${last.odometer} km). Deseja continuar?`)) return;
+        const lock = await ensureAccountIsOpen({ accountId: form.account_id, competenceId: form.competence_id });
+        if (!lock.allowed) { alert(lock.message); return; }
+        const { error } = await supabase.rpc("save_fuel_transaction", { p_transaction: { description: form.description, value: numericValue, due_date: form.due_date, status: form.status, account_id: form.account_id, category_id: form.category_id, competence_id: form.competence_id }, p_fuel_record: { ...fuelForm, odometer, liters, price_per_liter: price, total_value: numericValue }, p_transaction_id: editingTransactionId });
+        if (error) throw new Error(error.message);
+        closeDrawer(); await loadTransactions({ competenceId: competenceFilter, accountId: accountFilter, type: typeFilter, status: statusFilter, categoryId: categoryFilter, search: searchTerm, listMode }); return;
+      }
 
       if (form.type === "Transferência" && !editingTransactionId) {
         const originAccount = accounts.find(
@@ -842,6 +875,8 @@ function TransactionsPageContent() {
         throw new Error(error.message);
       }
 
+      if (editingTransactionId) await removeFuelRecordForTransaction(editingTransactionId);
+
       if (!editingTransactionId) {
         saveTransactionDefaults(form);
       }
@@ -912,6 +947,8 @@ function TransactionsPageContent() {
   const selectedCompetence = competences.find(
     (item) => item.id === competenceFilter
   );
+  const selectedCategory = categories.find((category) => category.id === form.category_id);
+  const isFuelCategory = selectedCategory?.special_type === "fuel";
 
   function getCompetenceOrder(competence: Competence) {
     return competence.year * 100 + competence.month;
@@ -1642,6 +1679,16 @@ function TransactionsPageContent() {
                 className="w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none"
               />
 
+              {form.type !== "Pagamento de Fatura" && form.type !== "Transferência" && (
+                <select value={form.category_id} onChange={(event) => { const categoryId=event.target.value; const category=categories.find(item=>item.id===categoryId); const fuel=category?.special_type==="fuel"; const type=category?.type??form.type; setForm({ ...form, category_id:categoryId, type:fuel?"Despesa":type, mode:fuel?"unico":form.mode, status:getAutomaticStatus(fuel?"Despesa":type,form.due_date) }); updateTransactionDefaults({category_id:categoryId,type:fuel?"Despesa":type}); }} className="w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none">
+                  <option value="">Categoria</option>{categories.map((category)=><option key={category.id} value={category.id}>{category.name}</option>)}
+                </select>
+              )}
+
+              {isFuelCategory && (
+                <FuelTransactionFields value={fuelForm} onChange={setFuelForm} onTotalChange={(total) => setForm((current) => ({ ...current, value: formatCurrencyFromNumber(total) }))} />
+              )}
+
               <input
                 value={form.description}
                 onChange={(event) =>
@@ -1660,9 +1707,7 @@ function TransactionsPageContent() {
 
               <input
                 value={form.value}
-                onChange={(event) =>
-                  setForm({ ...form, value: formatCurrencyInput(event.target.value) })
-                }
+                onChange={(event) => { const value=formatCurrencyInput(event.target.value); setForm({ ...form, value }); if(isFuelCategory){const total=parseCurrencyInput(value),liters=parsePtBrNumber(fuelForm.liters);if(total>0&&liters>0)setFuelForm(current=>({...current,price_per_liter:(total/liters).toFixed(3).replace(".",",")}));} }}
                 placeholder="Valor"
                 inputMode="numeric"
                 className="w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none"
@@ -1709,7 +1754,7 @@ function TransactionsPageContent() {
                 </select>
               )}
 
-              <select
+              {!isFuelCategory && <select
                 value={form.type}
                 onChange={(event) => {
                   const newType = event.target.value;
@@ -1732,7 +1777,7 @@ function TransactionsPageContent() {
                 <option value="Despesa">Despesa</option>
                 <option value="Transferência">Transferência</option>
                 <option value="Pagamento de Fatura">Pagamento de Fatura</option>
-              </select>
+              </select>}
 
               {form.type === "Transferência" && (
                 <div className="space-y-3">
@@ -1763,7 +1808,7 @@ function TransactionsPageContent() {
                 </div>
               )}
 
-              <select
+              {!isFuelCategory && <select
                 value={form.mode}
                 onChange={(event) =>
                   setForm({ ...form, mode: event.target.value })
@@ -1773,9 +1818,9 @@ function TransactionsPageContent() {
                 <option value="unico">Único</option>
                 <option value="recorrente">Recorrente</option>
                 <option value="parcelado">Parcelado</option>
-              </select>
+              </select>}
 
-              {form.mode === "parcelado" && !editingTransactionId && (
+              {!isFuelCategory && form.mode === "parcelado" && !editingTransactionId && (
                 <input
                   value={form.installments}
                   onChange={(event) =>
@@ -1787,7 +1832,7 @@ function TransactionsPageContent() {
                   className="w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none"
                 />
               )}
-              {form.type !== "Pagamento de Fatura" && form.type !== "Transferência" && (
+              {false && form.type !== "Pagamento de Fatura" && form.type !== "Transferência" && (
                 <select
                   value={form.category_id}
                   onChange={(event) => {

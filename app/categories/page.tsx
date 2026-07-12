@@ -26,6 +26,7 @@ type Category = {
   show_on_dashboard: boolean;
   dashboard_order: number | null;
   active: boolean;
+  special_type: string | null;
 };
 
 const initialForm = {
@@ -36,6 +37,7 @@ const initialForm = {
   show_on_dashboard: true,
   dashboard_order: "",
   active: true,
+  special_type: "",
 };
 
 export default function CategoriesPage() {
@@ -73,6 +75,7 @@ export default function CategoriesPage() {
         show_on_dashboard,
         dashboard_order,
         active
+        ,special_type
         `)
       .eq("owner_id", ownerId);
 
@@ -244,6 +247,7 @@ export default function CategoriesPage() {
           ? String(category.dashboard_order)
           : "",
       active: category.active,
+      special_type: category.special_type ?? "",
     });
     setIsDrawerOpen(true);
   }
@@ -262,7 +266,10 @@ export default function CategoriesPage() {
     }
 
     const payload = {
+      owner_id: ownerId,
+      name: form.name.trim(),
       type: form.type,
+      special_type: form.special_type || null,
       monthly_limit: form.monthly_limit ? Number(form.monthly_limit) : 0,
       monthly_goal: form.monthly_goal ? Number(form.monthly_goal) : 0,
       show_on_dashboard: form.show_on_dashboard,
@@ -751,6 +758,13 @@ export default function CategoriesPage() {
                 <option value="Despesa">Despesa</option>
                 <option value="Transferência">Transferência</option>
               </select>
+
+              <label className="space-y-2 text-sm text-slate-300">
+                <span>Função especial</span>
+                <select value={form.special_type} onChange={(event) => setForm({ ...form, special_type: event.target.value })} className="w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none">
+                  <option value="">Nenhuma</option><option value="fuel">Combustível</option><option value="vehicle_maintenance">Manutenção de veículo</option><option value="parking">Estacionamento</option><option value="toll">Pedágio</option><option value="vehicle_insurance">Seguro de veículo</option>
+                </select>
+              </label>
 
               <input
                 value={form.monthly_limit}
