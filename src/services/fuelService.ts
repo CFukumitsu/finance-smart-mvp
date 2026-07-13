@@ -1,5 +1,52 @@
 import { getCurrentUserId, supabase } from "@/src/lib/supabase";
-import type { FuelRecord } from "@/src/types/fuel";
+import type {
+  FuelRecord,
+  GoogleFuelStationDetails,
+  NearbyFuelStation,
+} from "@/src/types/fuel";
+
+async function readApiResponse<T>(response: Response): Promise<T> {
+  const data = (await response.json()) as T & { error?: string };
+
+  if (!response.ok) {
+    throw new Error(data.error || "Não foi possível consultar o Google Places.");
+  }
+
+  return data;
+}
+
+export async function searchNearbyFuelStations(
+  latitude: number,
+  longitude: number,
+  radius = 3000
+): Promise<NearbyFuelStation[]> {
+  const searchParams = new URLSearchParams({
+    lat: String(latitude),
+    lng: String(longitude),
+    radius: String(radius),
+  });
+
+  const response = await fetch(
+    `/api/maps/nearby-fuel-stations?${searchParams.toString()}`,
+    { cache: "no-store" }
+  );
+  const data = await readApiResponse<{ places?: NearbyFuelStation[] }>(
+    response
+  );
+
+  return data.places ?? [];
+}
+
+export async function loadGoogleFuelStationDetails(
+  googlePlaceId: string
+): Promise<GoogleFuelStationDetails> {
+  const response = await fetch(
+    `/api/maps/place-details?placeId=${encodeURIComponent(googlePlaceId)}`,
+    { cache: "no-store" }
+  );
+
+  return readApiResponse<GoogleFuelStationDetails>(response);
+}
 
 export async function loadFuelRecords(): Promise<FuelRecord[]> {
   const ownerId = await getCurrentUserId();

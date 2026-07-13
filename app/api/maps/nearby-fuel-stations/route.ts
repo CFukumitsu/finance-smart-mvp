@@ -23,6 +23,36 @@ type GoogleNearbyResponse = {
   places?: GooglePlace[];
 };
 
+function calculateDistanceMeters(
+  originLatitude: number,
+  originLongitude: number,
+  destinationLatitude: number | undefined,
+  destinationLongitude: number | undefined
+) {
+  if (
+    destinationLatitude === undefined ||
+    destinationLongitude === undefined
+  ) {
+    return null;
+  }
+
+  const earthRadiusMeters = 6371000;
+  const toRadians = (degrees: number) => (degrees * Math.PI) / 180;
+  const latitudeDelta = toRadians(destinationLatitude - originLatitude);
+  const longitudeDelta = toRadians(destinationLongitude - originLongitude);
+  const originLatitudeRadians = toRadians(originLatitude);
+  const destinationLatitudeRadians = toRadians(destinationLatitude);
+  const haversine =
+    Math.sin(latitudeDelta / 2) ** 2 +
+    Math.cos(originLatitudeRadians) *
+      Math.cos(destinationLatitudeRadians) *
+      Math.sin(longitudeDelta / 2) ** 2;
+
+  return Math.round(
+    earthRadiusMeters * 2 * Math.atan2(Math.sqrt(haversine), Math.sqrt(1 - haversine))
+  );
+}
+
 function parseCoordinate(
   value: string | null,
   minimum: number,
@@ -163,21 +193,38 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const places = (googleData.places ?? []).map((place) => ({
-      googlePlaceId: place.id ?? "",
-      name: place.displayName?.text ?? "Posto sem nome",
-      formattedAddress:
-        place.formattedAddress ??
-        place.shortFormattedAddress ??
-        "",
-      latitude: place.location?.latitude ?? null,
-      longitude: place.location?.longitude ?? null,
-      rating: place.rating ?? null,
-      userRatingCount: place.userRatingCount ?? 0,
-      businessStatus: place.businessStatus ?? null,
-      primaryType: place.primaryType ?? null,
-      googleMapsUri: place.googleMapsUri ?? null,
-    }));
+    const seenPlaceIds = new Set<string>();
+    const places = (googleData.places ?? []).flatMap((place) => {
+      const googlePlaceId = place.id?.trim();
+
+      if (!googlePlaceId || seenPlaceIds.has(googlePlaceId)) {
+        return [];
+      }
+
+      seenPlaceIds.add(googlePlaceId);
+
+      return [{
+        googlePlaceId,
+        name: place.displayName?.text ?? "Posto sem nome",
+        formattedAddress:
+          place.formattedAddress ??
+          place.shortFormattedAddress ??
+          "",
+        latitude: place.location?.latitude ?? null,
+        longitude: place.location?.longitude ?? null,
+        distanceMeters: calculateDistanceMeters(
+          latitude,
+          longitude,
+          place.location?.latitude,
+          place.location?.longitude
+        ),
+        rating: place.rating ?? null,
+        userRatingCount: place.userRatingCount ?? 0,
+        businessStatus: place.businessStatus ?? null,
+        primaryType: place.primaryType ?? null,
+        googleMapsUri: place.googleMapsUri ?? null,
+      }];
+    });
 
     return NextResponse.json({
       places,

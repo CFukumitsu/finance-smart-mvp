@@ -8,6 +8,101 @@ export type NormalizedImportItem = {
   raw: Record<string, unknown>;
 };
 
+export type ImportDiscardReason =
+  | "ignored_payment"
+  | "ignored_summary"
+  | "missing_date"
+  | "missing_description"
+  | "zero_or_invalid_value";
+
+export type ImportRowDiagnostic = {
+  rowNumber: number;
+  rawDate: unknown;
+  normalizedDate: string;
+  rawDescription: unknown;
+  normalizedDescription: string;
+  rawValue: unknown;
+  normalizedValue: number;
+  status: "accepted" | "discarded";
+  reason: ImportDiscardReason | null;
+};
+
+export type ImportNormalizationResult = {
+  items: NormalizedImportItem[];
+  diagnostics: ImportRowDiagnostic[];
+  headerRowIndex: number;
+  usedSavedHeaderRowIndex: boolean;
+  rowsAfterHeader: number;
+};
+
+export function assignOccurrenceSourceHashes<
+  T extends { date: string; description: string; value: number },
+>(items: T[]) {
+  const occurrenceCounter = new Map<string, number>();
+
+  return items.map((item) => {
+    const baseHash = `${item.date}|${normalizeHeader(item.description)}|${Number(
+      item.value
+    ).toFixed(2)}`;
+    const occurrence = (occurrenceCounter.get(baseHash) ?? 0) + 1;
+    occurrenceCounter.set(baseHash, occurrence);
+
+    return {
+      ...item,
+      occurrence,
+      sourceHash: `${baseHash}|${occurrence}`,
+    };
+  });
+}
+
+type StatementOccurrenceComparable = {
+  statement_date: string;
+  statement_description: string;
+  normalized_description?: string | null;
+  statement_value: number;
+};
+
+function getStatementOccurrenceKey(item: StatementOccurrenceComparable) {
+  return [
+    item.statement_date,
+    normalizeHeader(
+      item.normalized_description ?? item.statement_description
+    ),
+    Number(item.statement_value).toFixed(2),
+  ].join("|");
+}
+
+export function matchStatementItemOccurrences<
+  E extends StatementOccurrenceComparable,
+  P extends StatementOccurrenceComparable,
+>(existingItems: E[], payloads: P[]) {
+  const existingByKey = new Map<string, E[]>();
+
+  existingItems.forEach((item) => {
+    const key = getStatementOccurrenceKey(item);
+    const matches = existingByKey.get(key) ?? [];
+    matches.push(item);
+    existingByKey.set(key, matches);
+  });
+
+  const reusedItems: E[] = [];
+  const newPayloads: P[] = [];
+
+  payloads.forEach((payload) => {
+    const key = getStatementOccurrenceKey(payload);
+    const matches = existingByKey.get(key);
+    const existing = matches?.shift();
+
+    if (existing) {
+      reusedItems.push(existing);
+    } else {
+      newPayloads.push(payload);
+    }
+  });
+
+  return { reusedItems, newPayloads };
+}
+
 function normalizeHeader(value: unknown) {
   return String(value ?? "")
     .trim()
@@ -67,7 +162,7 @@ function normalizeDate(value: unknown, fallbackYear?: number) {
 
   const text = String(value ?? "").trim();
 
-  const fullDateMatch = text.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  const fullDateMatch = text.match(/^(\d{2})\/(\d{2})\/(\d{4})(?:\s|$)/);
   if (fullDateMatch) {
     return `${fullDateMatch[3]}-${fullDateMatch[2]}-${fullDateMatch[1]}`;
   }
@@ -88,7 +183,7 @@ function normalizeDate(value: unknown, fallbackYear?: number) {
 function buildRowsByHeader(rows: unknown[][], headerRowIndex: number) {
   const headers = rows[headerRowIndex] ?? [];
 
-  return rows.slice(headerRowIndex + 1).map((row) => {
+  return rows.slice(headerRowIndex + 1).map((row, offset) => {
     const record: Record<string, unknown> = {};
 
     headers.forEach((header, index) => {
@@ -99,7 +194,10 @@ function buildRowsByHeader(rows: unknown[][], headerRowIndex: number) {
       }
     });
 
-    return record;
+    return {
+      record,
+      rowNumber: headerRowIndex + offset + 2,
+    };
   });
 }
 
@@ -146,40 +244,164 @@ function mergeDescriptionWithInstallment(
   return `${description} ${installment}`.trim();
 }
 
+function rowContainsHeaders(row: unknown[], headers: string[]) {
+  const normalizedRow = new Set(
+    row.map(normalizeHeader).filter(Boolean)
+  );
+
+  return headers.every((header) => normalizedRow.has(normalizeHeader(header)));
+}
+
+export function resolveImportLayoutHeaderRowIndex(
+  rows: unknown[][],
+  layout: ImportLayout
+) {
+  const requiredHeaders = [
+    layout.date_header,
+    layout.description_header,
+    layout.value_header,
+  ].filter(Boolean);
+  const savedIndex = layout.header_row_index;
+
+  if (rowContainsHeaders(rows[savedIndex] ?? [], requiredHeaders)) {
+    return {
+      headerRowIndex: savedIndex,
+      usedSavedHeaderRowIndex: true,
+    };
+  }
+
+  const candidates = rows
+    .map((row, rowIndex) => ({ row, rowIndex }))
+    .filter(({ row }) => rowContainsHeaders(row, requiredHeaders))
+    .sort(
+      (left, right) =>
+        Math.abs(left.rowIndex - savedIndex) -
+        Math.abs(right.rowIndex - savedIndex)
+    );
+
+  if (candidates.length === 0) {
+    throw new Error(
+      "O cabeçalho salvo não foi encontrado na planilha. Revise o modelo de importação."
+    );
+  }
+
+  return {
+    headerRowIndex: candidates[0].rowIndex,
+    usedSavedHeaderRowIndex: false,
+  };
+}
+
+function getExplicitDiscardReason(
+  description: string
+): ImportDiscardReason | null {
+  const normalizedDescription = normalizeHeader(description);
+
+  if (
+    [
+      "pagamento efetuado",
+      "pagamento de fatura",
+      "pagamento recebido",
+    ].includes(normalizedDescription)
+  ) {
+    return "ignored_payment";
+  }
+
+  if (
+    ["total", "total da fatura", "subtotal", "saldo anterior"].includes(
+      normalizedDescription
+    )
+  ) {
+    return "ignored_summary";
+  }
+
+  return null;
+}
+
+export function normalizeRowsByImportLayoutWithDiagnostics(
+  rows: unknown[][],
+  layout: ImportLayout,
+  fallbackYear?: number
+): ImportNormalizationResult {
+  const { headerRowIndex, usedSavedHeaderRowIndex } =
+    resolveImportLayoutHeaderRowIndex(rows, layout);
+  const mappedRows = buildRowsByHeader(rows, headerRowIndex);
+  const items: NormalizedImportItem[] = [];
+  const diagnostics: ImportRowDiagnostic[] = [];
+
+  mappedRows.forEach(({ record: row, rowNumber }) => {
+    const rawValue = getValueByHeader(row, layout.value_header);
+    let value = normalizeNumber(rawValue);
+
+    if (layout.amount_sign === "negative") {
+      value = -Math.abs(value);
+    }
+
+    if (layout.amount_sign === "positive") {
+      value = Math.abs(value);
+    }
+
+    const installment = layout.installment_header
+      ? normalizeInstallmentText(getValueByHeader(row, layout.installment_header))
+      : null;
+    const rawDescription = getValueByHeader(row, layout.description_header);
+    const rawDate = getValueByHeader(row, layout.date_header);
+    const baseDescription = normalizeText(rawDescription);
+    const description = mergeDescriptionWithInstallment(
+      baseDescription,
+      installment
+    );
+    const date = normalizeDate(rawDate, fallbackYear);
+    const explicitDiscardReason = getExplicitDiscardReason(baseDescription);
+    const reason =
+      explicitDiscardReason ??
+      (!date
+        ? "missing_date"
+        : !description
+          ? "missing_description"
+          : value === 0
+            ? "zero_or_invalid_value"
+            : null);
+
+    diagnostics.push({
+      rowNumber,
+      rawDate,
+      normalizedDate: date,
+      rawDescription,
+      normalizedDescription: description,
+      rawValue,
+      normalizedValue: value,
+      status: reason ? "discarded" : "accepted",
+      reason,
+    });
+
+    if (!reason) {
+      items.push({
+        date,
+        description,
+        value,
+        installment,
+        raw: row,
+      });
+    }
+  });
+
+  return {
+    items,
+    diagnostics,
+    headerRowIndex,
+    usedSavedHeaderRowIndex,
+    rowsAfterHeader: mappedRows.length,
+  };
+}
+
 export function normalizeRowsByImportLayout(
   rows: unknown[][],
   layout: ImportLayout,
   fallbackYear?: number
 ): NormalizedImportItem[] {
-  const mappedRows = buildRowsByHeader(rows, layout.header_row_index);
-
-  return mappedRows
-    .map((row) => {
-      let value = normalizeNumber(getValueByHeader(row, layout.value_header));
-
-      if (layout.amount_sign === "negative") {
-        value = -Math.abs(value);
-      }
-
-      if (layout.amount_sign === "positive") {
-        value = Math.abs(value);
-      }
-
-      const installment = layout.installment_header
-        ? normalizeInstallmentText(getValueByHeader(row, layout.installment_header))
-        : null;
-
-      const description = normalizeText(
-        getValueByHeader(row, layout.description_header)
-      );
-
-      return {
-        date: normalizeDate(getValueByHeader(row, layout.date_header), fallbackYear),
-        description: mergeDescriptionWithInstallment(description, installment),
-        value,
-        installment,
-        raw: row,
-      };
-    })
-    .filter((item) => item.date && item.description && item.value !== 0);
+  return normalizeRowsByImportLayoutWithDiagnostics(
+    rows,
+    layout,
+    fallbackYear
+  ).items;
 }

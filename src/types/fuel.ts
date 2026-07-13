@@ -13,3 +13,30 @@ export type FuelCycle = {
   vehicleId: string; startRecordId: string; endRecordId: string; distance: number; liters: number;
   totalValue: number; consumptionKmPerLiter: number; costPerKm: number; fuelStationId: string | null;
 };
+
+export type NearbyFuelStation = {
+  googlePlaceId: string;
+  name: string;
+  formattedAddress: string;
+  latitude: number | null;
+  longitude: number | null;
+  distanceMeters: number | null;
+  rating: number | null;
+  userRatingCount: number;
+  businessStatus: string | null;
+  primaryType: string | null;
+  googleMapsUri: string | null;
+};
+
+export type GoogleFuelStationDetails = Omit<
+  NearbyFuelStation,
+  "distanceMeters"
+> & {
+  address: string;
+  neighborhood: string;
+  city: string;
+  state: string;
+  postalCode: string;
+  phone: string | null;
+  website: string | null;
+};

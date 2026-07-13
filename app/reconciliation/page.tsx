@@ -1,7 +1,11 @@
 "use client";
 
 import { loadActiveImportLayout } from "@/src/lib/importLayout";
-import { normalizeRowsByImportLayout } from "@/src/lib/reconciliation/importNormalizer";
+import {
+  assignOccurrenceSourceHashes,
+  matchStatementItemOccurrences,
+  normalizeRowsByImportLayoutWithDiagnostics,
+} from "@/src/lib/reconciliation/importNormalizer";
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx";
 import AppShell from "../components/layout/AppShell";
@@ -63,7 +67,7 @@ type DetectedLayout = {
   valueColumnIndex: number;
   creditColumnIndex?: number;
   debitColumnIndex?: number;
-  layoutType: "standard" | "porto";
+  layoutType: "standard" | "credit-debit";
   signature: string;
 };
 
@@ -73,6 +77,16 @@ function normalizeText(value: unknown) {
     .toLowerCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "");
+}
+
+function getErrorMessage(error: unknown) {
+  if (error instanceof Error) return error.message;
+
+  if (error && typeof error === "object" && "message" in error) {
+    return String(error.message);
+  }
+
+  return "Erro desconhecido";
 }
 
 function parseDate(value: unknown, fallbackYear?: number) {
@@ -280,12 +294,16 @@ async function readWorkbookRows(buffer: ArrayBuffer) {
   const firstSheetName = workbook.SheetNames[0];
   const sheet = workbook.Sheets[firstSheetName];
 
-  return XLSX.utils.sheet_to_json<unknown[]>(sheet, {
-    header: 1,
-    raw: true,
-    blankrows: false,
-    defval: "",
-  });
+  return {
+    rows: XLSX.utils.sheet_to_json<unknown[]>(sheet, {
+      header: 1,
+      raw: true,
+      blankrows: true,
+      defval: "",
+    }),
+    sheetName: firstSheetName,
+    range: sheet["!ref"] ?? "",
+  };
 }
 
 function detectLayout(rows: unknown[][]): DetectedLayout | null {
@@ -330,7 +348,7 @@ function detectLayout(rows: unknown[][]): DetectedLayout | null {
         valueColumnIndex: debitColumnIndex,
         creditColumnIndex,
         debitColumnIndex,
-        layoutType: "porto",
+        layoutType: "credit-debit",
         signature: row.filter(Boolean).join("|"),
       };
     }
@@ -353,7 +371,7 @@ function extractItems(
     .map((row, index) => {
       const description = String(row[layout.descriptionColumnIndex] ?? "").trim();
 
-      if (layout.layoutType === "porto") {
+      if (layout.layoutType === "credit-debit") {
         const creditValue = parseValue(row[layout.creditColumnIndex ?? -1]);
         const debitValue = parseValue(row[layout.debitColumnIndex ?? -1]);
         const value = debitValue || creditValue * -1;
@@ -390,8 +408,8 @@ function extractItems(
         item.description &&
         item.value !== 0 &&
         normalizedDescription !== "total" &&
-        !normalizedDescription.includes("fukumitsu") &&
-        !normalizedDescription.includes("barbara brand")
+        normalizedDescription !== "pagamento efetuado" &&
+        normalizedDescription !== "pagamento de fatura"
       );
     });
 }
@@ -592,20 +610,8 @@ type ExistingStatementItem = {
   normalized_description: string | null;
   statement_value: number;
   source_hash: string;
-  status: "Pendente" | "Conciliado" | "Ignorado";
+  status: "Pendente" | "Sugerido" | "Conciliado" | "Ignorado";
 };
-
-function getStableStatementKey(item: {
-  statement_date: string;
-  normalized_description: string;
-  statement_value: number;
-}) {
-  return [
-    item.statement_date,
-    item.normalized_description,
-    Number(item.statement_value).toFixed(2),
-  ].join("|");
-}
 
 async function syncStatementItems(
   ownerId: string,
@@ -626,40 +632,39 @@ async function syncStatementItems(
     throw existingError;
   }
 
-  const existingByStableKey = new Map<string, ExistingStatementItem>();
-
-  ((existingItems ?? []) as ExistingStatementItem[]).forEach((item) => {
-    const key = getStableStatementKey({
-      statement_date: item.statement_date,
-      normalized_description:
-        item.normalized_description ?? normalizeText(item.statement_description),
-      statement_value: Number(item.statement_value),
-    });
-
-    if (!existingByStableKey.has(key)) {
-      existingByStableKey.set(key, item);
-    }
+  const prioritizedExistingItems = [
+    ...((existingItems ?? []) as ExistingStatementItem[]),
+  ].sort((left, right) => {
+    const priority = { Conciliado: 0, Sugerido: 1, Pendente: 1, Ignorado: 2 };
+    return priority[left.status] - priority[right.status];
   });
-
-  const newPayloads = payloads.filter((payload) => {
-    const key = getStableStatementKey(payload);
-    return !existingByStableKey.has(key);
-  });
+  const { reusedItems, newPayloads } = matchStatementItemOccurrences(
+    prioritizedExistingItems,
+    payloads
+  );
+  let createdItemIds: string[] = [];
 
   if (newPayloads.length > 0) {
-    const { error: insertError } = await supabase
+    const { data: createdItems, error: insertError } = await supabase
       .from("credit_card_statement_items")
-      .insert(newPayloads);
+      .insert(newPayloads)
+      .select("id");
 
     if (insertError) {
       throw insertError;
     }
+
+    createdItemIds = (createdItems ?? []).map((item) => item.id);
   }
 
   return {
     imported: payloads.length,
-    reused: payloads.length - newPayloads.length,
+    reused: reusedItems.length,
     created: newPayloads.length,
+    currentItemIds: [
+      ...reusedItems.map((item) => item.id),
+      ...createdItemIds,
+    ],
   };
 }
 
@@ -682,6 +687,18 @@ export default function ReconciliationPage() {
   const [showOnlyUnmatched, setShowOnlyUnmatched] = useState(true);
   const [viewMode, setViewMode] = useState<"all" | "difference">("all");
   const [isProcessing, setIsProcessing] = useState(false);
+  const [importSummary, setImportSummary] = useState<{
+    sheetName: string;
+    range: string;
+    physicalRows: number;
+    rowsAfterHeader: number;
+    acceptedRows: number;
+    discardedRows: number;
+    acceptedTotal: number;
+    discardedTotal: number;
+    headerRowNumber: number;
+    recoveredLegacyHeader: boolean;
+  } | null>(null);
   const [itemToReconcile, setItemToReconcile] = useState<ImportedItem | null>(null);
   const [itemToCreateTransaction, setItemToCreateTransaction] =
     useState<ImportedItem | null>(null);
@@ -871,8 +888,8 @@ export default function ReconciliationPage() {
 
       setAccounts(accountList);
 
-      const defaultAccount = accountList.find((account) =>
-        normalizeText(account.name).includes("personnalite")
+      const defaultAccount = accountList.find(
+        (account) => account.type === "Cartão"
       );
 
       setSelectedAccountId(defaultAccount?.id ?? "");
@@ -1073,18 +1090,29 @@ export default function ReconciliationPage() {
     }
   }
 
-  async function runAutoReconciliation(accountId: string, competenceId: string) {
+  async function runAutoReconciliation(
+    accountId: string,
+    competenceId: string,
+    statementItemIds?: string[]
+  ) {
     const ownerId = await getCurrentUserId();
 
     const accountTransactions = await loadTransactions(accountId, competenceId);
 
-    const { data: pendingItems, error: pendingItemsError } = await supabase
+    let pendingItemsQuery = supabase
       .from("credit_card_statement_items")
       .select("id, statement_date, statement_description, statement_value, source_hash, status")
       .eq("owner_id", ownerId)
       .eq("account_id", accountId)
       .eq("competence_id", competenceId)
       .eq("status", "Pendente");
+
+    if (statementItemIds && statementItemIds.length > 0) {
+      pendingItemsQuery = pendingItemsQuery.in("id", statementItemIds);
+    }
+
+    const { data: pendingItems, error: pendingItemsError } =
+      await pendingItemsQuery;
 
     if (pendingItemsError) {
       throw pendingItemsError;
@@ -1368,12 +1396,14 @@ export default function ReconciliationPage() {
     setIsProcessing(true);
     setFileName(file.name);
     setDetectedLayout(null);
+    setImportSummary(null);
     setItems([]);
     setTransactions([]);
 
     try {
       const buffer = await file.arrayBuffer();
-      const rows = await readWorkbookRows(buffer);
+      const workbookData = await readWorkbookRows(buffer);
+      const { rows } = workbookData;
 
       const selectedCompetence = competences.find(
         (competence) => competence.id === selectedCompetenceId
@@ -1385,21 +1415,62 @@ export default function ReconciliationPage() {
       let extractedItems: ImportedItem[] = [];
 
       if (savedLayout) {
-        console.clear();
-        console.log("LAYOUT SALVO:", savedLayout);
-        console.log("HEADER ROW INDEX:", savedLayout.header_row_index);
-        console.log("LINHA DO CABEÇALHO LIDA:", rows[savedLayout.header_row_index]);
-        console.log("PRIMEIRAS 5 LINHAS APÓS CABEÇALHO:", rows.slice(savedLayout.header_row_index + 1, savedLayout.header_row_index + 6));
-
-        const normalizedItems = normalizeRowsByImportLayout(
+        const normalizationResult = normalizeRowsByImportLayoutWithDiagnostics(
           rows,
           savedLayout,
           selectedCompetence?.year
         );
+        const discardedDiagnostics = normalizationResult.diagnostics.filter(
+          (diagnostic) => diagnostic.status === "discarded"
+        );
+        const acceptedTotal = normalizationResult.items.reduce(
+          (sum, item) => sum + item.value,
+          0
+        );
+        const discardedTotal = discardedDiagnostics.reduce(
+          (sum, diagnostic) => sum + diagnostic.normalizedValue,
+          0
+        );
 
-        console.log("NORMALIZED ITEMS:", normalizedItems);
+        setImportSummary({
+          sheetName: workbookData.sheetName,
+          range: workbookData.range,
+          physicalRows: rows.length,
+          rowsAfterHeader: normalizationResult.rowsAfterHeader,
+          acceptedRows: normalizationResult.items.length,
+          discardedRows: discardedDiagnostics.length,
+          acceptedTotal,
+          discardedTotal,
+          headerRowNumber: normalizationResult.headerRowIndex + 1,
+          recoveredLegacyHeader:
+            !normalizationResult.usedSavedHeaderRowIndex,
+        });
 
-        extractedItems = normalizedItems.map((item) => ({
+        if (process.env.NODE_ENV === "development") {
+          console.groupCollapsed("Diagnóstico da importação da fatura");
+          console.log({
+            worksheet: workbookData.sheetName,
+            range: workbookData.range,
+            totalLinhasFisicas: rows.length,
+            indiceCabecalhoSalvo: savedLayout.header_row_index,
+            linhaCabecalhoResolvida: normalizationResult.headerRowIndex + 1,
+            linhasAposCabecalho: normalizationResult.rowsAfterHeader,
+            linhasValidas: normalizationResult.items.length,
+            linhasDescartadas: discardedDiagnostics.length,
+            somaValida: acceptedTotal,
+            somaDescartada: discardedTotal,
+          });
+          console.table(normalizationResult.diagnostics);
+          console.groupEnd();
+        }
+
+        if (normalizationResult.items.length === 0) {
+          throw new Error(
+            "Nenhum lançamento válido foi encontrado. Revise o cabeçalho e o mapeamento do modelo."
+          );
+        }
+
+        extractedItems = normalizationResult.items.map((item) => ({
           importKey: getStatementSourceHash(item.description, item.value),
           sourceHash: getStatementSourceHash(item.description, item.value),
           date: item.date,
@@ -1409,7 +1480,7 @@ export default function ReconciliationPage() {
         }));
 
         detectedImportLayout = {
-          headerRowIndex: savedLayout.header_row_index,
+          headerRowIndex: normalizationResult.headerRowIndex,
           dateColumnIndex: 0,
           descriptionColumnIndex: 0,
           valueColumnIndex: 0,
@@ -1424,19 +1495,11 @@ export default function ReconciliationPage() {
         return;
       }
 
-      const itemOccurrenceCounter = new Map<string, number>();
       const ownerId = await getCurrentUserId();
 
-      const statementItemsPayload = extractedItems.map((item) => {
-        const baseHash = `${item.date}|${normalizeText(item.description)}|${Number(
-          item.value
-        ).toFixed(2)}`;
-
-        const occurrence = (itemOccurrenceCounter.get(baseHash) ?? 0) + 1;
-        itemOccurrenceCounter.set(baseHash, occurrence);
-
-        const sourceHash = `${baseHash}|${occurrence}`;
-
+      const statementItemsPayload = assignOccurrenceSourceHashes(
+        extractedItems
+      ).map((item) => {
         return {
           owner_id: ownerId,
           account_id: selectedAccountId,
@@ -1445,11 +1508,12 @@ export default function ReconciliationPage() {
           statement_description: item.description,
           normalized_description: normalizeText(item.description),
           statement_value: item.value,
-          source_hash: sourceHash,
+          source_hash: item.sourceHash,
           status: "Pendente",
           updated_at: new Date().toISOString(),
         };
       });
+      let currentStatementItemIds: string[] = [];
 
       if (statementItemsPayload.length > 0) {
         const syncResult = await syncStatementItems(
@@ -1461,7 +1525,21 @@ export default function ReconciliationPage() {
 
         console.log("Sincronização da fatura:", syncResult);
 
-        await runAutoReconciliation(selectedAccountId, selectedCompetenceId);
+        currentStatementItemIds = syncResult.currentItemIds;
+
+        if (
+          currentStatementItemIds.length !== statementItemsPayload.length
+        ) {
+          throw new Error(
+            "A sincronização não conseguiu identificar todos os itens da fatura atual."
+          );
+        }
+
+        await runAutoReconciliation(
+          selectedAccountId,
+          selectedCompetenceId,
+          currentStatementItemIds
+        );
       }
 
       const { data: persistedItems, error: persistedItemsError } = await supabase
@@ -1472,6 +1550,7 @@ export default function ReconciliationPage() {
         .eq("owner_id", ownerId)
         .eq("account_id", selectedAccountId)
         .eq("competence_id", selectedCompetenceId)
+        .in("id", currentStatementItemIds)
         .neq("status", "Ignorado")
         .order("statement_date", { ascending: true })
         .order("created_at", { ascending: true });
@@ -1636,7 +1715,7 @@ export default function ReconciliationPage() {
         owner_id: ownerId,
         account_id: selectedAccountId,
         name: `Modelo ${selectedAccount?.name ?? ""}`.trim(),
-        header_row_index: Math.max(0, Number(layoutForm.header_row_index) - 1),
+        header_row_index: Math.max(0, Number(layoutForm.header_row_index)),
         date_header: layoutForm.date_header,
         description_header: layoutForm.description_header,
         value_header: layoutForm.value_header,
@@ -1816,24 +1895,7 @@ export default function ReconciliationPage() {
   }
 
   function getCandidateTransactions(item: ImportedItem) {
-    const fullyReconciledTransactionIds = items
-      .filter((currentItem) => {
-        if (currentItem.matchedTransactionId === item.matchedTransactionId) {
-          return false;
-        }
-
-        return isFullyReconciled(currentItem);
-      })
-      .map((currentItem) => currentItem.matchedTransactionId)
-      .filter(Boolean);
-
-    return transactions
-      .filter(
-        (transaction) =>
-          !fullyReconciledTransactionIds.includes(transaction.id) ||
-          transaction.id === item.matchedTransactionId
-      )
-      .map((transaction) => {
+    return transactions.map((transaction) => {
         const alreadyLinkedStatementTotal = items
           .filter(
             (currentItem) =>
@@ -1855,6 +1917,7 @@ export default function ReconciliationPage() {
           daysDifference,
           valueDifference,
           remainingFinanceValue,
+          alreadyLinkedStatementTotal,
         };
       })
       .sort((a, b) => {
@@ -1967,8 +2030,9 @@ export default function ReconciliationPage() {
     try {
       await saveReconciliation(item, transactionId);
     } catch (error) {
-      console.error("Erro ao gravar conciliação:", error);
-      alert("Erro ao gravar conciliação.");
+      const message = getErrorMessage(error);
+      console.error("Erro ao gravar conciliação:", message, error);
+      alert(`Erro ao gravar conciliação: ${message}`);
       return;
     }
 
@@ -1989,18 +2053,38 @@ export default function ReconciliationPage() {
     setItemToReconcile(null);
   }
 
-  async function correctAndReconcile(
+  async function reconcileAndAdjustLinkedTotal(
     item: ImportedItem,
-    transaction: Transaction
+    transaction: Transaction & { alreadyLinkedStatementTotal: number }
   ) {
-    const ownerId = await getCurrentUserId();
+    const adjustedValue = Math.abs(
+      transaction.alreadyLinkedStatementTotal + Number(item.value)
+    );
 
-    const correctedValue = Math.abs(Number(item.value));
+    const confirmed = window.confirm(
+      `Este lançamento já possui ${formatCurrency(transaction.alreadyLinkedStatementTotal)} ` +
+      `vinculado. O valor no Finance será ajustado de ${formatCurrency(Number(transaction.value))} ` +
+      `para ${formatCurrency(adjustedValue)}, somando os itens vinculados. Continuar?`
+    );
+
+    if (!confirmed) return;
+
+    const ownerId = await getCurrentUserId();
+    const previousTransactionId = item.matchedTransactionId ?? null;
+
+    try {
+      await saveReconciliation(item, transaction.id);
+    } catch (reconciliationError) {
+      const message = getErrorMessage(reconciliationError);
+      console.error("Erro ao gravar conciliação:", message, reconciliationError);
+      alert(`Erro ao gravar conciliação: ${message}`);
+      return;
+    }
 
     const { data: updatedTransaction, error } = await supabase
       .from("transactions")
       .update({
-        value: correctedValue,
+        value: adjustedValue,
       })
       .eq("id", transaction.id)
       .eq("owner_id", ownerId)
@@ -2008,20 +2092,25 @@ export default function ReconciliationPage() {
       .single();
 
     if (error || !updatedTransaction) {
-      console.error("Erro ao corrigir lançamento:", error);
-      alert("Erro ao corrigir lançamento.");
+      const message = getErrorMessage(error);
+
+      try {
+        await saveReconciliation(item, previousTransactionId);
+      } catch (restoreError) {
+        const restoreMessage = getErrorMessage(restoreError);
+        console.error("Erro ao restaurar conciliação:", restoreMessage, restoreError);
+        alert(
+          `Não foi possível ajustar o valor (${message}) nem restaurar o vínculo anterior (${restoreMessage}).`
+        );
+        return;
+      }
+
+      console.error("Erro ao ajustar lançamento:", message, error);
+      alert(`Não foi possível ajustar o valor. O vínculo anterior foi restaurado: ${message}`);
       return;
     }
 
     const newTransaction = updatedTransaction as Transaction;
-
-    try {
-      await saveReconciliation(item, newTransaction.id);
-    } catch (reconciliationError) {
-      console.error("Erro ao gravar conciliação:", reconciliationError);
-      alert("Lançamento corrigido, mas erro ao conciliar.");
-      return;
-    }
 
     setTransactions((previousTransactions) =>
       previousTransactions.map((currentTransaction) =>
@@ -2033,12 +2122,17 @@ export default function ReconciliationPage() {
 
     setItems((previousItems) =>
       previousItems.map((currentItem) =>
-        currentItem.id === item.id
+        currentItem.id === item.id ||
+          currentItem.matchedTransactionId === newTransaction.id
           ? {
             ...currentItem,
-            status: "Conciliado",
-            matched: true,
-            matchedTransactionId: newTransaction.id,
+            ...(currentItem.id === item.id
+              ? {
+                status: "Conciliado" as const,
+                matched: true,
+                matchedTransactionId: newTransaction.id,
+              }
+              : {}),
             matchedTransaction: newTransaction,
           }
           : currentItem
@@ -2377,9 +2471,13 @@ export default function ReconciliationPage() {
           ? "Pagamento da fatura atualizado com sucesso."
           : "Fatura fechada e pagamento programado com sucesso."
       );
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error("Erro ao fechar/atualizar fatura:", error);
-      alert(error?.message ?? JSON.stringify(error, null, 2) ?? "Erro ao salvar fatura.");
+      alert(
+        error instanceof Error
+          ? error.message
+          : "Erro ao salvar fatura."
+      );
     } finally {
       isClosingStatementRef.current = false;
       setIsClosingStatement(false);
@@ -2404,6 +2502,7 @@ export default function ReconciliationPage() {
               setItems([]);
               setTransactions([]);
               setDetectedLayout(null);
+              setImportSummary(null);
               setClosedStatement(null);
               setSelectedFile(null);
               setFileName("");
@@ -2425,6 +2524,7 @@ export default function ReconciliationPage() {
               setItems([]);
               setTransactions([]);
               setDetectedLayout(null);
+              setImportSummary(null);
               setClosedStatement(null);
               setSelectedFile(null);
               setFileName("");
@@ -2543,6 +2643,43 @@ export default function ReconciliationPage() {
                 {formatCurrency(totalDifference)}
               </p>
             </button>
+          </div>
+        )}
+
+        {importSummary && (
+          <div className="rounded-2xl border border-cyan-400/20 bg-cyan-400/5 p-5">
+            <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+              <div>
+                <p className="font-semibold text-cyan-200">
+                  Diagnóstico da leitura
+                </p>
+                <p className="mt-1 text-sm text-slate-300">
+                  Aba {importSummary.sheetName} · intervalo {importSummary.range} ·
+                  cabeçalho na linha {importSummary.headerRowNumber}
+                </p>
+              </div>
+              {importSummary.recoveredLegacyHeader && (
+                <span className="rounded-full bg-amber-500/10 px-3 py-1 text-xs font-semibold text-amber-200">
+                  Índice antigo de cabeçalho corrigido nesta leitura
+                </span>
+              )}
+            </div>
+            <div className="mt-4 grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-4">
+              <p className="text-slate-400">
+                Linhas físicas: <strong className="text-white">{importSummary.physicalRows}</strong>
+              </p>
+              <p className="text-slate-400">
+                Após cabeçalho: <strong className="text-white">{importSummary.rowsAfterHeader}</strong>
+              </p>
+              <p className="text-slate-400">
+                Válidas: <strong className="text-emerald-300">{importSummary.acceptedRows}</strong>
+                {" · "}{formatCurrency(importSummary.acceptedTotal)}
+              </p>
+              <p className="text-slate-400">
+                Ignoradas: <strong className="text-amber-300">{importSummary.discardedRows}</strong>
+                {" · "}{formatCurrency(importSummary.discardedTotal)}
+              </p>
+            </div>
           </div>
         )}
 
@@ -3040,14 +3177,16 @@ export default function ReconciliationPage() {
                                 Usar este
                               </button>
 
-                              <button
-                                onClick={() =>
-                                  correctAndReconcile(itemToReconcile, transaction)
-                                }
-                                className="rounded-lg bg-amber-600 px-3 py-2 text-xs font-semibold text-white hover:bg-amber-500"
-                              >
-                                Corrigir e usar
-                              </button>
+                              {Math.abs(transaction.alreadyLinkedStatementTotal) >= 0.01 && (
+                                <button
+                                  onClick={() =>
+                                    reconcileAndAdjustLinkedTotal(itemToReconcile, transaction)
+                                  }
+                                  className="rounded-lg bg-amber-600 px-3 py-2 text-xs font-semibold text-white hover:bg-amber-500"
+                                >
+                                  Vincular e ajustar total
+                                </button>
+                              )}
                             </div>
                           </td>
                         </tr>

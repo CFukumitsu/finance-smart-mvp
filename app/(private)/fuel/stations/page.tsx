@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   Check,
+  LoaderCircle,
   LocateFixed,
   MapPin,
   Pencil,
@@ -12,7 +13,13 @@ import {
   X,
 } from "lucide-react";
 import AppShell from "../../../components/layout/AppShell";
+import { useGeolocation } from "@/src/hooks/useGeolocation";
 import { getCurrentUserId, supabase } from "@/src/lib/supabase";
+import {
+  loadGoogleFuelStationDetails,
+  searchNearbyFuelStations,
+} from "@/src/services/fuelService";
+import type { NearbyFuelStation } from "@/src/types/fuel";
 
 type FuelStation = {
   id: string;
@@ -25,6 +32,15 @@ type FuelStation = {
   postal_code: string | null;
   latitude: number | null;
   longitude: number | null;
+  google_place_id: string | null;
+  google_maps_uri: string | null;
+  google_rating: number | null;
+  google_user_rating_count: number | null;
+  google_business_status: string | null;
+  google_primary_type: string | null;
+  google_display_name: string | null;
+  google_formatted_address: string | null;
+  google_last_synced_at: string | null;
   active: boolean;
   created_at: string;
 };
@@ -41,6 +57,15 @@ const emptyForm = {
   postal_code: "",
   latitude: "",
   longitude: "",
+  google_place_id: "",
+  google_maps_uri: "",
+  google_rating: null as number | null,
+  google_user_rating_count: null as number | null,
+  google_business_status: "",
+  google_primary_type: "",
+  google_display_name: "",
+  google_formatted_address: "",
+  google_last_synced_at: "",
   active: true,
 };
 
@@ -48,7 +73,11 @@ export default function FuelStationsPage() {
   const [stations, setStations] = useState<FuelStation[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
-  const [isLocating, setIsLocating] = useState(false);
+  const [isSearchingNearby, setIsSearchingNearby] = useState(false);
+  const [selectingPlaceId, setSelectingPlaceId] = useState<string | null>(null);
+  const [nearbyPlaces, setNearbyPlaces] = useState<NearbyFuelStation[]>([]);
+  const [locationMessage, setLocationMessage] = useState("");
+  const { getPosition, isLocating } = useGeolocation();
 
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [editingStationId, setEditingStationId] = useState<string | null>(null);
@@ -82,6 +111,15 @@ export default function FuelStationsPage() {
           postal_code,
           latitude,
           longitude,
+          google_place_id,
+          google_maps_uri,
+          google_rating,
+          google_user_rating_count,
+          google_business_status,
+          google_primary_type,
+          google_display_name,
+          google_formatted_address,
+          google_last_synced_at,
           active,
           created_at
         `)
@@ -142,6 +180,9 @@ export default function FuelStationsPage() {
   function resetForm() {
     setEditingStationId(null);
     setForm(emptyForm);
+    setNearbyPlaces([]);
+    setLocationMessage("");
+    setSelectingPlaceId(null);
   }
 
   function openNewStationDrawer() {
@@ -168,6 +209,15 @@ export default function FuelStationsPage() {
         station.longitude !== null
           ? String(station.longitude)
           : "",
+      google_place_id: station.google_place_id ?? "",
+      google_maps_uri: station.google_maps_uri ?? "",
+      google_rating: station.google_rating,
+      google_user_rating_count: station.google_user_rating_count,
+      google_business_status: station.google_business_status ?? "",
+      google_primary_type: station.google_primary_type ?? "",
+      google_display_name: station.google_display_name ?? "",
+      google_formatted_address: station.google_formatted_address ?? "",
+      google_last_synced_at: station.google_last_synced_at ?? "",
       active: station.active,
     });
 
@@ -206,50 +256,110 @@ export default function FuelStationsPage() {
     return Number.isFinite(parsed) ? parsed : null;
   }
 
-  function requestCurrentLocation() {
-    if (!navigator.geolocation) {
-      alert("A geolocalização não é suportada neste navegador.");
+  function formatDistance(distanceMeters: number | null) {
+    if (distanceMeters === null) {
+      return null;
+    }
+
+    if (distanceMeters < 1000) {
+      return `${distanceMeters} m`;
+    }
+
+    return `${(distanceMeters / 1000).toLocaleString("pt-BR", {
+      maximumFractionDigits: 1,
+    })} km`;
+  }
+
+  async function searchNearbyStations() {
+    try {
+      setLocationMessage("Obtendo sua localização atual...");
+      setNearbyPlaces([]);
+      const position = await getPosition();
+      const { latitude, longitude } = position.coords;
+
+      setLocationMessage("Buscando postos de combustível próximos...");
+      setIsSearchingNearby(true);
+      const places = await searchNearbyFuelStations(latitude, longitude);
+      setNearbyPlaces(places);
+      setLocationMessage(
+        places.length === 0
+          ? "Nenhum posto de combustível foi encontrado próximo à sua localização."
+          : `${places.length} posto${places.length === 1 ? "" : "s"} encontrado${places.length === 1 ? "" : "s"}. Selecione um para preencher o formulário.`
+      );
+    } catch (error) {
+      console.error("Erro ao localizar postos próximos:", error);
+      setLocationMessage(
+        error instanceof Error
+          ? error.message
+          : "Não foi possível localizar postos próximos."
+      );
+    } finally {
+      setIsSearchingNearby(false);
+    }
+  }
+
+  function loadExistingStation(station: FuelStation) {
+    openEditStationDrawer(station);
+    setLocationMessage(
+      "Este posto já estava cadastrado. O cadastro existente foi carregado para edição."
+    );
+  }
+
+  async function selectNearbyStation(place: NearbyFuelStation) {
+    const existingStation = stations.find(
+      (station) => station.google_place_id === place.googlePlaceId
+    );
+
+    if (existingStation) {
+      setLocationMessage("Este posto já está cadastrado na sua conta.");
+
+      if (window.confirm("Este posto já está cadastrado. Deseja carregar o cadastro existente para edição?")) {
+        loadExistingStation(existingStation);
+      }
       return;
     }
 
-    setIsLocating(true);
+    try {
+      setSelectingPlaceId(place.googlePlaceId);
+      setLocationMessage("Carregando os dados do posto selecionado...");
+      const details = await loadGoogleFuelStationDetails(place.googlePlaceId);
 
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        const latitude = position.coords.latitude.toFixed(7);
-        const longitude = position.coords.longitude.toFixed(7);
-
-        setForm((currentForm) => ({
-          ...currentForm,
-          latitude,
-          longitude,
-        }));
-
-        setIsLocating(false);
-      },
-      (error) => {
-        console.error("Erro ao obter localização:", error);
-
-        if (error.code === error.PERMISSION_DENIED) {
-          alert(
-            "A permissão de localização foi negada. Libere o acesso à localização no navegador."
-          );
-        } else if (error.code === error.POSITION_UNAVAILABLE) {
-          alert("Não foi possível determinar sua localização.");
-        } else if (error.code === error.TIMEOUT) {
-          alert("A localização demorou muito para responder.");
-        } else {
-          alert("Erro ao obter sua localização.");
-        }
-
-        setIsLocating(false);
-      },
-      {
-        enableHighAccuracy: true,
-        timeout: 15000,
-        maximumAge: 30000,
-      }
-    );
+      setForm((currentForm) => ({
+        ...currentForm,
+        name: details.name,
+        address: details.address || details.formattedAddress,
+        neighborhood: details.neighborhood,
+        city: details.city,
+        state: formatState(details.state),
+        postal_code: formatPostalCode(details.postalCode),
+        latitude:
+          details.latitude === null ? "" : String(details.latitude),
+        longitude:
+          details.longitude === null ? "" : String(details.longitude),
+        google_place_id: details.googlePlaceId,
+        google_maps_uri: details.googleMapsUri ?? "",
+        google_rating: details.rating,
+        google_user_rating_count: details.userRatingCount,
+        google_business_status: details.businessStatus ?? "",
+        google_primary_type: details.primaryType ?? "",
+        google_display_name: details.name,
+        google_formatted_address: details.formattedAddress,
+        google_last_synced_at: new Date().toISOString(),
+      }));
+      setNearbyPlaces([]);
+      setLocationMessage(
+        "Dados do Google preenchidos. Revise o formulário e clique em Salvar posto para confirmar."
+      );
+    } catch (error) {
+      console.error("Erro ao carregar posto do Google:", error);
+      setLocationMessage(
+        error instanceof Error
+          ? error.message
+          : "Não foi possível carregar o posto selecionado."
+      );
+    } finally {
+      setSelectingPlaceId(null);
+    }
   }
 
   async function saveStation() {
@@ -299,6 +409,35 @@ export default function FuelStationsPage() {
 
       const ownerId = await getCurrentUserId();
 
+      if (form.google_place_id) {
+        const { data: duplicate, error: duplicateError } = await supabase
+          .from("fuel_stations")
+          .select("id")
+          .eq("owner_id", ownerId)
+          .eq("google_place_id", form.google_place_id)
+          .maybeSingle();
+
+        if (duplicateError) {
+          throw new Error(duplicateError.message);
+        }
+
+        if (duplicate && duplicate.id !== editingStationId) {
+          const existingStation = stations.find(
+            (station) => station.id === duplicate.id
+          );
+
+          setLocationMessage("Este posto já está cadastrado na sua conta.");
+
+          if (
+            existingStation &&
+            window.confirm("Este posto já está cadastrado. Deseja carregar o cadastro existente para edição?")
+          ) {
+            loadExistingStation(existingStation);
+          }
+          return;
+        }
+      }
+
       const payload = {
         owner_id: ownerId,
         name,
@@ -310,6 +449,15 @@ export default function FuelStationsPage() {
         postal_code: form.postal_code.trim() || null,
         latitude,
         longitude,
+        google_place_id: form.google_place_id || null,
+        google_maps_uri: form.google_maps_uri || null,
+        google_rating: form.google_rating,
+        google_user_rating_count: form.google_user_rating_count,
+        google_business_status: form.google_business_status || null,
+        google_primary_type: form.google_primary_type || null,
+        google_display_name: form.google_display_name || null,
+        google_formatted_address: form.google_formatted_address || null,
+        google_last_synced_at: form.google_last_synced_at || null,
         active: form.active,
       };
 
@@ -324,7 +472,11 @@ export default function FuelStationsPage() {
             .insert(payload);
 
       if (error) {
-        throw error;
+        if (error.code === "23505" && form.google_place_id) {
+          throw new Error("Este posto já está cadastrado na sua conta.");
+        }
+
+        throw new Error(error.message);
       }
 
       closeDrawer();
@@ -793,30 +945,99 @@ export default function FuelStationsPage() {
               </div>
 
               <div className="rounded-xl border border-white/10 bg-slate-900 p-4">
-                <div className="flex items-start justify-between gap-4">
+                <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                   <div>
                     <p className="font-semibold text-white">
-                      Geolocalização
+                      Localizar postos próximos
                     </p>
 
                     <p className="mt-1 text-sm text-slate-400">
-                      Use a localização atual quando estiver no posto.
+                      Use sua localização para escolher um posto real do Google.
                     </p>
                   </div>
 
                   <button
                     type="button"
-                    onClick={requestCurrentLocation}
-                    disabled={isLocating}
-                    className="flex shrink-0 items-center gap-2 rounded-xl bg-cyan-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-cyan-500 disabled:cursor-not-allowed disabled:opacity-50"
+                    onClick={searchNearbyStations}
+                    disabled={isLocating || isSearchingNearby}
+                    className="flex shrink-0 items-center justify-center gap-2 rounded-xl bg-cyan-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-cyan-500 disabled:cursor-not-allowed disabled:opacity-50"
                   >
-                    <LocateFixed size={17} />
+                    {isLocating || isSearchingNearby ? (
+                      <LoaderCircle className="animate-spin" size={17} />
+                    ) : (
+                      <LocateFixed size={17} />
+                    )}
 
                     {isLocating
-                      ? "Localizando..."
-                      : "Usar localização"}
+                      ? "Obtendo localização..."
+                      : isSearchingNearby
+                        ? "Buscando postos..."
+                        : "Localizar postos próximos"}
                   </button>
                 </div>
+
+                {locationMessage && (
+                  <p
+                    role="status"
+                    className="mt-4 rounded-lg bg-slate-950 px-3 py-2 text-sm text-slate-300"
+                  >
+                    {locationMessage}
+                  </p>
+                )}
+
+                {nearbyPlaces.length > 0 && (
+                  <div className="mt-4 space-y-2" aria-label="Postos próximos">
+                    {nearbyPlaces.map((place) => {
+                      const distance = formatDistance(place.distanceMeters);
+                      const isSelecting = selectingPlaceId === place.googlePlaceId;
+
+                      return (
+                        <div
+                          key={place.googlePlaceId}
+                          className="rounded-xl border border-white/10 bg-slate-950 p-3"
+                        >
+                          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                            <div className="min-w-0">
+                              <p className="font-semibold text-white">
+                                {place.name}
+                              </p>
+                              <p className="mt-1 text-xs text-slate-400">
+                                {place.formattedAddress || "Endereço não informado pelo Google"}
+                              </p>
+                              {distance && (
+                                <p className="mt-1 text-xs font-medium text-cyan-300">
+                                  Aproximadamente {distance}
+                                </p>
+                              )}
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => selectNearbyStation(place)}
+                              disabled={selectingPlaceId !== null}
+                              className="flex shrink-0 items-center justify-center gap-2 rounded-lg border border-cyan-400/30 px-3 py-2 text-sm font-semibold text-cyan-200 hover:bg-cyan-500/10 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              {isSelecting && (
+                                <LoaderCircle className="animate-spin" size={15} />
+                              )}
+                              {isSelecting ? "Carregando..." : "Selecionar"}
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {form.google_place_id && (
+                  <div className="mt-4 rounded-lg border border-emerald-400/20 bg-emerald-500/5 px-3 py-2">
+                    <p className="text-xs font-semibold text-emerald-300">
+                      Posto selecionado do Google Places
+                    </p>
+                    <p className="mt-1 break-all text-xs text-slate-400">
+                      Place ID: {form.google_place_id}
+                    </p>
+                  </div>
+                )}
 
                 <div className="mt-4 grid gap-4 md:grid-cols-2">
                   <div>
