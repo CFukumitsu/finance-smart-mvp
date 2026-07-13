@@ -648,8 +648,8 @@ function TransactionsPageContent() {
     });
 
     const ownerId = await getCurrentUserId();
-    const { data: fuel } = await supabase.from("fuel_records").select("vehicle_id,station_id,fuel_type,odometer,liters,price_per_liter,full_tank,latitude,longitude,notes").eq("transaction_id", transaction.id).eq("owner_id", ownerId).maybeSingle();
-    if (fuel) setFuelForm({ vehicle_id:fuel.vehicle_id, station_id:fuel.station_id, fuel_type:fuel.fuel_type, odometer:String(fuel.odometer).replace(".",","), liters:String(fuel.liters).replace(".",","), price_per_liter:String(fuel.price_per_liter).replace(".",","), full_tank:fuel.full_tank, latitude:String(fuel.latitude??""), longitude:String(fuel.longitude??""), notes:fuel.notes??"" });
+    const { data: fuel } = await supabase.from("fuel_records").select("vehicle_id,fuel_station_id,fuel_type,odometer,liters,price_per_liter,full_tank,latitude,longitude").eq("transaction_id", transaction.id).eq("owner_id", ownerId).maybeSingle();
+    if (fuel) setFuelForm({ vehicle_id:fuel.vehicle_id, fuel_station_id:fuel.fuel_station_id ?? "", fuel_type:fuel.fuel_type, odometer:String(fuel.odometer).replace(".",","), liters:String(fuel.liters).replace(".",","), price_per_liter:String(fuel.price_per_liter).replace(".",","), full_tank:fuel.full_tank, latitude:String(fuel.latitude??""), longitude:String(fuel.longitude??"") });
 
     setIsDrawerOpen(true);
   }
@@ -695,13 +695,53 @@ function TransactionsPageContent() {
 
       if (isFuel) {
         const liters = parsePtBrNumber(fuelForm.liters), price = parsePtBrNumber(fuelForm.price_per_liter), odometer = parsePtBrNumber(fuelForm.odometer);
-        if (!fuelForm.vehicle_id || !fuelForm.station_id || !fuelForm.fuel_type || odometer < 0 || liters <= 0 || price <= 0 || numericValue <= 0) { alert("Preencha todos os dados obrigatórios do abastecimento."); return; }
+        if (!fuelForm.vehicle_id || !fuelForm.fuel_type || odometer < 0 || liters <= 0 || price <= 0 || numericValue <= 0) { alert("Preencha todos os dados obrigatórios do abastecimento."); return; }
         const { data: last } = await supabase.from("fuel_records").select("odometer").eq("owner_id", ownerId).eq("vehicle_id", fuelForm.vehicle_id).order("odometer", { ascending: false }).limit(1).maybeSingle();
         if (last && odometer < Number(last.odometer) && !window.confirm(`O hodômetro é inferior ao último registro (${last.odometer} km). Deseja continuar?`)) return;
         const lock = await ensureAccountIsOpen({ accountId: form.account_id, competenceId: form.competence_id });
         if (!lock.allowed) { alert(lock.message); return; }
-        const { error } = await supabase.rpc("save_fuel_transaction", { p_transaction: { description: form.description, value: numericValue, due_date: form.due_date, status: form.status, account_id: form.account_id, category_id: form.category_id, competence_id: form.competence_id }, p_fuel_record: { ...fuelForm, odometer, liters, price_per_liter: price, total_value: numericValue }, p_transaction_id: editingTransactionId });
-        if (error) throw new Error(error.message);
+        const transactionPayload = {
+          description: form.description,
+          value: numericValue,
+          due_date: form.due_date,
+          type: "Despesa",
+          mode: "unico",
+          status: form.status,
+          account_id: form.account_id,
+          category_id: form.category_id,
+          competence_id: form.competence_id,
+          owner_id: ownerId,
+        };
+        const transactionResult = editingTransactionId
+          ? await supabase.from("transactions").update(transactionPayload).eq("id", editingTransactionId).eq("owner_id", ownerId).select("id").single()
+          : await supabase.from("transactions").insert(transactionPayload).select("id").single();
+        if (transactionResult.error) throw new Error(transactionResult.error.message);
+
+        const transactionId = transactionResult.data.id;
+        const fuelRecordPayload = {
+          owner_id: ownerId,
+          transaction_id: transactionId,
+          vehicle_id: fuelForm.vehicle_id,
+          fuel_station_id: fuelForm.fuel_station_id || null,
+          fuel_type: fuelForm.fuel_type,
+          odometer,
+          liters,
+          price_per_liter: price,
+          total_value: numericValue,
+          full_tank: fuelForm.full_tank,
+          latitude: fuelForm.latitude || null,
+          longitude: fuelForm.longitude || null,
+          recorded_at: form.due_date,
+        };
+        const { error: fuelRecordError } = await supabase
+          .from("fuel_records")
+          .upsert(fuelRecordPayload, { onConflict: "transaction_id" });
+        if (fuelRecordError) {
+          if (!editingTransactionId) {
+            await supabase.from("transactions").delete().eq("id", transactionId).eq("owner_id", ownerId);
+          }
+          throw new Error(fuelRecordError.message);
+        }
         closeDrawer(); await loadTransactions({ competenceId: competenceFilter, accountId: accountFilter, type: typeFilter, status: statusFilter, categoryId: categoryFilter, search: searchTerm, listMode }); return;
       }
 

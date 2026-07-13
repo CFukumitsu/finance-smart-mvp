@@ -7,9 +7,7 @@ export function calculateFuelCycles(records: FuelRecord[]): FuelCycle[] {
 
   byVehicle.forEach((vehicleRecords, vehicleId) => {
     const ordered = [...vehicleRecords].sort((a, b) => {
-      const dateA = a.transaction?.due_date ?? a.created_at;
-      const dateB = b.transaction?.due_date ?? b.created_at;
-      return dateA.localeCompare(dateB) || a.created_at.localeCompare(b.created_at);
+      return a.recorded_at.localeCompare(b.recorded_at) || a.created_at.localeCompare(b.created_at);
     });
     let start: FuelRecord | null = null;
     let liters = 0;
@@ -26,7 +24,7 @@ export function calculateFuelCycles(records: FuelRecord[]): FuelCycle[] {
       if (distance > 0 && liters > 0) {
         cycles.push({ vehicleId, startRecordId: start.id, endRecordId: record.id, distance, liters,
           totalValue, consumptionKmPerLiter: distance / liters, costPerKm: totalValue / distance,
-          stationId: record.station_id });
+          fuelStationId: record.fuel_station_id });
       }
       start = record; liters = 0; totalValue = 0;
     }
@@ -49,4 +47,3 @@ export function parsePtBrNumber(value: string) {
   const parsed = Number(normalized);
   return Number.isFinite(parsed) ? parsed : 0;
 }
-
