@@ -1726,7 +1726,7 @@ function TransactionsPageContent() {
               )}
 
               {isFuelCategory && (
-                <FuelTransactionFields value={fuelForm} onChange={setFuelForm} onTotalChange={(total) => setForm((current) => ({ ...current, value: formatCurrencyFromNumber(total) }))} />
+                <FuelTransactionFields value={fuelForm} onChange={setFuelForm} onTotalChange={(total) => setForm((current) => ({ ...current, value: formatCurrencyFromNumber(total) }))} isEditing={editingTransactionId !== null} />
               )}
 
               <input

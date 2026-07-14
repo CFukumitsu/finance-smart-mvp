@@ -1,22 +1,308 @@
 "use client";
-import { useEffect, useState } from "react";
+
+import { useEffect, useRef, useState } from "react";
+import { LocateFixed, LoaderCircle } from "lucide-react";
 import { getCurrentUserId, supabase } from "@/src/lib/supabase";
-import { parsePtBrNumber } from "@/src/utils/fuelCalculations";
+import {
+  ensureGenericFuelStation,
+  loadActiveFuelStations,
+} from "@/src/services/fuelService";
 import { useGeolocation } from "@/src/hooks/useGeolocation";
+import type { FuelStationOption } from "@/src/types/fuel";
+import { parsePtBrNumber } from "@/src/utils/fuelCalculations";
+import {
+  findNearestRegisteredStation,
+  NEARBY_REGISTERED_STATION_RADIUS_METERS,
+} from "@/src/utils/fuelStationProximity";
 
-export type FuelForm = { vehicle_id:string;fuel_station_id:string;fuel_type:string;odometer:string;liters:string;price_per_liter:string;full_tank:boolean;latitude:string;longitude:string };
-type Item={id:string;name:string;is_default?:boolean;fuel_type?:string;latitude?:number|null;longitude?:number|null};
-type Place={googlePlaceId:string;name:string;formattedAddress:string;latitude:number|null;longitude:number|null;rating:number|null;userRatingCount:number;businessStatus:string|null;primaryType:string|null;googleMapsUri:string|null};
-export const emptyFuelForm:FuelForm={vehicle_id:"",fuel_station_id:"",fuel_type:"Gasolina comum",odometer:"",liters:"",price_per_liter:"",full_tank:false,latitude:"",longitude:""};
-const fuelRecordTypeForVehicle = (fuelType?: string) => ({ Gasolina:"Gasolina comum", Flex:"Gasolina comum", Diesel:"Diesel S10", Elétrico:"Energia elétrica", Híbrido:"Gasolina comum" }[fuelType ?? ""] ?? fuelType ?? "Gasolina comum");
+export type FuelForm = {
+  vehicle_id: string;
+  fuel_station_id: string;
+  fuel_type: string;
+  odometer: string;
+  liters: string;
+  price_per_liter: string;
+  full_tank: boolean;
+  latitude: string;
+  longitude: string;
+};
 
-export default function FuelTransactionFields({value,onChange,onTotalChange}:{value:FuelForm;onChange:(v:FuelForm)=>void;onTotalChange:(v:number)=>void}){
- const[vehicles,setVehicles]=useState<Item[]>([]),[stations,setStations]=useState<Item[]>([]),[places,setPlaces]=useState<Place[]>([]),[message,setMessage]=useState("");const{getPosition,isLocating}=useGeolocation();
- useEffect(()=>{(async()=>{const owner=await getCurrentUserId();const[v,s]=await Promise.all([supabase.from("vehicles").select("id,name,is_default,fuel_type").eq("owner_id",owner).eq("active",true).order("is_default",{ascending:false}),supabase.from("fuel_stations").select("id,name,latitude,longitude").eq("owner_id",owner).eq("active",true).order("name")]);setVehicles(((v.data??[]) as Item[]).map(item=>({...item,fuel_type:fuelRecordTypeForVehicle(item.fuel_type)})));setStations((s.data??[]) as Item[]);if(!value.vehicle_id&&v.data?.[0])onChange({...value,vehicle_id:v.data[0].id,fuel_type:fuelRecordTypeForVehicle(v.data[0].fuel_type)})})().catch(console.error)},[]);// eslint-disable-line react-hooks/exhaustive-deps
- const update=(patch:Partial<FuelForm>)=>onChange({...value,...patch});
- const changeLiters=(raw:string)=>{update({liters:raw});const l=parsePtBrNumber(raw),p=parsePtBrNumber(value.price_per_liter);if(l>0&&p>0)onTotalChange(l*p)};
- const changePrice=(raw:string)=>{update({price_per_liter:raw});const l=parsePtBrNumber(value.liters),p=parsePtBrNumber(raw);if(l>0&&p>0)onTotalChange(l*p)};
- async function nearby(){try{const pos=await getPosition();const latitude=pos.coords.latitude,longitude=pos.coords.longitude;update({latitude:String(latitude),longitude:String(longitude)});const response=await fetch(`/api/maps/nearby-fuel-stations?lat=${latitude}&lng=${longitude}&radius=3000`);const data=await response.json();if(!response.ok)throw new Error(data.error);setPlaces(data.places??[])}catch(e){setMessage(e instanceof Error?e.message:"Erro ao localizar postos.")}}
- async function savePlace(place:Place){const detailsResponse=await fetch(`/api/maps/place-details?placeId=${encodeURIComponent(place.googlePlaceId)}`);const d=await detailsResponse.json();if(!detailsResponse.ok){setMessage(d.error);return}const owner=await getCurrentUserId();const payload={owner_id:owner,name:d.name,address:d.address||null,neighborhood:d.neighborhood||null,city:d.city||null,state:d.state||null,postal_code:d.postalCode||null,latitude:d.latitude,longitude:d.longitude,active:true,google_place_id:d.googlePlaceId,google_maps_uri:d.googleMapsUri,google_rating:d.rating,google_user_rating_count:d.userRatingCount,google_business_status:d.businessStatus,google_primary_type:d.primaryType,google_display_name:d.name,google_formatted_address:d.formattedAddress,google_last_synced_at:new Date().toISOString()};const{data,error}=await supabase.from("fuel_stations").upsert(payload,{onConflict:"owner_id,google_place_id",ignoreDuplicates:false}).select("id,name,latitude,longitude").single();if(error){setMessage(error.message);return}setStations(s=>[...s.filter(x=>x.id!==data.id),data]);update({fuel_station_id:data.id,latitude:String(data.latitude??""),longitude:String(data.longitude??"")});setPlaces([])}
- return <fieldset className="space-y-3 rounded-2xl border border-amber-400/20 bg-amber-500/5 p-4"><legend className="px-2 font-semibold text-amber-300">Dados do abastecimento</legend><div className="grid gap-3 md:grid-cols-2"><select value={value.vehicle_id} onChange={e=>{const v=vehicles.find(x=>x.id===e.target.value);update({vehicle_id:e.target.value,fuel_type:v?.fuel_type??value.fuel_type})}} className="rounded-xl bg-slate-900 p-3 text-white"><option value="">Veículo *</option>{vehicles.map(v=><option key={v.id} value={v.id}>{v.name}{v.is_default?' (padrão)':''}</option>)}</select><select value={value.fuel_station_id} onChange={e=>update({fuel_station_id:e.target.value})} className="rounded-xl bg-slate-900 p-3 text-white"><option value="">Sem posto</option>{stations.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}</select><select value={value.fuel_type} onChange={e=>update({fuel_type:e.target.value})} className="rounded-xl bg-slate-900 p-3 text-white">{["Gasolina comum","Gasolina aditivada","Gasolina premium","Etanol","Diesel S10","Diesel S500","GNV","Energia elétrica","Outro"].map(f=><option key={f}>{f}</option>)}</select><input value={value.odometer} onChange={e=>update({odometer:e.target.value})} inputMode="decimal" placeholder="Hodômetro *" className="rounded-xl bg-slate-900 p-3 text-white"/><input value={value.liters} onChange={e=>changeLiters(e.target.value)} inputMode="decimal" placeholder="Litros *" className="rounded-xl bg-slate-900 p-3 text-white"/><input value={value.price_per_liter} onChange={e=>changePrice(e.target.value)} inputMode="decimal" placeholder="Preço por litro *" className="rounded-xl bg-slate-900 p-3 text-white"/></div><label className="flex gap-2 text-slate-300"><input type="checkbox" checked={value.full_tank} onChange={e=>update({full_tank:e.target.checked})}/> Tanque cheio: {value.full_tank?'Sim':'Não'}</label><button type="button" onClick={nearby} disabled={isLocating} className="rounded-xl border border-amber-400/30 px-4 py-2 text-amber-200">{isLocating?'Localizando...':'Procurar postos próximos no Google'}</button>{message&&<p className="text-sm text-amber-200">{message}</p>}{places.length>0&&<div className="space-y-2">{places.map(p=><button type="button" key={p.googlePlaceId} onClick={()=>savePlace(p)} className="block w-full rounded-lg border border-white/10 p-3 text-left text-slate-200"><b>{p.name}</b><span className="block text-xs text-slate-400">{p.formattedAddress}</span></button>)}</div>}<p className="text-xs text-slate-400">Abastecimentos são sempre únicos, sem parcelamento ou recorrência.</p></fieldset>
+type VehicleOption = {
+  id: string;
+  name: string;
+  is_default?: boolean;
+  fuel_type?: string;
+};
+
+type Props = {
+  value: FuelForm;
+  onChange: (value: FuelForm) => void;
+  onTotalChange: (value: number) => void;
+  isEditing?: boolean;
+};
+
+export const emptyFuelForm: FuelForm = {
+  vehicle_id: "",
+  fuel_station_id: "",
+  fuel_type: "Gasolina comum",
+  odometer: "",
+  liters: "",
+  price_per_liter: "",
+  full_tank: false,
+  latitude: "",
+  longitude: "",
+};
+
+const fuelRecordTypeForVehicle = (fuelType?: string) =>
+  ({
+    Gasolina: "Gasolina comum",
+    Flex: "Gasolina comum",
+    Diesel: "Diesel S10",
+    Elétrico: "Energia elétrica",
+    Híbrido: "Gasolina comum",
+  })[fuelType ?? ""] ??
+  fuelType ??
+  "Gasolina comum";
+
+export default function FuelTransactionFields({
+  value,
+  onChange,
+  onTotalChange,
+  isEditing = false,
+}: Props) {
+  const [vehicles, setVehicles] = useState<VehicleOption[]>([]);
+  const [stations, setStations] = useState<FuelStationOption[]>([]);
+  const [message, setMessage] = useState("");
+  const [isPreparing, setIsPreparing] = useState(true);
+  const { getPosition, isLocating } = useGeolocation();
+  const valueRef = useRef(value);
+  const onChangeRef = useRef(onChange);
+  const manualStationSelectionRef = useRef(false);
+  const initializationStartedRef = useRef(false);
+
+  useEffect(() => {
+    valueRef.current = value;
+  }, [value]);
+
+  useEffect(() => {
+    onChangeRef.current = onChange;
+  }, [onChange]);
+
+  function applyChange(patch: Partial<FuelForm>) {
+    const nextValue = { ...valueRef.current, ...patch };
+    valueRef.current = nextValue;
+    onChangeRef.current(nextValue);
+  }
+
+  async function captureLocationAndSuggest(
+    availableStations: FuelStationOption[],
+    genericStation: FuelStationOption | null
+  ) {
+    try {
+      setMessage("Obtendo sua localização para sugerir um posto...");
+      const position = await getPosition();
+      const coordinates = {
+        latitude: position.coords.latitude,
+        longitude: position.coords.longitude,
+      };
+      const nearest = findNearestRegisteredStation(
+        coordinates,
+        availableStations
+      );
+      const stationId = manualStationSelectionRef.current
+        ? valueRef.current.fuel_station_id
+        : nearest?.station.id ?? genericStation?.id ?? "";
+
+      applyChange({
+        latitude: String(coordinates.latitude),
+        longitude: String(coordinates.longitude),
+        fuel_station_id: stationId,
+      });
+
+      if (manualStationSelectionRef.current) {
+        setMessage("Localização atualizada. Sua escolha manual de posto foi preservada.");
+      } else if (nearest) {
+        setMessage(
+          `Posto sugerido automaticamente a ${Math.round(nearest.distanceMeters)} m.`
+        );
+      } else if (genericStation) {
+        setMessage(
+          `Nenhum posto cadastrado foi encontrado em até ${NEARBY_REGISTERED_STATION_RADIUS_METERS} m. Selecionamos Outros postos.`
+        );
+      } else {
+        setMessage("Não foi possível determinar um posto automaticamente. Escolha um posto manualmente.");
+      }
+    } catch {
+      if (!manualStationSelectionRef.current && genericStation) {
+        applyChange({ fuel_station_id: genericStation.id });
+      }
+      setMessage(
+        genericStation
+          ? "Não foi possível obter sua localização. Selecionamos Outros postos; você pode trocar manualmente."
+          : "Não foi possível obter sua localização. Escolha um posto manualmente; o lançamento pode ser salvo normalmente."
+      );
+    }
+  }
+
+  useEffect(() => {
+    if (initializationStartedRef.current) return;
+    initializationStartedRef.current = true;
+    let cancelled = false;
+
+    async function initialize() {
+      try {
+        const ownerId = await getCurrentUserId();
+        const vehiclesResponse = await supabase
+          .from("vehicles")
+          .select("id,name,is_default,fuel_type")
+          .eq("owner_id", ownerId)
+          .eq("active", true)
+          .order("is_default", { ascending: false });
+
+        if (vehiclesResponse.error) throw new Error(vehiclesResponse.error.message);
+
+        let genericStation: FuelStationOption | null = null;
+        try {
+          genericStation = await ensureGenericFuelStation();
+        } catch (error) {
+          console.error("Erro ao preparar posto genérico:", error);
+        }
+
+        const availableStations = await loadActiveFuelStations();
+        if (cancelled) return;
+
+        const availableVehicles = (vehiclesResponse.data ?? []).map((item) => ({
+          ...item,
+          fuel_type: fuelRecordTypeForVehicle(item.fuel_type),
+        }));
+        setVehicles(availableVehicles);
+        setStations(availableStations);
+
+        const firstVehicle = availableVehicles[0];
+        if (!valueRef.current.vehicle_id && firstVehicle) {
+          applyChange({
+            vehicle_id: firstVehicle.id,
+            fuel_type: firstVehicle.fuel_type ?? "Gasolina comum",
+          });
+        }
+
+        if (!isEditing && !valueRef.current.fuel_station_id) {
+          await captureLocationAndSuggest(availableStations, genericStation);
+        }
+      } catch (error) {
+        console.error("Erro ao preparar dados do abastecimento:", error);
+        if (!cancelled) {
+          setMessage("Não foi possível preparar a sugestão de posto. O lançamento ainda pode ser preenchido manualmente.");
+        }
+      } finally {
+        if (!cancelled) setIsPreparing(false);
+      }
+    }
+
+    void initialize();
+    return () => {
+      cancelled = true;
+    };
+  }, [isEditing]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  function changeLiters(raw: string) {
+    applyChange({ liters: raw });
+    const liters = parsePtBrNumber(raw);
+    const price = parsePtBrNumber(valueRef.current.price_per_liter);
+    if (liters > 0 && price > 0) onTotalChange(liters * price);
+  }
+
+  function changePrice(raw: string) {
+    applyChange({ price_per_liter: raw });
+    const liters = parsePtBrNumber(valueRef.current.liters);
+    const price = parsePtBrNumber(raw);
+    if (liters > 0 && price > 0) onTotalChange(liters * price);
+  }
+
+  async function refreshLocation() {
+    let genericStation = stations.find((station) => station.station_type === "generic") ?? null;
+    if (!genericStation) {
+      try {
+        genericStation = await ensureGenericFuelStation();
+        const refreshedStations = await loadActiveFuelStations();
+        setStations(refreshedStations);
+        await captureLocationAndSuggest(refreshedStations, genericStation);
+        return;
+      } catch {
+        // A captura ainda pode atualizar as coordenadas sem o fallback genérico.
+      }
+    }
+    await captureLocationAndSuggest(stations, genericStation);
+  }
+
+  return (
+    <fieldset className="space-y-3 rounded-2xl border border-amber-400/20 bg-amber-500/5 p-4">
+      <legend className="px-2 font-semibold text-amber-300">Dados do abastecimento</legend>
+      <div className="grid gap-3 md:grid-cols-2">
+        <select
+          value={value.vehicle_id}
+          onChange={(event) => {
+            const vehicle = vehicles.find((item) => item.id === event.target.value);
+            applyChange({
+              vehicle_id: event.target.value,
+              fuel_type: vehicle?.fuel_type ?? value.fuel_type,
+            });
+          }}
+          className="rounded-xl bg-slate-900 p-3 text-white"
+        >
+          <option value="">Veículo *</option>
+          {vehicles.map((vehicle) => (
+            <option key={vehicle.id} value={vehicle.id}>
+              {vehicle.name}{vehicle.is_default ? " (padrão)" : ""}
+            </option>
+          ))}
+        </select>
+        <select
+          value={value.fuel_station_id}
+          onChange={(event) => {
+            manualStationSelectionRef.current = true;
+            applyChange({ fuel_station_id: event.target.value });
+            setMessage("Posto escolhido manualmente.");
+          }}
+          className="rounded-xl bg-slate-900 p-3 text-white"
+        >
+          <option value="">Sem posto</option>
+          {stations.map((station) => (
+            <option key={station.id} value={station.id}>
+              {station.name}{station.station_type === "generic" ? " (genérico)" : ""}
+            </option>
+          ))}
+        </select>
+        <select
+          value={value.fuel_type}
+          onChange={(event) => applyChange({ fuel_type: event.target.value })}
+          className="rounded-xl bg-slate-900 p-3 text-white"
+        >
+          {["Gasolina comum", "Gasolina aditivada", "Gasolina premium", "Etanol", "Diesel S10", "Diesel S500", "GNV", "Energia elétrica", "Outro"].map((fuel) => (
+            <option key={fuel}>{fuel}</option>
+          ))}
+        </select>
+        <input value={value.odometer} onChange={(event) => applyChange({ odometer: event.target.value })} inputMode="decimal" placeholder="Hodômetro *" className="rounded-xl bg-slate-900 p-3 text-white" />
+        <input value={value.liters} onChange={(event) => changeLiters(event.target.value)} inputMode="decimal" placeholder="Litros *" className="rounded-xl bg-slate-900 p-3 text-white" />
+        <input value={value.price_per_liter} onChange={(event) => changePrice(event.target.value)} inputMode="decimal" placeholder="Preço por litro *" className="rounded-xl bg-slate-900 p-3 text-white" />
+      </div>
+      <label className="flex gap-2 text-slate-300">
+        <input type="checkbox" checked={value.full_tank} onChange={(event) => applyChange({ full_tank: event.target.checked })} />
+        Tanque cheio: {value.full_tank ? "Sim" : "Não"}
+      </label>
+      <button
+        type="button"
+        onClick={() => void refreshLocation()}
+        disabled={isLocating || isPreparing}
+        className="inline-flex items-center gap-2 rounded-xl border border-amber-400/30 px-4 py-2 text-amber-200 disabled:opacity-50"
+      >
+        {isLocating || isPreparing ? <LoaderCircle className="animate-spin" size={16} /> : <LocateFixed size={16} />}
+        {isLocating ? "Localizando..." : "Atualizar localização"}
+      </button>
+      {message && <p role="status" className="text-sm text-amber-100">{message}</p>}
+      <p className="text-xs text-slate-400">
+        A localização é usada somente neste abastecimento. Se ela falhar, o lançamento não será bloqueado.
+      </p>
+    </fieldset>
+  );
 }

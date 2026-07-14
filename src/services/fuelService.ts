@@ -1,9 +1,54 @@
 import { getCurrentUserId, supabase } from "@/src/lib/supabase";
 import type {
   FuelRecord,
+  FuelStationOption,
   GoogleFuelStationDetails,
   NearbyFuelStation,
 } from "@/src/types/fuel";
+import {
+  isMissingFuelStationTypeColumn,
+  withCompatibleFuelStationType,
+} from "@/src/utils/fuelStationCompatibility";
+
+export async function loadActiveFuelStations(): Promise<FuelStationOption[]> {
+  const ownerId = await getCurrentUserId();
+  let { data, error } = await supabase
+    .from("fuel_stations")
+    .select("id,name,latitude,longitude,active,station_type")
+    .eq("owner_id", ownerId)
+    .eq("active", true)
+    .order("station_type", { ascending: false })
+    .order("name", { ascending: true });
+
+  if (isMissingFuelStationTypeColumn(error)) {
+    const legacyResponse = await supabase
+      .from("fuel_stations")
+      .select("id,name,latitude,longitude,active")
+      .eq("owner_id", ownerId)
+      .eq("active", true)
+      .order("name", { ascending: true });
+
+    data = legacyResponse.data as typeof data;
+    error = legacyResponse.error;
+  }
+
+  if (error) throw new Error(error.message);
+  return (data ?? []).map(withCompatibleFuelStationType) as FuelStationOption[];
+}
+
+export async function ensureGenericFuelStation(): Promise<FuelStationOption> {
+  const { data, error } = await supabase.rpc("ensure_generic_fuel_station");
+
+  if (error) throw new Error(error.message);
+
+  const station = Array.isArray(data) ? data[0] : data;
+
+  if (!station?.id) {
+    throw new Error("Não foi possível preparar o posto genérico.");
+  }
+
+  return station as FuelStationOption;
+}
 
 async function readApiResponse<T>(response: Response): Promise<T> {
   const data = (await response.json()) as T & { error?: string };

@@ -20,6 +20,11 @@ import {
   searchNearbyFuelStations,
 } from "@/src/services/fuelService";
 import type { NearbyFuelStation } from "@/src/types/fuel";
+import NearbyFuelStationsMap from "@/src/components/fuel/NearbyFuelStationsMap";
+import {
+  isMissingFuelStationTypeColumn,
+  withCompatibleFuelStationType,
+} from "@/src/utils/fuelStationCompatibility";
 
 type FuelStation = {
   id: string;
@@ -42,6 +47,7 @@ type FuelStation = {
   google_formatted_address: string | null;
   google_last_synced_at: string | null;
   active: boolean;
+  station_type: "registered" | "generic";
   created_at: string;
 };
 
@@ -76,6 +82,8 @@ export default function FuelStationsPage() {
   const [isSearchingNearby, setIsSearchingNearby] = useState(false);
   const [selectingPlaceId, setSelectingPlaceId] = useState<string | null>(null);
   const [nearbyPlaces, setNearbyPlaces] = useState<NearbyFuelStation[]>([]);
+  const [nearbyOrigin, setNearbyOrigin] = useState<{ latitude: number; longitude: number } | null>(null);
+  const [highlightedPlaceId, setHighlightedPlaceId] = useState<string | null>(null);
   const [locationMessage, setLocationMessage] = useState("");
   const { getPosition, isLocating } = useGeolocation();
 
@@ -98,7 +106,7 @@ export default function FuelStationsPage() {
 
       const ownerId = await getCurrentUserId();
 
-      const { data, error } = await supabase
+      let { data, error } = await supabase
         .from("fuel_stations")
         .select(`
           id,
@@ -121,16 +129,52 @@ export default function FuelStationsPage() {
           google_formatted_address,
           google_last_synced_at,
           active,
+          station_type,
           created_at
         `)
         .eq("owner_id", ownerId)
         .order("name", { ascending: true });
 
+      if (isMissingFuelStationTypeColumn(error)) {
+        const legacyResponse = await supabase
+          .from("fuel_stations")
+          .select(`
+            id,
+            name,
+            brand,
+            address,
+            neighborhood,
+            city,
+            state,
+            postal_code,
+            latitude,
+            longitude,
+            google_place_id,
+            google_maps_uri,
+            google_rating,
+            google_user_rating_count,
+            google_business_status,
+            google_primary_type,
+            google_display_name,
+            google_formatted_address,
+            google_last_synced_at,
+            active,
+            created_at
+          `)
+          .eq("owner_id", ownerId)
+          .order("name", { ascending: true });
+
+        data = legacyResponse.data as typeof data;
+        error = legacyResponse.error;
+      }
+
       if (error) {
         throw error;
       }
 
-      setStations((data ?? []) as FuelStation[]);
+      setStations(
+        (data ?? []).map(withCompatibleFuelStationType) as FuelStation[]
+      );
     } catch (error) {
       console.error("Erro ao carregar postos:", error);
 
@@ -177,10 +221,29 @@ export default function FuelStationsPage() {
     });
   }, [stations, searchTerm, statusFilter]);
 
+  const registeredPlaceIds = useMemo(
+    () =>
+      new Set(
+        stations.flatMap((station) =>
+          station.google_place_id ? [station.google_place_id] : []
+        )
+      ),
+    [stations]
+  );
+
+  const editingGenericStation = useMemo(
+    () =>
+      stations.find((station) => station.id === editingStationId)?.station_type ===
+      "generic",
+    [editingStationId, stations]
+  );
+
   function resetForm() {
     setEditingStationId(null);
     setForm(emptyForm);
     setNearbyPlaces([]);
+    setNearbyOrigin(null);
+    setHighlightedPlaceId(null);
     setLocationMessage("");
     setSelectingPlaceId(null);
   }
@@ -271,16 +334,23 @@ export default function FuelStationsPage() {
   }
 
   async function searchNearbyStations() {
+    if (editingGenericStation) {
+      setLocationMessage("Outros postos não representa um local fixo e não pode receber dados do Google.");
+      return;
+    }
+
     try {
       setLocationMessage("Obtendo sua localização atual...");
       setNearbyPlaces([]);
       const position = await getPosition();
       const { latitude, longitude } = position.coords;
+      setNearbyOrigin({ latitude, longitude });
 
       setLocationMessage("Buscando postos de combustível próximos...");
       setIsSearchingNearby(true);
       const places = await searchNearbyFuelStations(latitude, longitude);
       setNearbyPlaces(places);
+      setHighlightedPlaceId(places[0]?.googlePlaceId ?? null);
       setLocationMessage(
         places.length === 0
           ? "Nenhum posto de combustível foi encontrado próximo à sua localização."
@@ -447,10 +517,10 @@ export default function FuelStationsPage() {
         city: form.city.trim() || null,
         state: form.state.trim() || null,
         postal_code: form.postal_code.trim() || null,
-        latitude,
-        longitude,
-        google_place_id: form.google_place_id || null,
-        google_maps_uri: form.google_maps_uri || null,
+        latitude: editingGenericStation ? null : latitude,
+        longitude: editingGenericStation ? null : longitude,
+        google_place_id: editingGenericStation ? null : form.google_place_id || null,
+        google_maps_uri: editingGenericStation ? null : form.google_maps_uri || null,
         google_rating: form.google_rating,
         google_user_rating_count: form.google_user_rating_count,
         google_business_status: form.google_business_status || null,
@@ -959,7 +1029,7 @@ export default function FuelStationsPage() {
                   <button
                     type="button"
                     onClick={searchNearbyStations}
-                    disabled={isLocating || isSearchingNearby}
+        disabled={isLocating || isSearchingNearby || editingGenericStation}
                     className="flex shrink-0 items-center justify-center gap-2 rounded-xl bg-cyan-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-cyan-500 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {isLocating || isSearchingNearby ? (
@@ -985,22 +1055,30 @@ export default function FuelStationsPage() {
                   </p>
                 )}
 
-                {nearbyPlaces.length > 0 && (
-                  <div className="mt-4 space-y-2" aria-label="Postos próximos">
-                    {nearbyPlaces.map((place) => {
-                      const distance = formatDistance(place.distanceMeters);
-                      const isSelecting = selectingPlaceId === place.googlePlaceId;
+                {nearbyPlaces.length > 0 && nearbyOrigin && (
+                  <div className="mt-4 grid min-w-0 gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)]">
+                    <div className="max-h-[clamp(16rem,42vh,28rem)] space-y-2 overflow-y-auto pr-1" aria-label="Postos próximos">
+                      {nearbyPlaces.map((place) => {
+                        const distance = formatDistance(place.distanceMeters);
+                        const isSelecting = selectingPlaceId === place.googlePlaceId;
+                        const isHighlighted = highlightedPlaceId === place.googlePlaceId;
+                        const isRegistered = registeredPlaceIds.has(place.googlePlaceId);
 
-                      return (
-                        <div
-                          key={place.googlePlaceId}
-                          className="rounded-xl border border-white/10 bg-slate-950 p-3"
-                        >
-                          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                            <div className="min-w-0">
-                              <p className="font-semibold text-white">
-                                {place.name}
-                              </p>
+                        return (
+                          <div
+                            key={place.googlePlaceId}
+                            className={`rounded-xl border p-3 transition ${
+                              isHighlighted
+                                ? "border-amber-400/60 bg-amber-500/10"
+                                : "border-white/10 bg-slate-950"
+                            }`}
+                          >
+                            <button
+                              type="button"
+                              onClick={() => setHighlightedPlaceId(place.googlePlaceId)}
+                              className="w-full text-left"
+                            >
+                              <p className="font-semibold text-white">{place.name}</p>
                               <p className="mt-1 text-xs text-slate-400">
                                 {place.formattedAddress || "Endereço não informado pelo Google"}
                               </p>
@@ -1009,22 +1087,38 @@ export default function FuelStationsPage() {
                                   Aproximadamente {distance}
                                 </p>
                               )}
-                            </div>
+                              {isRegistered && (
+                                <p className="mt-1 text-xs font-semibold text-emerald-300">
+                                  Já cadastrado
+                                </p>
+                              )}
+                            </button>
                             <button
                               type="button"
                               onClick={() => selectNearbyStation(place)}
                               disabled={selectingPlaceId !== null}
-                              className="flex shrink-0 items-center justify-center gap-2 rounded-lg border border-cyan-400/30 px-3 py-2 text-sm font-semibold text-cyan-200 hover:bg-cyan-500/10 disabled:cursor-not-allowed disabled:opacity-50"
+                              className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg border border-cyan-400/30 px-3 py-2 text-sm font-semibold text-cyan-200 hover:bg-cyan-500/10 disabled:cursor-not-allowed disabled:opacity-50"
                             >
-                              {isSelecting && (
-                                <LoaderCircle className="animate-spin" size={15} />
-                              )}
-                              {isSelecting ? "Carregando..." : "Selecionar"}
+                              {isSelecting && <LoaderCircle className="animate-spin" size={15} />}
+                              {isSelecting
+                                ? "Carregando..."
+                                : isRegistered
+                                  ? "Carregar cadastro"
+                                  : "Selecionar"}
                             </button>
                           </div>
-                        </div>
-                      );
-                    })}
+                        );
+                      })}
+                    </div>
+                    <NearbyFuelStationsMap
+                      userLocation={nearbyOrigin}
+                      places={nearbyPlaces}
+                      highlightedPlaceId={highlightedPlaceId}
+                      registeredPlaceIds={registeredPlaceIds}
+                      onHighlight={setHighlightedPlaceId}
+                      onSelect={selectNearbyStation}
+                      selectingPlaceId={selectingPlaceId}
+                    />
                   </div>
                 )}
 
@@ -1047,6 +1141,7 @@ export default function FuelStationsPage() {
 
                     <input
                       value={form.latitude}
+                      disabled={editingGenericStation}
                       onChange={(event) =>
                         setForm({
                           ...form,
@@ -1066,6 +1161,7 @@ export default function FuelStationsPage() {
 
                     <input
                       value={form.longitude}
+                      disabled={editingGenericStation}
                       onChange={(event) =>
                         setForm({
                           ...form,

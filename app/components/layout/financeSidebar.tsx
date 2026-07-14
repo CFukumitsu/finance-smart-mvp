@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
@@ -24,6 +24,11 @@ const menuItems = [
     label: "Dashboard",
     icon: LayoutDashboard,
     href: "/",
+  },
+  {
+    label: "Análises",
+    icon: ChartNoAxesCombined,
+    href: "/analytics",
   },
   {
     label: "Lançamentos",
@@ -106,12 +111,7 @@ export default function FinanceSidebar({
     pathname === "/fuel" ||
     pathname.startsWith("/fuel/") ||
     pathname.startsWith("/vehicles");
-
-  useEffect(() => {
-    if (isFuelRoute) {
-      setIsFuelMenuOpen(true);
-    }
-  }, [isFuelRoute]);
+  const isFuelMenuExpanded = isFuelRoute || isFuelMenuOpen;
 
   function handleFuelMenuClick() {
     if (!isExpanded) {
@@ -233,14 +233,14 @@ export default function FinanceSidebar({
                   <ChevronDown
                     size={16}
                     className={`shrink-0 transition-transform ${
-                      isFuelMenuOpen ? "rotate-180" : ""
+                      isFuelMenuExpanded ? "rotate-180" : ""
                     }`}
                   />
                 </>
               )}
             </button>
 
-            {isExpanded && isFuelMenuOpen && (
+            {isExpanded && isFuelMenuExpanded && (
               <div className="mt-1 space-y-0.5 border-l border-amber-400/20 pl-3">
                 {fuelMenuItems.map((item) => {
                   const isActive =

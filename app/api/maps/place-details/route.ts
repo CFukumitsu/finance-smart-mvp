@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { getAuthenticatedServerUser } from "@/src/lib/supabaseServer";
 
 type GoogleAddressComponent = {
   longText?: string;
@@ -38,10 +39,16 @@ function findComponent(
 
 export async function GET(request: NextRequest) {
   try {
+    const { user } = await getAuthenticatedServerUser();
+
+    if (!user) {
+      return NextResponse.json({ error: "Não autorizado." }, { status: 401 });
+    }
+
     const placeId =
       request.nextUrl.searchParams.get("placeId")?.trim();
 
-    if (!placeId) {
+    if (!placeId || placeId.length > 255 || !/^[\w-]+$/.test(placeId)) {
       return NextResponse.json(
         {
           error: "Place ID é obrigatório.",

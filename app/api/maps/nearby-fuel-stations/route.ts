@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { getAuthenticatedServerUser } from "@/src/lib/supabaseServer";
 
 type GooglePlace = {
   id?: string;
@@ -77,6 +78,12 @@ function parseCoordinate(
 
 export async function GET(request: NextRequest) {
   try {
+    const { user } = await getAuthenticatedServerUser();
+
+    if (!user) {
+      return NextResponse.json({ error: "Não autorizado." }, { status: 401 });
+    }
+
     const latitude = parseCoordinate(
       request.nextUrl.searchParams.get("lat"),
       -90,
