@@ -2,7 +2,8 @@
 
 import { useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { signInWithEmailAndPassword } from "@/src/services/authService";
+import { signInWithEmailAndPassword, signInWithGoogle } from "@/src/services/authService";
+import { safeInternalRedirect } from "@/src/utils/identity";
 
 export default function LoginForm() {
   const router = useRouter();
@@ -11,12 +12,46 @@ export default function LoginForm() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isGoogleLoading, setIsGoogleLoading] = useState(false);
+  const oauthError = searchParams.get("error");
+  const [message, setMessage] = useState(() => {
+    if (oauthError === "oauth_cancelled") return "O login com Google foi cancelado.";
+    if (oauthError === "oauth_callback") return "Não foi possível concluir o login com Google. Tente novamente.";
+    return "";
+  });
+
+  const redirectTo = safeInternalRedirect(searchParams.get("redirectTo"));
+
+  async function handleGoogleLogin() {
+    setMessage("");
+    setIsGoogleLoading(true);
+
+    try {
+      const response = await fetch("/api/auth/providers", { cache: "no-store" });
+      const providers = await response.json() as { google?: boolean };
+
+      if (!response.ok || providers.google !== true) {
+        setMessage("O login com Google ainda não está habilitado. Um administrador precisa ativá-lo no Supabase Auth.");
+        setIsGoogleLoading(false);
+        return;
+      }
+
+      const { error } = await signInWithGoogle(redirectTo);
+      if (!error) return;
+
+      setMessage("Não foi possível iniciar o login com Google. Tente novamente.");
+      setIsGoogleLoading(false);
+    } catch {
+      setMessage("Não foi possível verificar o login com Google agora. Tente novamente em instantes.");
+      setIsGoogleLoading(false);
+    }
+  }
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
     if (!email || !password) {
-      alert("Informe e-mail e senha.");
+      setMessage("Informe e-mail e senha.");
       return;
     }
 
@@ -27,11 +62,11 @@ export default function LoginForm() {
     setIsSubmitting(false);
 
     if (error) {
-      alert(error.message);
+      setMessage("E-mail ou senha inválidos.");
       return;
     }
 
-    router.replace(searchParams.get("redirectTo") ?? "/dashboard");
+    router.replace(redirectTo);
     router.refresh();
   }
 
@@ -41,6 +76,7 @@ export default function LoginForm() {
       className="w-full max-w-md rounded-3xl border border-white/10 bg-slate-950/80 p-8 shadow-2xl"
     >
       <div className="mb-8 flex flex-col items-center text-center">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src="/logo-fkt.png"
           alt="FKT Systems"
@@ -61,8 +97,25 @@ export default function LoginForm() {
       </div>
 
       <div className="space-y-4">
+        <button
+          type="button"
+          onClick={handleGoogleLogin}
+          disabled={isSubmitting || isGoogleLoading}
+          className="flex w-full items-center justify-center gap-3 rounded-xl border border-white/15 bg-white px-5 py-3 font-bold text-slate-900 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          <span className="text-lg font-black text-blue-600">G</span>
+          {isGoogleLoading ? "Redirecionando..." : "Continuar com Google"}
+        </button>
+
+        <div className="flex items-center gap-3 text-xs uppercase tracking-widest text-slate-500">
+          <span className="h-px flex-1 bg-white/10" /> ou <span className="h-px flex-1 bg-white/10" />
+        </div>
+
+        {message && <p role="alert" className="rounded-xl border border-red-400/20 bg-red-500/10 px-4 py-3 text-sm text-red-200">{message}</p>}
         <input
           type="email"
+          aria-label="E-mail"
+          autoComplete="email"
           value={email}
           onChange={(event) => setEmail(event.target.value)}
           placeholder="E-mail"
@@ -71,6 +124,8 @@ export default function LoginForm() {
 
         <input
           type="password"
+          aria-label="Senha"
+          autoComplete="current-password"
           value={password}
           onChange={(event) => setPassword(event.target.value)}
           placeholder="Senha"

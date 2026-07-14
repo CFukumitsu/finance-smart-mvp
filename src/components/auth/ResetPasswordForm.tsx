@@ -19,8 +19,8 @@ export default function ResetPasswordForm() {
       return;
     }
 
-    if (password.length < 6) {
-      alert("A senha deve ter pelo menos 6 caracteres.");
+    if (password.length < 8) {
+      alert("A senha deve ter pelo menos 8 caracteres.");
       return;
     }
 

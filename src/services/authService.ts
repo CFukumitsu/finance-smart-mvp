@@ -27,3 +27,12 @@ export async function updatePassword(password: string) {
     password,
   });
 }
+
+export async function signInWithGoogle(redirectTo = "/dashboard") {
+  const callback = new URL("/auth/callback", window.location.origin);
+  callback.searchParams.set("next", redirectTo);
+  return supabase.auth.signInWithOAuth({
+    provider: "google",
+    options: { redirectTo: callback.toString() },
+  });
+}
