@@ -232,9 +232,11 @@ function csvNumber(value: number) {
 function MonthlyTable({
   kind,
   monthly,
+  includePendingCashFlow,
 }: {
   kind: AnalyticsScreenKind;
   monthly: MonthlyAnalytics[];
+  includePendingCashFlow: boolean;
 }) {
   const columns =
     kind === "income"
@@ -242,7 +244,9 @@ function MonthlyTable({
       : kind === "expenses"
         ? ["Competência", "Despesas"]
         : kind === "cash-flow"
-          ? ["Competência", "Entradas", "Saídas", "Saldo final"]
+          ? includePendingCashFlow
+            ? ["Competência", "Entradas realizadas e previstas", "Saídas realizadas e previstas", "Saldo projetado"]
+            : ["Competência", "Entradas realizadas", "Saídas realizadas", "Saldo realizado"]
           : ["Competência", "Receitas", "Despesas", "Saldo"];
 
   const rowValues = (item: MonthlyAnalytics) => {
@@ -317,6 +321,7 @@ export default function AnalyticsScreen({ kind }: { kind: AnalyticsScreenKind })
     transactions,
     openingBalance,
     filters,
+    includePendingCashFlow,
     isLoading,
     error,
   } = useAnalytics();
@@ -329,8 +334,9 @@ export default function AnalyticsScreen({ kind }: { kind: AnalyticsScreenKind })
         transactions,
         filters,
         openingBalance,
+        includePendingCashFlow,
       }),
-    [selectedCompetences, transactions, filters, openingBalance]
+    [selectedCompetences, transactions, filters, openingBalance, includePendingCashFlow]
   );
   const incomeSummary = useMemo(
     () => summarizeMonthlyValues(monthly, "income"),
@@ -373,7 +379,9 @@ export default function AnalyticsScreen({ kind }: { kind: AnalyticsScreenKind })
       : kind === "expenses"
         ? ["Competência", "Despesas"]
         : kind === "cash-flow"
-          ? ["Competência", "Entradas", "Saídas", "Saldo final"]
+          ? includePendingCashFlow
+            ? ["Competência", "Entradas realizadas e previstas", "Saídas realizadas e previstas", "Saldo projetado"]
+            : ["Competência", "Entradas realizadas", "Saídas realizadas", "Saldo realizado"]
           : ["Competência", "Receitas", "Despesas", "Saldo"];
   const csvRows = monthly.map((item) => {
     if (kind === "income") return [item.competenceName, csvNumber(item.income)];
@@ -397,7 +405,24 @@ export default function AnalyticsScreen({ kind }: { kind: AnalyticsScreenKind })
   return (
     <div className="min-w-0 space-y-6">
       <AnalyticsHeader title={copy.title} description={copy.description} />
-      <AnalyticsFilters showCategory={kind !== "cash-flow"} />
+      <AnalyticsFilters
+        showCategory={kind !== "cash-flow"}
+        showStatus={kind !== "cash-flow"}
+        cashFlowMode={kind === "cash-flow"}
+      />
+
+      {kind === "cash-flow" && (
+        <div className="rounded-xl border border-cyan-400/20 bg-cyan-500/5 px-4 py-3 text-sm text-cyan-100">
+          <span className="font-semibold">
+            {includePendingCashFlow ? "Fluxo realizado e previsto" : "Fluxo realizado"}
+          </span>
+          <span className="ml-2 text-cyan-100/70">
+            {includePendingCashFlow
+              ? "Inclui lançamentos efetivados e pendentes."
+              : "Considera somente recebimentos e pagamentos efetivados."}
+          </span>
+        </div>
+      )}
 
       {error && (
         <p className="rounded-xl border border-rose-500/30 bg-rose-500/10 p-4 text-sm text-rose-200">
@@ -416,8 +441,8 @@ export default function AnalyticsScreen({ kind }: { kind: AnalyticsScreenKind })
           <>
             <AnalyticsSummaryCard label="Receitas · 12 meses" value={formatAnalyticsCurrency(incomeSummary.total)} tone="positive" />
             <AnalyticsSummaryCard label="Despesas · 12 meses" value={formatAnalyticsCurrency(expenseSummary.total)} tone="negative" />
-            <AnalyticsSummaryCard label="Saldo acumulado" value={formatAnalyticsCurrency(netResult)} tone={netResult >= 0 ? "positive" : "negative"} />
-            <AnalyticsSummaryCard label="Economia média mensal" value={formatAnalyticsCurrency(averageSavings)} tone={averageSavings >= 0 ? "info" : "negative"} />
+            <AnalyticsSummaryCard label="Resultado do período" value={formatAnalyticsCurrency(netResult)} tone={netResult >= 0 ? "positive" : "negative"} />
+            <AnalyticsSummaryCard label="Resultado médio mensal" value={formatAnalyticsCurrency(averageSavings)} tone={averageSavings >= 0 ? "info" : "negative"} />
           </>
         )}
 
@@ -442,9 +467,9 @@ export default function AnalyticsScreen({ kind }: { kind: AnalyticsScreenKind })
         {kind === "cash-flow" && (
           <>
             <AnalyticsSummaryCard label="Saldo inicial" value={formatAnalyticsCurrency(openingBalance)} />
-            <AnalyticsSummaryCard label="Entradas" value={formatAnalyticsCurrency(totalCashIn)} tone="positive" />
-            <AnalyticsSummaryCard label="Saídas" value={formatAnalyticsCurrency(totalCashOut)} tone="negative" />
-            <AnalyticsSummaryCard label="Saldo final" value={formatAnalyticsCurrency(finalCashBalance)} tone={finalCashBalance >= 0 ? "info" : "negative"} />
+            <AnalyticsSummaryCard label={includePendingCashFlow ? "Entradas realizadas e previstas" : "Entradas realizadas"} value={formatAnalyticsCurrency(totalCashIn)} tone="positive" />
+            <AnalyticsSummaryCard label={includePendingCashFlow ? "Saídas realizadas e previstas" : "Saídas realizadas"} value={formatAnalyticsCurrency(totalCashOut)} tone="negative" />
+            <AnalyticsSummaryCard label={includePendingCashFlow ? "Saldo projetado" : "Saldo realizado"} value={formatAnalyticsCurrency(finalCashBalance)} tone={finalCashBalance >= 0 ? "info" : "negative"} />
           </>
         )}
       </div>
@@ -455,7 +480,7 @@ export default function AnalyticsScreen({ kind }: { kind: AnalyticsScreenKind })
             <AnalyticsChartCard title="Receitas x Despesas" description="Evolução das últimas 12 competências.">
               <MonthlyLines data={monthly} lines={[{ key: "income", name: "Receitas", color: chartColors.income }, { key: "expenses", name: "Despesas", color: chartColors.expenses }]} />
             </AnalyticsChartCard>
-            <AnalyticsChartCard title="Saldo mensal" description="Resultado entre receitas e despesas em cada competência.">
+            <AnalyticsChartCard title="Resultado mensal" description="Resultado entre receitas e despesas em cada competência.">
               <MonthlyBars data={monthly} bars={[{ key: "balance", name: "Saldo", color: chartColors.balance }]} />
             </AnalyticsChartCard>
             <AnalyticsChartCard title="Top categorias" description="Categorias com maior volume de despesas no período.">
@@ -503,17 +528,21 @@ export default function AnalyticsScreen({ kind }: { kind: AnalyticsScreenKind })
 
         {kind === "cash-flow" && (
           <>
-            <AnalyticsChartCard title="Fluxo mensal" description="Entradas e saídas de contas por vencimento.">
+            <AnalyticsChartCard title={includePendingCashFlow ? "Fluxo realizado e previsto" : "Fluxo realizado"} description="Entradas e saídas de contas por vencimento.">
               <MonthlyBars data={monthly} bars={[{ key: "cashIn", name: "Entradas", color: chartColors.income }, { key: "cashOut", name: "Saídas", color: chartColors.expenses }]} />
             </AnalyticsChartCard>
-            <AnalyticsChartCard title="Saldo acumulado" description="Saldo inicial somado aos movimentos mensais.">
+            <AnalyticsChartCard title="Saldo acumulado das contas" description="Saldo inicial somado aos movimentos mensais.">
               <MonthlyLines data={monthly} lines={[{ key: "cumulativeCashBalance", name: "Saldo", color: chartColors.balance }]} />
             </AnalyticsChartCard>
           </>
         )}
       </div>
 
-      <MonthlyTable kind={kind} monthly={monthly} />
+      <MonthlyTable
+        kind={kind}
+        monthly={monthly}
+        includePendingCashFlow={includePendingCashFlow}
+      />
 
       <div className="flex justify-end">
         <CsvExportButton

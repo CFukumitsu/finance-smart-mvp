@@ -79,9 +79,7 @@ export async function loadAnalyticsDataset(
     .in("competence_id", competenceIds);
 
   if (filters.accountId) {
-    transactionsQuery = transactionsQuery.or(
-      `account_id.eq.${filters.accountId},destination_account_id.eq.${filters.accountId}`
-    );
+    transactionsQuery = transactionsQuery.eq("account_id", filters.accountId);
   }
 
   if (filters.categoryId) {

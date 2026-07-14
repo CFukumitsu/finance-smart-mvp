@@ -20,34 +20,62 @@ export function isAnalyticalExpense(transaction: AnalyticsTransaction) {
 
 function getCashMovement(
   transaction: AnalyticsTransaction,
-  accountId: string
+  accountId: string,
+  includePending: boolean
 ) {
   const value = toValue(transaction);
   const isCashAccount = transaction.account?.type !== "Cartão";
 
-  if (transaction.type === "Receita" && isCashAccount) {
+  if (transaction.type === "Transferência") {
+    if (!accountId) return { cashIn: 0, cashOut: 0 };
+
+    const originAccountId = transaction.origin_account_id;
+    const destinationAccountId = transaction.destination_account_id;
+    const isPendingIncluded = includePending && transaction.status === "Pendente";
+
+    if (
+      !originAccountId ||
+      !destinationAccountId ||
+      originAccountId === destinationAccountId ||
+      transaction.account_id !== accountId
+    ) {
+      return { cashIn: 0, cashOut: 0 };
+    }
+
+    if (
+      accountId === originAccountId &&
+      (transaction.status === "Pago" || isPendingIncluded)
+    ) {
+      return { cashIn: 0, cashOut: value };
+    }
+
+    if (
+      accountId === destinationAccountId &&
+      (transaction.status === "Recebido" || isPendingIncluded)
+    ) {
+      return { cashIn: value, cashOut: 0 };
+    }
+
+    return { cashIn: 0, cashOut: 0 };
+  }
+
+  const isPendingIncluded = includePending && transaction.status === "Pendente";
+
+  if (
+    transaction.type === "Receita" &&
+    isCashAccount &&
+    (transaction.status === "Recebido" || isPendingIncluded)
+  ) {
     return { cashIn: value, cashOut: 0 };
   }
 
   if (
     isCashAccount &&
     (transaction.type === "Despesa" ||
-      transaction.type === "Pagamento de Fatura")
+      transaction.type === "Pagamento de Fatura") &&
+    (transaction.status === "Pago" || isPendingIncluded)
   ) {
     return { cashIn: 0, cashOut: value };
-  }
-
-  if (transaction.type === "Transferência" && accountId) {
-    if (
-      transaction.destination_account_id === accountId ||
-      (transaction.account_id === accountId && transaction.status === "Recebido")
-    ) {
-      return { cashIn: value, cashOut: 0 };
-    }
-
-    if (transaction.account_id === accountId) {
-      return { cashIn: 0, cashOut: value };
-    }
   }
 
   return { cashIn: 0, cashOut: 0 };
@@ -58,6 +86,7 @@ export function buildMonthlyAnalytics(params: {
   transactions: AnalyticsTransaction[];
   filters: AnalyticsFilters;
   openingBalance: number;
+  includePendingCashFlow?: boolean;
 }): MonthlyAnalytics[] {
   let cumulativeBalance = 0;
   let cumulativeCashBalance = params.openingBalance;
@@ -79,7 +108,8 @@ export function buildMonthlyAnalytics(params: {
       (result, transaction) => {
         const movement = getCashMovement(
           transaction,
-          params.filters.accountId
+          params.filters.accountId,
+          params.includePendingCashFlow ?? false
         );
         result.cashIn += movement.cashIn;
         result.cashOut += movement.cashOut;

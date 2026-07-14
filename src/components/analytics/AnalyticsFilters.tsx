@@ -5,11 +5,13 @@ import { useAnalytics } from "./AnalyticsProvider";
 type AnalyticsFiltersProps = {
   showCategory?: boolean;
   showStatus?: boolean;
+  cashFlowMode?: boolean;
 };
 
 export default function AnalyticsFilters({
   showCategory = true,
   showStatus = true,
+  cashFlowMode = false,
 }: AnalyticsFiltersProps) {
   const {
     accounts,
@@ -17,6 +19,8 @@ export default function AnalyticsFilters({
     competences,
     filters,
     setFilter,
+    includePendingCashFlow,
+    setIncludePendingCashFlow,
     isLoading,
   } = useAnalytics();
 
@@ -88,6 +92,23 @@ export default function AnalyticsFilters({
             <option value="Pago">Pago</option>
             <option value="Recebido">Recebido</option>
           </select>
+        </label>
+      )}
+
+      {cashFlowMode && (
+        <label className="flex min-w-0 items-center gap-3 rounded-xl border border-white/10 bg-slate-950 px-3 py-2.5 text-sm text-white">
+          <input
+            type="checkbox"
+            checked={includePendingCashFlow}
+            onChange={(event) => setIncludePendingCashFlow(event.target.checked)}
+            className="h-4 w-4 rounded border-white/20 bg-slate-900 accent-cyan-500"
+          />
+          <span className="min-w-0">
+            <span className="block font-medium">Incluir pendentes</span>
+            <span className="block text-xs text-slate-500">
+              Soma compromissos e recebimentos previstos.
+            </span>
+          </span>
         </label>
       )}
     </section>

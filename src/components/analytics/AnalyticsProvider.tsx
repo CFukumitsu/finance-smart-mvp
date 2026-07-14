@@ -20,6 +20,7 @@ import type {
   AnalyticsFilters,
   AnalyticsTransaction,
 } from "@/src/types/analytics";
+import { resolveAnalyticsDatasetFilters } from "@/src/utils/analyticsFilters";
 
 type AnalyticsContextValue = {
   accounts: AnalyticsAccount[];
@@ -30,6 +31,8 @@ type AnalyticsContextValue = {
   openingBalance: number;
   filters: AnalyticsFilters;
   setFilter: (name: keyof AnalyticsFilters, value: string) => void;
+  includePendingCashFlow: boolean;
+  setIncludePendingCashFlow: (include: boolean) => void;
   isLoading: boolean;
   error: string;
 };
@@ -65,6 +68,7 @@ export function AnalyticsProvider({ children }: { children: React.ReactNode }) {
   const [transactions, setTransactions] = useState<AnalyticsTransaction[]>([]);
   const [openingBalance, setOpeningBalance] = useState(0);
   const [filters, setFilters] = useState<AnalyticsFilters>(emptyFilters);
+  const [includePendingCashFlow, setIncludePendingCashFlow] = useState(false);
   const [isLoadingReference, setIsLoadingReference] = useState(true);
   const [isLoadingDataset, setIsLoadingDataset] = useState(false);
   const [error, setError] = useState("");
@@ -129,10 +133,7 @@ export function AnalyticsProvider({ children }: { children: React.ReactNode }) {
     [selectedCompetences]
   );
   const datasetFilters = useMemo(
-    () =>
-      pathname === "/analytics/cash-flow"
-        ? { ...filters, categoryId: "" }
-        : filters,
+    () => resolveAnalyticsDatasetFilters(pathname, filters),
     [filters, pathname]
   );
 
@@ -197,6 +198,8 @@ export function AnalyticsProvider({ children }: { children: React.ReactNode }) {
         openingBalance: user ? openingBalance : 0,
         filters,
         setFilter,
+        includePendingCashFlow,
+        setIncludePendingCashFlow,
         isLoading:
           isAuthLoading || (Boolean(user) && (isLoadingReference || isLoadingDataset)),
         error:

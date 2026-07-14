@@ -7,6 +7,8 @@ import type {
 } from "../types/analytics";
 // @ts-expect-error Node's native TypeScript test runner requires the extension.
 import { buildBreakdown, buildMonthlyAnalytics } from "./analyticsCalculations.ts";
+// @ts-expect-error Node's native TypeScript test runner requires the extension.
+import { resolveAnalyticsDatasetFilters } from "./analyticsFilters.ts";
 
 const competences: AnalyticsCompetence[] = [
   { id: "june", name: "2026-06", month: 6, year: 2026 },
@@ -90,4 +92,147 @@ test("agrupa valores reais por categoria", () => {
   assert.equal(breakdown.length, 1);
   assert.equal(breakdown[0].value, 150);
   assert.equal(breakdown[0].count, 2);
+});
+
+function transferPair(id: string, value = 1000): AnalyticsTransaction[] {
+  return [
+    transaction({
+      id: `${id}-origin`,
+      competence_id: "june",
+      type: "Transferência",
+      value,
+      account_id: "account-a",
+      origin_account_id: "account-a",
+      destination_account_id: "account-b",
+      status: "Pago",
+    }),
+    transaction({
+      id: `${id}-destination`,
+      competence_id: "june",
+      type: "Transferência",
+      value,
+      account_id: "account-b",
+      origin_account_id: "account-a",
+      destination_account_id: "account-b",
+      status: "Recebido",
+    }),
+  ];
+}
+
+function cashFor(
+  transactions: AnalyticsTransaction[],
+  accountId: string,
+  includePendingCashFlow = false
+) {
+  return buildMonthlyAnalytics({
+    competences: [competences[0]],
+    filters: { ...filters, accountId },
+    openingBalance: 0,
+    transactions,
+    includePendingCashFlow,
+  })[0];
+}
+
+test("transferência gera uma única saída na conta de origem", () => {
+  const result = cashFor(transferPair("transfer"), "account-a");
+
+  assert.equal(result.cashIn, 0);
+  assert.equal(result.cashOut, 1000);
+});
+
+test("transferência gera uma única entrada na conta de destino", () => {
+  const result = cashFor(transferPair("transfer"), "account-b");
+
+  assert.equal(result.cashIn, 1000);
+  assert.equal(result.cashOut, 0);
+});
+
+test("transferência interna não altera nem infla o fluxo consolidado", () => {
+  const result = cashFor(transferPair("transfer"), "");
+
+  assert.equal(result.cashIn, 0);
+  assert.equal(result.cashOut, 0);
+  assert.equal(result.cashBalance, 0);
+});
+
+test("preserva duas transferências distintas com mesmo valor e data", () => {
+  const result = cashFor(
+    [...transferPair("first"), ...transferPair("second")],
+    "account-a"
+  );
+
+  assert.equal(result.cashIn, 0);
+  assert.equal(result.cashOut, 2000);
+});
+
+test("ignora transferência inconsistente sem inventar movimento", () => {
+  const result = cashFor(
+    [
+      transaction({
+        id: "incomplete",
+        competence_id: "june",
+        type: "Transferência",
+        value: 1000,
+        account_id: "account-b",
+        origin_account_id: "account-a",
+        destination_account_id: null,
+        status: "Recebido",
+      }),
+    ],
+    "account-b"
+  );
+
+  assert.equal(result.cashIn, 0);
+  assert.equal(result.cashOut, 0);
+});
+
+test("fluxo padrão considera somente recebimentos e pagamentos realizados", () => {
+  const result = cashFor(
+    [
+      transaction({ id: "received", competence_id: "june", type: "Receita", value: 100, status: "Recebido" }),
+      transaction({ id: "income-pending", competence_id: "june", type: "Receita", value: 50, status: "Pendente" }),
+      transaction({ id: "paid", competence_id: "june", type: "Despesa", value: 30, status: "Pago" }),
+      transaction({ id: "expense-pending", competence_id: "june", type: "Despesa", value: 20, status: "Pendente" }),
+      transaction({ id: "invoice-paid", competence_id: "june", type: "Pagamento de Fatura", value: 10, status: "Pago" }),
+      transaction({ id: "invoice-pending", competence_id: "june", type: "Pagamento de Fatura", value: 5, status: "Pendente" }),
+    ],
+    "checking"
+  );
+
+  assert.equal(result.cashIn, 100);
+  assert.equal(result.cashOut, 40);
+});
+
+test("opção de pendentes soma compromissos e recebimentos previstos", () => {
+  const result = cashFor(
+    [
+      transaction({ id: "received", competence_id: "june", type: "Receita", value: 100, status: "Recebido" }),
+      transaction({ id: "income-pending", competence_id: "june", type: "Receita", value: 50, status: "Pendente" }),
+      transaction({ id: "paid", competence_id: "june", type: "Despesa", value: 30, status: "Pago" }),
+      transaction({ id: "expense-pending", competence_id: "june", type: "Despesa", value: 20, status: "Pendente" }),
+      transaction({ id: "invoice-paid", competence_id: "june", type: "Pagamento de Fatura", value: 10, status: "Pago" }),
+      transaction({ id: "invoice-pending", competence_id: "june", type: "Pagamento de Fatura", value: 5, status: "Pendente" }),
+    ],
+    "checking",
+    true
+  );
+
+  assert.equal(result.cashIn, 150);
+  assert.equal(result.cashOut, 65);
+});
+
+test("filtro explícito de status é preservado fora do Fluxo de Caixa", () => {
+  const explicitStatusFilters = { ...filters, categoryId: "category", status: "Pago" };
+
+  assert.equal(
+    resolveAnalyticsDatasetFilters("/analytics/expenses", explicitStatusFilters).status,
+    "Pago"
+  );
+
+  const cashFlowFilters = resolveAnalyticsDatasetFilters(
+    "/analytics/cash-flow",
+    explicitStatusFilters
+  );
+  assert.equal(cashFlowFilters.status, "");
+  assert.equal(cashFlowFilters.categoryId, "");
 });
