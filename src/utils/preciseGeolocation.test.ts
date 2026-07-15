@@ -98,7 +98,9 @@ test("rejeita a melhor posição quando a precisão continua acima de 300 metros
   await assert.rejects(request.promise, (error: unknown) => {
     assert.ok(error instanceof PreciseGeolocationError);
     assert.equal(error.code, "INACCURATE");
-    assert.match(error.message, /Vá para um local aberto/);
+    assert.equal(error.accuracyMeters, 301);
+    assert.match(error.message, /Melhor precisão recebida: 301 metros/);
+    assert.match(error.message, /localização precisa para o Chrome/);
     return true;
   });
 });
@@ -128,4 +130,3 @@ test("cancelamento limpa watch e timeout", async () => {
   });
   assert.deepEqual(geolocation.clearedWatchIds, [17]);
 });
-

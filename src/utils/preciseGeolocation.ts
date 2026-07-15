@@ -12,14 +12,17 @@ export type PreciseGeolocationErrorCode =
 
 export class PreciseGeolocationError extends Error {
   readonly code: PreciseGeolocationErrorCode;
+  readonly accuracyMeters: number | null;
 
   constructor(
     code: PreciseGeolocationErrorCode,
-    message: string
+    message: string,
+    accuracyMeters: number | null = null
   ) {
     super(message);
     this.name = "PreciseGeolocationError";
     this.code = code;
+    this.accuracyMeters = accuracyMeters;
   }
 }
 
@@ -109,10 +112,12 @@ export function requestPreciseGeolocation(
     }
 
     if (bestPosition) {
+      const bestAccuracyMeters = Math.round(bestPosition.coords.accuracy);
       rejectWith(
         new PreciseGeolocationError(
           "INACCURATE",
-          "Não foi possível obter uma localização precisa. Vá para um local aberto e toque em Atualizar localização."
+          `Não foi possível obter uma localização precisa. Melhor precisão recebida: ${bestAccuracyMeters} metros. Ative a localização precisa para o Chrome e para este site, vá para um local aberto e toque em Atualizar localização.`,
+          bestAccuracyMeters
         )
       );
       return;
