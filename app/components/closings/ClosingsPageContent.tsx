@@ -8,6 +8,10 @@ import {
   reopenCompetence,
 } from "@/src/services/closingService";
 import { getCurrentUserId, supabase } from "@/src/lib/supabase";
+import {
+  addMonthsToCompetence,
+  ensureCompetenceExists,
+} from "@/src/services/competenceService";
 import type { CompetenceClosure } from "@/src/types/closing";
 import {
   calculateAccountCredits,
@@ -114,6 +118,7 @@ export default function ClosingsPageContent() {
   async function loadData(competenceId?: string) {
     setIsLoading(true);
 
+    await ensureCompetenceExists(new Date());
     const ownerId = await getCurrentUserId();
 
     const { data: competenceData, error: competenceError } = await supabase
@@ -362,6 +367,10 @@ export default function ClosingsPageContent() {
       const openingBalance = getAccountOpeningBalance(account.id);
       const closingBalance = getAccountClosingBalance(account.id);
 
+      if (selectedCompetence?.name) {
+        await ensureCompetenceExists(addMonthsToCompetence(selectedCompetence.name, 1));
+      }
+
       const { error } = await supabase.from("account_closures").upsert(
         {
           competence_id: selectedCompetenceId,
@@ -389,45 +398,6 @@ export default function ClosingsPageContent() {
       setIsProcessingId(null);
     }
   }
-  async function getOrCreateCompetenceByDate(date: string, ownerId: string) {
-    const baseDate = new Date(date + "T00:00:00");
-    const month = baseDate.getMonth() + 1;
-    const year = baseDate.getFullYear();
-    const name = `${year}-${String(month).padStart(2, "0")}`;
-
-    const existingCompetence = competences.find(
-      (competence) => competence.name === name
-    );
-
-    if (existingCompetence) {
-      return existingCompetence.id;
-    }
-
-    const startDate = `${year}-${String(month).padStart(2, "0")}-01`;
-    const endDate = new Date(year, month, 0).toISOString().split("T")[0];
-
-    const { data, error } = await supabase
-      .from("competences")
-      .insert({
-        name,
-        month,
-        year,
-        start_date: startDate,
-        end_date: endDate,
-        closed: false,
-        owner_id: ownerId,
-      })
-      .select("id, name")
-      .single();
-
-    if (error || !data) {
-      throw error ?? new Error("Erro ao criar competência do pagamento.");
-    }
-
-    setCompetences((current) => [data, ...current]);
-
-    return data.id;
-  }
   async function closeCardStatement(account: Account) {
     if (!selectedCompetenceId) return;
 
@@ -449,8 +419,7 @@ export default function ClosingsPageContent() {
       let paymentTransactionId = null;
 
       if (shouldCreatePayment) {
-        const paymentCompetenceId =
-          await getOrCreateCompetenceByDate(paymentDueDate, ownerId);
+        const paymentCompetenceId = (await ensureCompetenceExists(paymentDueDate)).id;
 
         const paymentDescription = `Pagamento fatura ${account.name}`;
 
@@ -590,6 +559,9 @@ export default function ClosingsPageContent() {
     setIsProcessingId(selectedCompetenceId);
 
     try {
+      if (selectedCompetence?.name) {
+        await ensureCompetenceExists(addMonthsToCompetence(selectedCompetence.name, 1));
+      }
       await closeCompetence(selectedCompetenceId);
       await loadData(selectedCompetenceId);
     } catch (error) {

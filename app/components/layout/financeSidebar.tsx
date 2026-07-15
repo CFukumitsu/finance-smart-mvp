@@ -8,6 +8,7 @@ import {
   ListChecks,
   WalletCards,
   Tags,
+  CalendarRange,
   Repeat,
   LockKeyhole,
   Landmark,
@@ -44,6 +45,11 @@ const menuItems = [
     label: "Categorias",
     icon: Tags,
     href: "/categories",
+  },
+  {
+    label: "Competências",
+    icon: CalendarRange,
+    href: "/competences",
   },
   {
     label: "Recorrências",

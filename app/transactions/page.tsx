@@ -11,6 +11,11 @@ import { parsePtBrNumber } from "@/src/utils/fuelCalculations";
 import { removeFuelRecordForTransaction } from "@/src/services/fuelService";
 import { ensureAccountIsOpen } from "@/src/utils/accountLock";
 import {
+  ensureCompetenceExists,
+  ensureCompetencesExist,
+  toCompetenceKey,
+} from "@/src/services/competenceService";
+import {
   calculateAccountFinalBalance,
   filterTransactionsUntilDate,
 } from "@/src/utils/balanceCalculations";
@@ -458,6 +463,7 @@ function TransactionsPageContent() {
     setIsLoading(true);
 
     const ownerId = await getCurrentUserId();
+    await ensureCompetenceExists(new Date());
 
     const [accountClosuresResponse, cardStatementsResponse] = await Promise.all([
       supabase
@@ -692,13 +698,20 @@ function TransactionsPageContent() {
 
     try {
       const ownerId = await getCurrentUserId();
+      const dueDateCompetence = competences.find(
+        (competence) => competence.name === toCompetenceKey(form.due_date)
+      );
+      const effectiveCompetenceId =
+        form.mode !== "parcelado" && !dueDateCompetence
+          ? (await ensureCompetenceExists(form.due_date)).id
+          : form.competence_id;
 
       if (isFuel) {
         const liters = parsePtBrNumber(fuelForm.liters), price = parsePtBrNumber(fuelForm.price_per_liter), odometer = parsePtBrNumber(fuelForm.odometer);
         if (!fuelForm.vehicle_id || !fuelForm.fuel_type || odometer < 0 || liters <= 0 || price <= 0 || numericValue <= 0) { alert("Preencha todos os dados obrigatórios do abastecimento."); return; }
         const { data: last } = await supabase.from("fuel_records").select("odometer").eq("owner_id", ownerId).eq("vehicle_id", fuelForm.vehicle_id).order("odometer", { ascending: false }).limit(1).maybeSingle();
         if (last && odometer < Number(last.odometer) && !window.confirm(`O hodômetro é inferior ao último registro (${last.odometer} km). Deseja continuar?`)) return;
-        const lock = await ensureAccountIsOpen({ accountId: form.account_id, competenceId: form.competence_id });
+        const lock = await ensureAccountIsOpen({ accountId: form.account_id, competenceId: effectiveCompetenceId });
         if (!lock.allowed) { alert(lock.message); return; }
         const transactionPayload = {
           description: form.description,
@@ -709,7 +722,7 @@ function TransactionsPageContent() {
           status: form.status,
           account_id: form.account_id,
           category_id: form.category_id,
-          competence_id: form.competence_id,
+          competence_id: effectiveCompetenceId,
           owner_id: ownerId,
         };
         const transactionResult = editingTransactionId
@@ -764,7 +777,7 @@ function TransactionsPageContent() {
             status: "Pago",
             account_id: form.account_id,
             category_id: null,
-            competence_id: form.competence_id,
+            competence_id: effectiveCompetenceId,
             origin_account_id: form.account_id,
             destination_account_id: form.destination_account_id,
             owner_id: ownerId,
@@ -778,7 +791,7 @@ function TransactionsPageContent() {
             status: "Recebido",
             account_id: form.destination_account_id,
             category_id: null,
-            competence_id: form.competence_id,
+            competence_id: effectiveCompetenceId,
             origin_account_id: form.account_id,
             destination_account_id: form.destination_account_id,
             owner_id: ownerId,
@@ -831,10 +844,22 @@ function TransactionsPageContent() {
         return;
       }
 
+      const installmentDates =
+        form.mode === "parcelado" && !editingTransactionId
+          ? Array.from({ length: installmentCount }, (_, index) =>
+              addMonths(form.due_date, index)
+            )
+          : [];
+      const ensuredInstallmentCompetences = await ensureCompetencesExist(installmentDates);
+
       const transactionsToSave = form.mode === "parcelado" && !editingTransactionId
         ? Array.from({ length: installmentCount }, (_, index) => {
           const dueDate = addMonths(form.due_date, index);
-          const competenceId = getCompetenceIdByDate(dueDate);
+          const competenceId = ensuredInstallmentCompetences.get(toCompetenceKey(dueDate))?.id;
+
+          if (!competenceId) {
+            throw new Error(`Não foi possível preparar a competência de ${toCompetenceKey(dueDate)}.`);
+          }
 
           return {
             description: `${form.description} ${index + 1}/${installmentCount}`,
@@ -874,7 +899,7 @@ function TransactionsPageContent() {
             form.type === "Transferência" || form.type === "Pagamento de Fatura"
               ? null
               : form.category_id || null,
-          competence_id: form.competence_id,
+          competence_id: effectiveCompetenceId,
           origin_account_id:
             form.type === "Transferência"
               ? form.origin_account_id || form.account_id || null

@@ -1,7 +1,9 @@
 import { getCurrentUserId, supabase } from "@/src/lib/supabase";
+import { ensureCompetenceExists } from "@/src/services/competenceService";
 
 type GenerateRecurringTransactionsParams = {
   competenceId: string;
+  competenceReference?: string;
 };
 
 type CompetenceRow = {
@@ -23,17 +25,21 @@ type RecurringTransactionRow = {
 
 export async function generateRecurringTransactions({
   competenceId,
+  competenceReference,
 }: GenerateRecurringTransactionsParams) {
   if (!competenceId) {
     throw new Error("Competência não informada.");
   }
 
   const ownerId = await getCurrentUserId();
+  const resolvedCompetenceId = competenceReference
+    ? (await ensureCompetenceExists(competenceReference)).id
+    : competenceId;
 
   const { data: competenceData, error: competenceError } = await supabase
     .from("competences")
     .select("id, name, month, year")
-    .eq("id", competenceId)
+    .eq("id", resolvedCompetenceId)
     .eq("owner_id", ownerId)
     .single();
 
@@ -66,7 +72,7 @@ export async function generateRecurringTransactions({
     .from("transactions")
     .select("id, recurring_transaction_id")
     .eq("owner_id", ownerId)
-    .eq("competence_id", competenceId)
+    .eq("competence_id", resolvedCompetenceId)
     .not("recurring_transaction_id", "is", null);
 
   if (existingError) {
@@ -104,7 +110,7 @@ export async function generateRecurringTransactions({
       value: item.amount,
       account_id: item.account_id,
       category_id: item.category_id,
-      competence_id: competenceId,
+      competence_id: resolvedCompetenceId,
       due_date: buildDueDate(item.day_of_month),
       status: "Pendente",
       recurring_transaction_id: item.id,

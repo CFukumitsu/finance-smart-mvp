@@ -2,7 +2,8 @@
 
 import { useState } from "react";
 import AppShell from "../components/layout/AppShell";
-import { supabase } from "@/src/lib/supabase";
+import { getCurrentUserId, supabase } from "@/src/lib/supabase";
+import { ensureCompetencesExist } from "@/src/services/competenceService";
 import * as XLSX from "xlsx";
 
 type AccessAccount = {
@@ -72,18 +73,6 @@ export default function ImportAccessPage() {
 
   function getCompetenceName(dateString: string) {
     return dateString.slice(0, 7);
-  }
-
-  function getMonth(dateString: string) {
-    return Number(dateString.slice(5, 7));
-  }
-
-  function getYear(dateString: string) {
-    return Number(dateString.slice(0, 4));
-  }
-
-  function getLastDayOfMonth(year: number, month: number) {
-    return new Date(year, month, 0).getDate();
   }
 
   function getStatus(type: "Receita" | "Despesa", dueDate: string) {
@@ -156,6 +145,7 @@ export default function ImportAccessPage() {
     resetLogs();
 
     try {
+      const ownerId = await getCurrentUserId();
       addLog("info", "Lendo arquivos Excel...");
 
       const accessAccounts = await readExcelFile<AccessAccount>(pagamentoFile);
@@ -178,6 +168,7 @@ export default function ImportAccessPage() {
           : null;
 
         return {
+          owner_id: ownerId,
           name: account.DS_PAGAMENTO,
           type: closingDay || dueDay ? "Cartão" : "Conta",
           closing_day: closingDay,
@@ -210,6 +201,7 @@ export default function ImportAccessPage() {
 
       const categoryPayload = [
         ...accessCategories.map((category) => ({
+          owner_id: ownerId,
           name: category.DS_TIPO_GASTO,
           type: "Despesa",
           monthly_limit: 0,
@@ -218,6 +210,7 @@ export default function ImportAccessPage() {
           legacy_id: Number(category.ID_TIPO_GASTO),
         })),
         {
+          owner_id: ownerId,
           name: "Sem categoria Access",
           type: "Despesa",
           monthly_limit: 0,
@@ -254,44 +247,16 @@ export default function ImportAccessPage() {
         )
       ).sort();
 
-      const competencePayload = competenceNames.map((name) => {
-        const year = Number(name.slice(0, 4));
-        const month = Number(name.slice(5, 7));
-        const lastDay = getLastDayOfMonth(year, month);
-
-        return {
-          name,
-          month,
-          year,
-          start_date: `${name}-01`,
-          end_date: `${name}-${String(lastDay).padStart(2, "0")}`,
-          status: "ABERTA",
-        };
-      });
-
-      console.log("Competence Names:", competenceNames);
-      console.log("Primeiras 5 competências:", competencePayload.slice(0, 5));
-      console.log(
-        "Primeira competência JSON:",
-        JSON.stringify(competencePayload[0], null, 2)
-      );
-
-      const { data: createdCompetences, error: competencesError } = await supabase
-        .from("competences")
-        .insert(competencePayload)
-        .select("id, name");
-
-      if (competencesError) {
-        throw new Error(`Erro ao importar competências: ${competencesError.message}`);
-      }
+      const ensuredCompetences = await ensureCompetencesExist(competenceNames);
+      const createdCompetences = Array.from(ensuredCompetences.values());
 
       const competenceIdByName = new Map<string, string>();
 
-      (createdCompetences ?? []).forEach((competence: any) => {
+      createdCompetences.forEach((competence) => {
         competenceIdByName.set(competence.name, competence.id);
       });
 
-      addLog("success", `${createdCompetences?.length ?? 0} competências criadas.`);
+      addLog("success", `${createdCompetences.length} competências preparadas.`);
 
       addLog("info", "Importando transações...");
 
@@ -302,6 +267,7 @@ export default function ImportAccessPage() {
             transaction.ST_OPERACAO === "C" ? "Receita" : "Despesa";
 
           return {
+            owner_id: ownerId,
             description: transaction.DS_TRANSACAO,
             due_date: dueDate,
             value: Number(transaction.NR_VALOR ?? 0),

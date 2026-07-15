@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import AppShell from "../../components/layout/AppShell";
 import { getCurrentUserId, supabase } from "@/src/lib/supabase";
+import { ensureCompetenceExists } from "@/src/services/competenceService";
 import {
     cancelRecurringTransaction,
     createRecurringTransaction,
@@ -86,6 +87,7 @@ export default function RecurrencesPageContent() {
     }
 
     async function loadAuxiliaryData() {
+        await ensureCompetenceExists(new Date());
         const ownerId = await getCurrentUserId();
     
         const [accountsResult, categoriesResult, competencesResult] =
@@ -243,6 +245,9 @@ export default function RecurrencesPageContent() {
 
             const result = await generateRecurringTransactions({
                 competenceId: selectedCompetenceId,
+                competenceReference: competences.find(
+                    (item) => item.id === selectedCompetenceId
+                )?.name,
             });
 
             alert(

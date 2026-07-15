@@ -10,6 +10,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx";
 import AppShell from "../components/layout/AppShell";
 import { getCurrentUserId, supabase } from "@/src/lib/supabase";
+import { ensureCompetenceExists } from "@/src/services/competenceService";
 
 type Account = {
   id: string;
@@ -896,6 +897,7 @@ export default function ReconciliationPage() {
     }
 
     async function loadCompetences(ownerId: string) {
+      await ensureCompetenceExists(new Date());
       const { data, error } = await supabase
         .from("competences")
         .select("id, name, month, year, start_date, end_date")
@@ -2198,46 +2200,6 @@ export default function ReconciliationPage() {
     setClosedStatement(null);
   }
 
-  async function getOrCreateCompetenceByDate(date: string, ownerId: string) {
-    const baseDate = new Date(date + "T00:00:00");
-    const month = baseDate.getMonth() + 1;
-    const year = baseDate.getFullYear();
-    const name = `${year}-${String(month).padStart(2, "0")}`;
-
-    const existingCompetence = competences.find(
-      (competence) => competence.month === month && competence.year === year
-    );
-
-    if (existingCompetence) {
-      return existingCompetence.id;
-    }
-
-    const startDate = `${year}-${String(month).padStart(2, "0")}-01`;
-    const endDate = new Date(year, month, 0).toISOString().split("T")[0];
-
-    const { data, error } = await supabase
-      .from("competences")
-      .insert({
-        owner_id: ownerId,
-        name,
-        month,
-        year,
-        start_date: startDate,
-        end_date: endDate,
-        closed: false,
-      })
-      .select("id, name, month, year, start_date, end_date")
-      .single();
-
-    if (error || !data) {
-      throw error ?? new Error("Erro ao criar competência do pagamento.");
-    }
-
-    setCompetences((previousCompetences) => [data, ...previousCompetences]);
-
-    return data.id;
-  }
-
   async function reopenStatement() {
     const ownerId = await getCurrentUserId();
     if (!closedStatement?.id) {
@@ -2287,8 +2249,6 @@ export default function ReconciliationPage() {
 
   async function closeStatementAndCreatePayment() {
     if (isClosingStatementRef.current) return;
-
-    const ownerId = await getCurrentUserId();
 
     isClosingStatementRef.current = true;
     setIsClosingStatement(true);
@@ -2352,7 +2312,7 @@ export default function ReconciliationPage() {
       const description = `Pagamento de fatura ${selectedAccount?.name ?? ""} - ${selectedCompetence?.name ?? ""
         }`;
 
-      const paymentCompetenceId = await getOrCreateCompetenceByDate(paymentDueDate, ownerId);
+      const paymentCompetenceId = (await ensureCompetenceExists(paymentDueDate)).id;
 
       const { data: existingStatement, error: existingStatementError } =
         await supabase
