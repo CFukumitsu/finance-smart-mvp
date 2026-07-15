@@ -81,7 +81,7 @@ export async function POST(request: Request) {
     const origin = process.env.NEXT_PUBLIC_SITE_URL || new URL(request.url).origin;
     const { data, error } = await admin.auth.admin.inviteUserByEmail(email, {
       data: { first_name: firstName, last_name: lastName, full_name: name },
-      redirectTo: `${origin.replace(/\/$/, "")}/reset-password?invited=1`,
+      redirectTo: `${origin.replace(/\/$/, "")}/accept-invite`,
     });
     if (error || !data.user) {
       return NextResponse.json({ error: "Não foi possível enviar o convite. Verifique o limite de e-mails e tente novamente." }, { status: 502 });
@@ -136,7 +136,7 @@ export async function PUT(request: Request) {
     if (userError || profileError || !userData.user?.email) return NextResponse.json({ error: "Usuário não encontrado." }, { status: 404 });
     if (profile?.status !== "invited" || userData.user.last_sign_in_at) return NextResponse.json({ error: "Este usuário já está ativo." }, { status: 409 });
     const origin = process.env.NEXT_PUBLIC_SITE_URL || new URL(request.url).origin;
-    const { error } = await admin.auth.admin.inviteUserByEmail(userData.user.email, { redirectTo: `${origin.replace(/\/$/, "")}/reset-password?invited=1` });
+    const { error } = await admin.auth.admin.inviteUserByEmail(userData.user.email, { redirectTo: `${origin.replace(/\/$/, "")}/accept-invite` });
     if (error) return NextResponse.json({ error: "Não foi possível reenviar o convite. Verifique o limite de e-mails." }, { status: 502 });
     await admin.from("profiles").update({ invited_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq("id", userId);
     return NextResponse.json({ message: "Convite reenviado com sucesso." });
