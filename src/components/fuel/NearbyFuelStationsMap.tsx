@@ -172,6 +172,8 @@ export default function NearbyFuelStationsMap({
     }
 
     map.fitBounds(bounds, 48);
+    map.panTo(userPosition);
+    if ((map.getZoom() ?? 0) < 14) map.setZoom(14);
   }, [highlightedPlaceId, isScriptReady, onHighlight, places, registeredPlaceIds, userLocation]);
 
   useEffect(() => {

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 // @ts-expect-error Node's native TypeScript test runner requires the extension.
-import { calculateDistanceMeters, findNearestRegisteredStation, NEARBY_REGISTERED_STATION_RADIUS_METERS, type StationWithCoordinates } from "./fuelStationProximity.ts";
+import { calculateDistanceMeters, findNearestRegisteredStation, NEARBY_REGISTERED_STATION_RADIUS_METERS, sortFuelStationsByDistance, type StationWithCoordinates } from "./fuelStationProximity.ts";
 
 const origin = { latitude: -23.55052, longitude: -46.633308 };
 
@@ -60,4 +60,14 @@ test("ignora genérico, inativo e coordenadas inválidas", () => {
   ]);
 
   assert.equal(nearest, null);
+});
+
+test("ordena resultados da busca por proximidade e deixa distância ausente por último", () => {
+  const sorted = sortFuelStationsByDistance([
+    { id: "far", distanceMeters: 900 },
+    { id: "unknown", distanceMeters: null },
+    { id: "near", distanceMeters: 120 },
+  ]);
+
+  assert.deepEqual(sorted.map((item) => item.id), ["near", "far", "unknown"]);
 });

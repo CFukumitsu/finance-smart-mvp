@@ -1,38 +1,54 @@
 "use client";
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  PreciseGeolocationError,
+  requestPreciseGeolocation,
+} from "@/src/utils/preciseGeolocation";
 
 export function useGeolocation() {
   const [isLocating, setIsLocating] = useState(false);
-  const getPosition = () => new Promise<GeolocationPosition>((resolve, reject) => {
+  const activeRequestRef = useRef<ReturnType<typeof requestPreciseGeolocation> | null>(null);
+  const mountedRef = useRef(true);
+
+  const cancelPosition = useCallback(() => {
+    activeRequestRef.current?.cancel();
+    activeRequestRef.current = null;
+    if (mountedRef.current) setIsLocating(false);
+  }, []);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      activeRequestRef.current?.cancel();
+      activeRequestRef.current = null;
+    };
+  }, []);
+
+  const getPosition = useCallback(async (options?: {
+    onAccuracyChange?: (accuracyMeters: number) => void;
+  }) => {
     if (!navigator.geolocation) {
-      reject(new Error("A geolocalização não é suportada neste navegador."));
-      return;
+      throw new PreciseGeolocationError(
+        "UNSUPPORTED",
+        "A geolocalização não é suportada neste navegador."
+      );
     }
+
+    activeRequestRef.current?.cancel();
+    const request = requestPreciseGeolocation(navigator.geolocation, options);
+    activeRequestRef.current = request;
     setIsLocating(true);
-    navigator.geolocation.getCurrentPosition(
-      (position) => { setIsLocating(false); resolve(position); },
-      (error) => {
-        setIsLocating(false);
 
-        if (error.code === error.PERMISSION_DENIED) {
-          reject(new Error("A permissão de localização foi negada. Libere o acesso nas configurações do navegador."));
-          return;
-        }
+    try {
+      return await request.promise;
+    } finally {
+      if (activeRequestRef.current === request) {
+        activeRequestRef.current = null;
+        if (mountedRef.current) setIsLocating(false);
+      }
+    }
+  }, []);
 
-        if (error.code === error.POSITION_UNAVAILABLE) {
-          reject(new Error("Não foi possível determinar sua localização atual."));
-          return;
-        }
-
-        if (error.code === error.TIMEOUT) {
-          reject(new Error("A localização demorou muito para responder. Tente novamente."));
-          return;
-        }
-
-        reject(new Error("Não foi possível obter sua localização."));
-      },
-      { enableHighAccuracy: true, timeout: 15000, maximumAge: 30000 }
-    );
-  });
-  return { getPosition, isLocating };
+  return { getPosition, cancelPosition, isLocating };
 }

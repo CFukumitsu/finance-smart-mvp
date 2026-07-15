@@ -231,6 +231,10 @@ export async function GET(request: NextRequest) {
         primaryType: place.primaryType ?? null,
         googleMapsUri: place.googleMapsUri ?? null,
       }];
+    }).sort((first, second) => {
+      if (first.distanceMeters === null) return 1;
+      if (second.distanceMeters === null) return -1;
+      return first.distanceMeters - second.distanceMeters;
     });
 
     return NextResponse.json({

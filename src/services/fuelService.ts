@@ -9,6 +9,9 @@ import {
   isMissingFuelStationTypeColumn,
   withCompatibleFuelStationType,
 } from "@/src/utils/fuelStationCompatibility";
+import { sortFuelStationsByDistance } from "@/src/utils/fuelStationProximity";
+
+export const INITIAL_NEARBY_FUEL_STATION_RADIUS_METERS = 1500;
 
 export async function loadActiveFuelStations(): Promise<FuelStationOption[]> {
   const ownerId = await getCurrentUserId();
@@ -63,7 +66,7 @@ async function readApiResponse<T>(response: Response): Promise<T> {
 export async function searchNearbyFuelStations(
   latitude: number,
   longitude: number,
-  radius = 3000
+  radius = INITIAL_NEARBY_FUEL_STATION_RADIUS_METERS
 ): Promise<NearbyFuelStation[]> {
   const searchParams = new URLSearchParams({
     lat: String(latitude),
@@ -79,7 +82,7 @@ export async function searchNearbyFuelStations(
     response
   );
 
-  return data.places ?? [];
+  return sortFuelStationsByDistance(data.places ?? []);
 }
 
 export async function loadGoogleFuelStationDetails(

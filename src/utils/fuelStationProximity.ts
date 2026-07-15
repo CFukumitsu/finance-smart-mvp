@@ -13,6 +13,16 @@ export type StationWithCoordinates = {
   station_type: "registered" | "generic";
 };
 
+export function sortFuelStationsByDistance<T extends { distanceMeters: number | null }>(
+  stations: T[]
+) {
+  return [...stations].sort((first, second) => {
+    if (first.distanceMeters === null) return 1;
+    if (second.distanceMeters === null) return -1;
+    return first.distanceMeters - second.distanceMeters;
+  });
+}
+
 function isValidCoordinate(value: number, minimum: number, maximum: number) {
   return Number.isFinite(value) && value >= minimum && value <= maximum;
 }

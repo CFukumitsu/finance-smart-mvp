@@ -8,6 +8,7 @@ import {
   loadActiveFuelStations,
 } from "@/src/services/fuelService";
 import { useGeolocation } from "@/src/hooks/useGeolocation";
+import { PreciseGeolocationError } from "@/src/utils/preciseGeolocation";
 import type { FuelStationOption } from "@/src/types/fuel";
 import { parsePtBrNumber } from "@/src/utils/fuelCalculations";
 import {
@@ -99,8 +100,13 @@ export default function FuelTransactionFields({
     genericStation: FuelStationOption | null
   ) {
     try {
-      setMessage("Obtendo sua localização para sugerir um posto...");
-      const position = await getPosition();
+      applyChange({ latitude: "", longitude: "" });
+      setMessage("Obtendo localização precisa...");
+      const position = await getPosition({
+        onAccuracyChange(accuracyMeters) {
+          setMessage(`Precisão aproximada: ${Math.round(accuracyMeters)} metros`);
+        },
+      });
       const coordinates = {
         latitude: position.coords.latitude,
         longitude: position.coords.longitude,
@@ -132,15 +138,14 @@ export default function FuelTransactionFields({
       } else {
         setMessage("Não foi possível determinar um posto automaticamente. Escolha um posto manualmente.");
       }
-    } catch {
+    } catch (error) {
+      if (error instanceof PreciseGeolocationError && error.code === "CANCELLED") {
+        return;
+      }
       if (!manualStationSelectionRef.current && genericStation) {
         applyChange({ fuel_station_id: genericStation.id });
       }
-      setMessage(
-        genericStation
-          ? "Não foi possível obter sua localização. Selecionamos Outros postos; você pode trocar manualmente."
-          : "Não foi possível obter sua localização. Escolha um posto manualmente; o lançamento pode ser salvo normalmente."
-      );
+      setMessage(error instanceof Error ? error.message : "Não foi possível obter uma localização precisa.");
     }
   }
 
@@ -297,7 +302,7 @@ export default function FuelTransactionFields({
         className="inline-flex items-center gap-2 rounded-xl border border-amber-400/30 px-4 py-2 text-amber-200 disabled:opacity-50"
       >
         {isLocating || isPreparing ? <LoaderCircle className="animate-spin" size={16} /> : <LocateFixed size={16} />}
-        {isLocating ? "Localizando..." : "Atualizar localização"}
+        {isLocating ? "Obtendo localização precisa..." : "Atualizar localização"}
       </button>
       {message && <p role="status" className="text-sm text-amber-100">{message}</p>}
       <p className="text-xs text-slate-400">

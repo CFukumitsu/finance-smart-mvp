@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import AppShell from "../../../components/layout/AppShell";
 import { useGeolocation } from "@/src/hooks/useGeolocation";
+import { PreciseGeolocationError } from "@/src/utils/preciseGeolocation";
 import { getCurrentUserId, supabase } from "@/src/lib/supabase";
 import {
   loadGoogleFuelStationDetails,
@@ -85,7 +86,7 @@ export default function FuelStationsPage() {
   const [nearbyOrigin, setNearbyOrigin] = useState<{ latitude: number; longitude: number } | null>(null);
   const [highlightedPlaceId, setHighlightedPlaceId] = useState<string | null>(null);
   const [locationMessage, setLocationMessage] = useState("");
-  const { getPosition, isLocating } = useGeolocation();
+  const { getPosition, cancelPosition, isLocating } = useGeolocation();
 
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [editingStationId, setEditingStationId] = useState<string | null>(null);
@@ -288,6 +289,7 @@ export default function FuelStationsPage() {
   }
 
   function closeDrawer() {
+    cancelPosition();
     resetForm();
     setIsDrawerOpen(false);
   }
@@ -340,9 +342,15 @@ export default function FuelStationsPage() {
     }
 
     try {
-      setLocationMessage("Obtendo sua localização atual...");
+      setLocationMessage("Obtendo localização precisa...");
       setNearbyPlaces([]);
-      const position = await getPosition();
+      setNearbyOrigin(null);
+      setHighlightedPlaceId(null);
+      const position = await getPosition({
+        onAccuracyChange(accuracyMeters) {
+          setLocationMessage(`Precisão aproximada: ${Math.round(accuracyMeters)} metros`);
+        },
+      });
       const { latitude, longitude } = position.coords;
       setNearbyOrigin({ latitude, longitude });
 
@@ -350,13 +358,16 @@ export default function FuelStationsPage() {
       setIsSearchingNearby(true);
       const places = await searchNearbyFuelStations(latitude, longitude);
       setNearbyPlaces(places);
-      setHighlightedPlaceId(places[0]?.googlePlaceId ?? null);
+      setHighlightedPlaceId(null);
       setLocationMessage(
         places.length === 0
           ? "Nenhum posto de combustível foi encontrado próximo à sua localização."
           : `${places.length} posto${places.length === 1 ? "" : "s"} encontrado${places.length === 1 ? "" : "s"}. Selecione um para preencher o formulário.`
       );
     } catch (error) {
+      if (error instanceof PreciseGeolocationError && error.code === "CANCELLED") {
+        return;
+      }
       console.error("Erro ao localizar postos próximos:", error);
       setLocationMessage(
         error instanceof Error
@@ -1039,10 +1050,10 @@ export default function FuelStationsPage() {
                     )}
 
                     {isLocating
-                      ? "Obtendo localização..."
+                      ? "Obtendo localização precisa..."
                       : isSearchingNearby
                         ? "Buscando postos..."
-                        : "Localizar postos próximos"}
+                        : "Atualizar localização"}
                   </button>
                 </div>
 
