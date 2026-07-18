@@ -1,11 +1,17 @@
 "use client";
 
-import { loadActiveImportLayout } from "@/src/lib/importLayout";
+import {
+  loadActiveImportLayout,
+  removeActiveImportLayout,
+  replaceActiveImportLayout,
+  type ImportLayout,
+} from "@/src/lib/importLayout";
 import {
   assignOccurrenceSourceHashes,
   matchStatementItemOccurrences,
   normalizeRowsByImportLayoutWithDiagnostics,
 } from "@/src/lib/reconciliation/importNormalizer";
+import { buildReconciliationCandidates, calculateAdjustedTransactionValue } from "@/src/lib/reconciliation/candidateRanking";
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx";
 import AppShell from "../components/layout/AppShell";
@@ -713,6 +719,9 @@ export default function ReconciliationPage() {
   const [headerRowCandidates, setHeaderRowCandidates] = useState<HeaderRowCandidate[]>([]);
   const [selectedHeaderRowIndex, setSelectedHeaderRowIndex] = useState<number | null>(null);
   const [showLayoutMapping, setShowLayoutMapping] = useState(false);
+  const [activeLayout, setActiveLayout] = useState<ImportLayout | null>(null);
+  const [layoutAction, setLayoutAction] = useState<"create" | "replace">("create");
+  const [isManagingLayout, setIsManagingLayout] = useState(false);
   const [pendingLayoutRows, setPendingLayoutRows] = useState<unknown[][]>([]);
   const [layoutForm, setLayoutForm] = useState({
     header_row_index: "1",
@@ -894,6 +903,14 @@ export default function ReconciliationPage() {
       );
 
       setSelectedAccountId(defaultAccount?.id ?? "");
+      if (defaultAccount) {
+        try {
+          setActiveLayout(await loadActiveImportLayout(defaultAccount.id));
+        } catch (layoutError) {
+          console.error("Erro ao carregar layout ativo:", layoutError);
+          alert("Não foi possível carregar o layout desta conta/cartão.");
+        }
+      }
     }
 
     async function loadCompetences(ownerId: string) {
@@ -1406,12 +1423,14 @@ export default function ReconciliationPage() {
       const buffer = await file.arrayBuffer();
       const workbookData = await readWorkbookRows(buffer);
       const { rows } = workbookData;
+      setPendingLayoutRows(rows);
 
       const selectedCompetence = competences.find(
         (competence) => competence.id === selectedCompetenceId
       );
 
       const savedLayout = await loadActiveImportLayout(selectedAccountId);
+      setActiveLayout(savedLayout);
 
       let detectedImportLayout: DetectedLayout | null = null;
       let extractedItems: ImportedItem[] = [];
@@ -1490,6 +1509,7 @@ export default function ReconciliationPage() {
           signature: `saved-layout-${savedLayout.id}`,
         };
       } else {
+        setLayoutAction("create");
         openLayoutMapping(rows);
         alert(
           "Não encontrei um modelo salvo para este cartão. Faça o mapeamento das colunas uma vez e eu salvo para as próximas importações."
@@ -1682,6 +1702,41 @@ export default function ReconciliationPage() {
     }
   }
 
+  function beginReplaceLayout() {
+    if (!activeLayout) return;
+    const confirmed = window.confirm(
+      "Este novo layout substituirá o layout atualmente utilizado para esta conta/cartão."
+    );
+    if (!confirmed) return;
+    if (pendingLayoutRows.length === 0) {
+      alert("Carregue primeiro o arquivo que será usado para mapear o novo layout.");
+      return;
+    }
+    setLayoutAction("replace");
+    openLayoutMapping(pendingLayoutRows);
+  }
+
+  async function removeCurrentLayout() {
+    if (!activeLayout || !selectedAccountId) return;
+    const confirmed = window.confirm(
+      "O layout deixará de ser utilizado nas próximas importações. Os dados já importados permanecerão inalterados."
+    );
+    if (!confirmed) return;
+
+    setIsManagingLayout(true);
+    try {
+      await removeActiveImportLayout(selectedAccountId);
+      setActiveLayout(null);
+      setLayoutAction("create");
+      alert("Layout removido das próximas importações.");
+    } catch (removeError) {
+      console.error("Erro ao remover layout de importação:", removeError);
+      alert(`Erro ao remover layout: ${getErrorMessage(removeError)}`);
+    } finally {
+      setIsManagingLayout(false);
+    }
+  }
+
   async function saveImportLayout() {
     if (!selectedAccountId) {
       alert("Selecione uma conta/cartão.");
@@ -1698,24 +1753,8 @@ export default function ReconciliationPage() {
     }
 
     try {
-      const ownerId = await getCurrentUserId();
-
-      const { error: deactivateError } = await supabase
-        .from("import_layouts")
-        .update({
-          active: false,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("owner_id", ownerId)
-        .eq("account_id", selectedAccountId);
-
-      if (deactivateError) {
-        throw deactivateError;
-      }
-
-      const { error: insertError } = await supabase.from("import_layouts").insert({
-        owner_id: ownerId,
-        account_id: selectedAccountId,
+      setIsManagingLayout(true);
+      const result = await replaceActiveImportLayout(selectedAccountId, {
         name: `Modelo ${selectedAccount?.name ?? ""}`.trim(),
         header_row_index: Math.max(0, Number(layoutForm.header_row_index)),
         date_header: layoutForm.date_header,
@@ -1723,13 +1762,9 @@ export default function ReconciliationPage() {
         value_header: layoutForm.value_header,
         installment_header: layoutForm.installment_header || null,
         amount_sign: layoutForm.amount_sign,
-        active: true,
-        updated_at: new Date().toISOString(),
       });
 
-      if (insertError) {
-        throw insertError;
-      }
+      setActiveLayout(result.layout);
 
       setShowLayoutMapping(false);
 
@@ -1740,7 +1775,9 @@ export default function ReconciliationPage() {
       }
     } catch (error) {
       console.error("Erro ao salvar modelo de importação:", error);
-      alert("Erro ao salvar modelo de importação.");
+      alert(`Erro ao salvar modelo de importação: ${getErrorMessage(error)}`);
+    } finally {
+      setIsManagingLayout(false);
     }
   }
 
@@ -1897,38 +1934,11 @@ export default function ReconciliationPage() {
   }
 
   function getCandidateTransactions(item: ImportedItem) {
-    return transactions.map((transaction) => {
-        const alreadyLinkedStatementTotal = items
-          .filter(
-            (currentItem) =>
-              currentItem.matchedTransactionId === transaction.id &&
-              currentItem.id !== item.id
-          )
-          .reduce((sum, currentItem) => sum + Number(currentItem.value), 0);
-
-        const financeValue = getSignedTransactionValue(transaction);
-
-        const remainingFinanceValue =
-          financeValue - alreadyLinkedStatementTotal;
-
-        const daysDifference = getDaysDifference(item.date, transaction.due_date);
-        const valueDifference = Math.abs(remainingFinanceValue - item.value);
-
-        return {
-          ...transaction,
-          daysDifference,
-          valueDifference,
-          remainingFinanceValue,
-          alreadyLinkedStatementTotal,
-        };
-      })
-      .sort((a, b) => {
-        if (a.valueDifference !== b.valueDifference) {
-          return a.valueDifference - b.valueDifference;
-        }
-
-        return a.daysDifference - b.daysDifference;
-      });
+    return buildReconciliationCandidates({
+      statementItem: item,
+      transactions,
+      linkedItems: items,
+    });
   }
 
   async function saveReconciliation(
@@ -2057,14 +2067,12 @@ export default function ReconciliationPage() {
 
   async function reconcileAndAdjustLinkedTotal(
     item: ImportedItem,
-    transaction: Transaction & { alreadyLinkedStatementTotal: number }
+    transaction: Transaction & { alreadyReconciled: number }
   ) {
-    const adjustedValue = Math.abs(
-      transaction.alreadyLinkedStatementTotal + Number(item.value)
-    );
+    const adjustedValue = calculateAdjustedTransactionValue(transaction.alreadyReconciled, item.value);
 
     const confirmed = window.confirm(
-      `Este lançamento já possui ${formatCurrency(transaction.alreadyLinkedStatementTotal)} ` +
+      `Este lançamento já possui ${formatCurrency(transaction.alreadyReconciled)} ` +
       `vinculado. O valor no Finance será ajustado de ${formatCurrency(Number(transaction.value))} ` +
       `para ${formatCurrency(adjustedValue)}, somando os itens vinculados. Continuar?`
     );
@@ -2444,6 +2452,12 @@ export default function ReconciliationPage() {
     }
   }
 
+  const visibleCandidateTransactions = itemToReconcile
+    ? getCandidateTransactions(itemToReconcile).filter((transaction) =>
+        normalizeText(transaction.description).includes(normalizeText(candidateSearch))
+      )
+    : [];
+
   return (
     <AppShell>
       <div className="space-y-6">
@@ -2457,8 +2471,10 @@ export default function ReconciliationPage() {
         <div className="grid gap-4 rounded-2xl border border-white/10 bg-slate-950/60 p-6 md:grid-cols-2">
           <select
             value={selectedAccountId}
-            onChange={(event) => {
-              setSelectedAccountId(event.target.value);
+            onChange={async (event) => {
+              const accountId = event.target.value;
+              setSelectedAccountId(accountId);
+              setActiveLayout(null);
               setItems([]);
               setTransactions([]);
               setDetectedLayout(null);
@@ -2466,6 +2482,14 @@ export default function ReconciliationPage() {
               setClosedStatement(null);
               setSelectedFile(null);
               setFileName("");
+              if (accountId) {
+                try {
+                  setActiveLayout(await loadActiveImportLayout(accountId));
+                } catch (layoutError) {
+                  console.error("Erro ao carregar layout ativo:", layoutError);
+                  alert("Não foi possível carregar o layout desta conta/cartão.");
+                }
+              }
             }}
             className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none"
           >
@@ -2522,6 +2546,29 @@ export default function ReconciliationPage() {
             {isProcessing ? "Carregando..." : "Carregar conferência"}
           </button>
         </div>
+
+        {selectedAccountId && (
+          <section className="flex flex-col gap-4 rounded-2xl border border-white/10 bg-slate-950/60 p-5 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="text-sm font-semibold text-white">Layout de importação</p>
+              <p className="mt-1 text-sm text-slate-400">
+                {activeLayout
+                  ? `${activeLayout.name} está ativo para esta conta/cartão.`
+                  : "Nenhum layout ativo. A próxima importação exigirá um novo mapeamento."}
+              </p>
+            </div>
+            {activeLayout && (
+              <div className="flex flex-wrap gap-2">
+                <button type="button" onClick={beginReplaceLayout} disabled={isManagingLayout} className="rounded-lg border border-amber-400/30 px-3 py-2 text-sm font-semibold text-amber-200 hover:bg-amber-500/10 disabled:opacity-50">
+                  Substituir layout
+                </button>
+                <button type="button" onClick={removeCurrentLayout} disabled={isManagingLayout} className="rounded-lg border border-rose-400/30 px-3 py-2 text-sm font-semibold text-rose-200 hover:bg-rose-500/10 disabled:opacity-50">
+                  Remover layout
+                </button>
+              </div>
+            )}
+          </section>
+        )}
 
         {detectedLayout && (
           <div className="grid gap-4 md:grid-cols-6">
@@ -3095,31 +3142,39 @@ export default function ReconciliationPage() {
                     <tr>
                       <th className="px-4 py-3">Data</th>
                       <th className="px-4 py-3">Descrição no Finance Smart</th>
-                      <th className="px-4 py-3 text-right">Valor</th>
+                      <th className="px-4 py-3 text-right">Valor original</th>
+                      <th className="px-4 py-3 text-right">Já conciliado</th>
+                      <th className="px-4 py-3 text-right">Saldo disponível</th>
                       <th className="px-4 py-3 text-right">Diferença</th>
                       <th className="px-4 py-3 text-right">Ação</th>
                     </tr>
                   </thead>
 
                   <tbody className="divide-y divide-white/10">
-                    {getCandidateTransactions(itemToReconcile)
-                      .filter((transaction) =>
-                        transaction.description
-                          .toLowerCase()
-                          .includes(candidateSearch.toLowerCase())
-                      )
-                      .map((transaction) => (
-                        <tr key={transaction.id} className="hover:bg-white/[0.03]">
+                    {visibleCandidateTransactions.map((transaction, index) => (
+                        <tr key={transaction.id} className={index === 0 ? "bg-cyan-500/[0.08]" : "hover:bg-white/[0.03]"}>
                           <td className="px-4 py-3 text-slate-300">
                             {new Date(transaction.due_date + "T00:00:00").toLocaleDateString("pt-BR")}
                           </td>
 
                           <td className="px-4 py-3 text-white">
                             {transaction.description}
+                            <div className="mt-1 flex flex-wrap gap-1">
+                              {index === 0 && <span className="rounded-full bg-cyan-500/15 px-2 py-0.5 text-[10px] font-bold text-cyan-200">Melhor candidato</span>}
+                              {transaction.badges.map((badge) => <span key={badge} className="rounded-full bg-white/[0.07] px-2 py-0.5 text-[10px] font-semibold text-slate-300">{badge}</span>)}
+                            </div>
                           </td>
 
                           <td className="px-4 py-3 text-right text-slate-300">
-                            {formatCurrency(transaction.remainingFinanceValue ?? transaction.value)}
+                            {formatCurrency(transaction.originalValue)}
+                          </td>
+
+                          <td className="px-4 py-3 text-right text-slate-400">
+                            {formatCurrency(transaction.alreadyReconciled)}
+                          </td>
+
+                          <td className="px-4 py-3 text-right font-semibold text-emerald-300">
+                            {formatCurrency(transaction.availableBalance)}
                           </td>
 
                           <td className="px-4 py-3 text-right text-slate-400">
@@ -3137,12 +3192,13 @@ export default function ReconciliationPage() {
                                 Usar este
                               </button>
 
-                              {Math.abs(transaction.alreadyLinkedStatementTotal) >= 0.01 && (
+                              {transaction.alreadyReconciled >= 0.01 && (
                                 <button
                                   onClick={() =>
                                     reconcileAndAdjustLinkedTotal(itemToReconcile, transaction)
                                   }
                                   className="rounded-lg bg-amber-600 px-3 py-2 text-xs font-semibold text-white hover:bg-amber-500"
+                                  title="Vincula este item ao lançamento e altera o valor original do lançamento para a soma de todos os itens vinculados."
                                 >
                                   Vincular e ajustar total
                                 </button>
@@ -3152,10 +3208,10 @@ export default function ReconciliationPage() {
                         </tr>
                       ))}
 
-                    {getCandidateTransactions(itemToReconcile).length === 0 && (
+                    {visibleCandidateTransactions.length === 0 && (
                       <tr>
-                        <td colSpan={5} className="px-4 py-8 text-center text-slate-400">
-                          Nenhum lançamento encontrado para este cartão.
+                        <td colSpan={7} className="px-4 py-8 text-center text-slate-400">
+                          Nenhum lançamento com saldo disponível foi encontrado.
                         </td>
                       </tr>
                     )}
@@ -3343,10 +3399,12 @@ export default function ReconciliationPage() {
           <div className="max-h-[90vh] w-full max-w-4xl overflow-y-auto rounded-2xl border border-white/10 bg-slate-950 p-6 shadow-2xl">
             <div className="mb-5">
               <h2 className="text-xl font-bold text-white">
-                Configurar modelo de importação
+                {layoutAction === "replace" ? "Substituir layout de importação" : "Configurar modelo de importação"}
               </h2>
               <p className="mt-1 text-sm text-slate-400">
-                Primeiro escolha qual linha da planilha contém os nomes das colunas.
+                {layoutAction === "replace"
+                  ? "Este novo layout substituirá o layout atualmente utilizado para esta conta/cartão."
+                  : "Primeiro escolha qual linha da planilha contém os nomes das colunas."}
               </p>
             </div>
 
@@ -3486,9 +3544,10 @@ export default function ReconciliationPage() {
                 <button
                   type="button"
                   onClick={saveImportLayout}
-                  className="rounded-xl bg-blue-600 px-4 py-3 font-bold text-white hover:bg-blue-500"
+                  disabled={isManagingLayout}
+                  className="rounded-xl bg-blue-600 px-4 py-3 font-bold text-white hover:bg-blue-500 disabled:opacity-50"
                 >
-                  Salvar modelo
+                  {isManagingLayout ? "Salvando..." : layoutAction === "replace" ? "Substituir layout" : "Salvar modelo"}
                 </button>
               )}
             </div>

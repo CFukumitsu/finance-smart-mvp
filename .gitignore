@@ -34,6 +34,13 @@ yarn-error.log*
 .env*
 !.env.example
 
+# local PROD-to-DEV clone tooling and execution data
+/.env.clone*
+/.clone-runs/
+/docs/clone-prod-to-dev.md
+/scripts/clone-prod-user-to-dev*.ts
+/supabase/scripts/
+
 # vercel
 .vercel
 
