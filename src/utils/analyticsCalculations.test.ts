@@ -20,6 +20,8 @@ const filters: AnalyticsFilters = {
   accountId: "",
   categoryId: "",
   status: "",
+  startDate: "2026-06-01",
+  endDate: "2026-07-31",
 };
 
 function transaction(

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import {
   Bar,
   BarChart,
@@ -18,6 +18,20 @@ import {
   buildMonthlyAnalytics,
   summarizeMonthlyValues,
 } from "@/src/utils/analyticsCalculations";
+import {
+  buildCategoryBudgetInsights,
+  calculateDailyAvailableLimit,
+  calculateDailyExpensePace,
+  calculateMonthlyProjection,
+  calculatePercentageChange,
+  countInclusiveDays,
+  filterTransactionsByDate,
+  findExpenseIncreaseDrivers,
+  getComparisonDateRange,
+  getElapsedRangeDays,
+  normalizeAnalyticsDateRange,
+  type BudgetStatus,
+} from "@/src/utils/analyticsPredictive";
 import type {
   AnalyticsBreakdown,
   AnalyticsScreenKind,
@@ -41,7 +55,7 @@ const screenCopy: Record<
   overview: {
     title: "Visão Geral",
     description:
-      "Acompanhe receitas, despesas e resultado das últimas 12 competências em uma leitura única.",
+      "Acompanhe receitas, despesas e resultado do período selecionado em uma leitura única.",
   },
   income: {
     title: "Receitas",
@@ -229,6 +243,18 @@ function csvNumber(value: number) {
   return value.toFixed(2).replace(".", ",");
 }
 
+function formatAnalyticsDate(value: string) {
+  const [year, month, day] = value.split("-");
+  return `${day}/${month}/${year}`;
+}
+
+const budgetStatusClass: Record<BudgetStatus, string> = {
+  Normal: "border-emerald-400/25 bg-emerald-500/10 text-emerald-200",
+  Atenção: "border-amber-400/25 bg-amber-500/10 text-amber-200",
+  Risco: "border-orange-400/25 bg-orange-500/10 text-orange-200",
+  Estourado: "border-rose-400/25 bg-rose-500/10 text-rose-200",
+};
+
 function MonthlyTable({
   kind,
   monthly,
@@ -319,24 +345,44 @@ export default function AnalyticsScreen({ kind }: { kind: AnalyticsScreenKind })
   const {
     selectedCompetences,
     transactions,
+    financialTargets,
+    categories,
     openingBalance,
     filters,
     includePendingCashFlow,
     isLoading,
     error,
   } = useAnalytics();
+  const [showAllAlerts, setShowAllAlerts] = useState(false);
   const copy = screenCopy[kind];
+
+  const dateRange = useMemo(() => {
+    try {
+      return normalizeAnalyticsDateRange(filters.startDate, filters.endDate);
+    } catch {
+      return null;
+    }
+  }, [filters.endDate, filters.startDate]);
+  const comparisonRange = useMemo(() => dateRange ? getComparisonDateRange(dateRange) : null, [dateRange]);
+  const currentTransactions = useMemo(
+    () => dateRange ? filterTransactionsByDate(transactions, dateRange) : [],
+    [dateRange, transactions]
+  );
+  const previousTransactions = useMemo(
+    () => comparisonRange ? filterTransactionsByDate(transactions, comparisonRange) : [],
+    [comparisonRange, transactions]
+  );
 
   const monthly = useMemo(
     () =>
       buildMonthlyAnalytics({
         competences: selectedCompetences,
-        transactions,
+        transactions: currentTransactions,
         filters,
         openingBalance,
         includePendingCashFlow,
       }),
-    [selectedCompetences, transactions, filters, openingBalance, includePendingCashFlow]
+    [selectedCompetences, currentTransactions, filters, openingBalance, includePendingCashFlow]
   );
   const incomeSummary = useMemo(
     () => summarizeMonthlyValues(monthly, "income"),
@@ -347,24 +393,24 @@ export default function AnalyticsScreen({ kind }: { kind: AnalyticsScreenKind })
     [monthly]
   );
   const incomeCategories = useMemo(
-    () => buildBreakdown(transactions, "Receita", "category"),
-    [transactions]
+    () => buildBreakdown(currentTransactions, "Receita", "category"),
+    [currentTransactions]
   );
   const incomeAccounts = useMemo(
-    () => buildBreakdown(transactions, "Receita", "account"),
-    [transactions]
+    () => buildBreakdown(currentTransactions, "Receita", "account"),
+    [currentTransactions]
   );
   const expenseCategories = useMemo(
-    () => buildBreakdown(transactions, "Despesa", "category"),
-    [transactions]
+    () => buildBreakdown(currentTransactions, "Despesa", "category"),
+    [currentTransactions]
   );
   const expenseAccounts = useMemo(
-    () => buildBreakdown(transactions, "Despesa", "account"),
-    [transactions]
+    () => buildBreakdown(currentTransactions, "Despesa", "account"),
+    [currentTransactions]
   );
   const expenseCards = useMemo(
-    () => buildBreakdown(transactions, "Despesa", "card"),
-    [transactions]
+    () => buildBreakdown(currentTransactions, "Despesa", "card"),
+    [currentTransactions]
   );
 
   const totalCashIn = monthly.reduce((sum, item) => sum + item.cashIn, 0);
@@ -372,6 +418,38 @@ export default function AnalyticsScreen({ kind }: { kind: AnalyticsScreenKind })
   const finalCashBalance = openingBalance + totalCashIn - totalCashOut;
   const netResult = incomeSummary.total - expenseSummary.total;
   const averageSavings = monthly.length > 0 ? netResult / monthly.length : 0;
+
+  const now = new Date();
+  const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+  const consideredDays = dateRange ? getElapsedRangeDays(dateRange, today) : 0;
+  const previousDays = comparisonRange ? countInclusiveDays(comparisonRange) : 0;
+  const previousExpenses = previousTransactions
+    .filter((transaction) => transaction.type === "Despesa")
+    .reduce((sum, transaction) => sum + Math.abs(Number(transaction.value ?? 0)), 0);
+  const dailyExpensePace = calculateDailyExpensePace(expenseSummary.total, consideredDays);
+  const previousDailyPace = calculateDailyExpensePace(previousExpenses, previousDays);
+  const dailyPaceChange = calculatePercentageChange(dailyExpensePace, previousDailyPace);
+  const monthlyProjection = dateRange ? calculateMonthlyProjection(expenseSummary.total, dateRange, today) : null;
+  const budgetInsights = useMemo(
+    () => dateRange ? buildCategoryBudgetInsights({
+      transactions: currentTransactions,
+      targets: financialTargets,
+      categories,
+      range: dateRange,
+      today,
+    }) : [],
+    [categories, currentTransactions, dateRange, financialTargets, today]
+  );
+  const alerts = budgetInsights.filter((item) => item.status !== "Normal");
+  const visibleAlerts = showAllAlerts ? alerts : alerts.slice(0, 3);
+  const increaseDrivers = useMemo(
+    () => findExpenseIncreaseDrivers({ currentTransactions, previousTransactions, categories }),
+    [categories, currentTransactions, previousTransactions]
+  );
+  const totalPlanned = budgetInsights.reduce((sum, item) => sum + item.planned, 0);
+  const totalBudgetRealized = budgetInsights.reduce((sum, item) => sum + item.realized, 0);
+  const remainingDays = budgetInsights[0]?.remainingDays ?? 0;
+  const dailyAvailable = calculateDailyAvailableLimit(totalPlanned, totalBudgetRealized, remainingDays);
 
   const csvHeaders =
     kind === "income"
@@ -436,11 +514,61 @@ export default function AnalyticsScreen({ kind }: { kind: AnalyticsScreenKind })
         </p>
       )}
 
+      {(kind === "overview" || kind === "expenses") && dateRange && (
+        <>
+          <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4" aria-label="Indicadores preditivos do período">
+            <AnalyticsSummaryCard label="Ritmo médio diário" value={formatAnalyticsCurrency(dailyExpensePace)} detail={`${consideredDays} ${consideredDays === 1 ? "dia considerado" : "dias considerados"}${dailyPaceChange === null ? " · sem base comparável" : ` · ${Math.abs(dailyPaceChange).toLocaleString("pt-BR", { maximumFractionDigits: 1 })}% ${dailyPaceChange >= 0 ? "acima" : "abaixo"} do anterior`}`} tone={dailyPaceChange !== null && dailyPaceChange > 0 ? "negative" : "info"} />
+            <AnalyticsSummaryCard label={monthlyProjection === null ? "Despesas realizadas" : "Projeção até o fim do mês"} value={formatAnalyticsCurrency(monthlyProjection ?? expenseSummary.total)} detail={monthlyProjection === null ? "Sem projeção para período histórico ou com mais de um mês." : `Divisor: ${consideredDays} dias decorridos; sem incluir dias futuros.`} tone="negative" />
+            <AnalyticsSummaryCard label="Limite diário disponível" value={dailyAvailable === null ? "Sem orçamento" : formatAnalyticsCurrency(dailyAvailable)} detail={dailyAvailable === null ? "Configure planejamento mensal por categoria." : `${remainingDays} ${remainingDays === 1 ? "dia restante" : "dias restantes"} considerados${totalBudgetRealized > totalPlanned ? " · Estourado" : ""}.`} tone={dailyAvailable === 0 && totalPlanned > 0 ? "negative" : "info"} />
+            <AnalyticsSummaryCard label="Período comparativo" value={`${formatAnalyticsDate(comparisonRange!.startDate)} a ${formatAnalyticsDate(comparisonRange!.endDate)}`} detail="Intervalo imediatamente anterior; mês completo usa o mês anterior completo." />
+          </section>
+
+          <section className="rounded-2xl border border-white/10 bg-slate-900/60 p-4 sm:p-5">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div><h2 className="font-semibold text-white">Alertas inteligentes</h2><p className="mt-1 text-xs text-slate-500">Regras determinísticas, ordenadas por gravidade e calculadas sobre os filtros selecionados.</p></div>
+              {alerts.length > 3 && <button type="button" onClick={() => setShowAllAlerts((current) => !current)} className="rounded-lg border border-white/10 px-3 py-2 text-xs font-medium text-cyan-200 hover:bg-cyan-500/10">{showAllAlerts ? "Mostrar principais" : `Ver todos (${alerts.length})`}</button>}
+            </div>
+            {budgetInsights.length === 0 ? (
+              <p className="mt-4 rounded-xl border border-dashed border-white/10 p-4 text-sm text-slate-400">Não há planejamento de categoria configurado para esta competência. Intervalos com mais de um mês não recebem alertas mensais.</p>
+            ) : alerts.length === 0 ? (
+              <p className="mt-4 rounded-xl border border-emerald-400/20 bg-emerald-500/5 p-4 text-sm text-emerald-200">Nenhuma categoria exige atenção com os filtros atuais.</p>
+            ) : (
+              <div className="mt-4 grid gap-3 lg:grid-cols-3">
+                {visibleAlerts.map((alert) => <article key={alert.categoryId} className={`rounded-xl border p-4 ${budgetStatusClass[alert.status]}`}>
+                  <div className="flex items-center justify-between gap-3"><h3 className="font-semibold">{alert.status} em {alert.categoryName}</h3><span className="text-xs font-bold">{alert.percentage.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%</span></div>
+                  <p className="mt-2 text-sm opacity-90">Você gastou {formatAnalyticsCurrency(alert.realized)} de {formatAnalyticsCurrency(alert.planned)}.</p>
+                  {alert.projected !== null && <p className="mt-1 text-sm opacity-80">No ritmo atual, a categoria deve encerrar em {formatAnalyticsCurrency(alert.projected)}.</p>}
+                  {alert.probableOverrunDate && <p className="mt-1 text-sm font-medium">Possível estouro em {formatAnalyticsDate(alert.probableOverrunDate)}.</p>}
+                </article>)}
+              </div>
+            )}
+          </section>
+
+          {budgetInsights.length > 0 && <section className="rounded-2xl border border-white/10 bg-slate-900/60 p-4 sm:p-5">
+            <h2 className="font-semibold text-white">Orçamento consumido por categoria</h2>
+            <div className="mt-4 grid gap-3 lg:grid-cols-2">{budgetInsights.map((item) => <article key={item.categoryId} className="rounded-xl border border-white/10 bg-white/[0.025] p-4">
+              <div className="flex flex-wrap items-center justify-between gap-2"><h3 className="font-medium text-white">{item.categoryName}</h3><span className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${budgetStatusClass[item.status]}`}>{item.status}</span></div>
+              <div className="mt-3 h-2 overflow-hidden rounded-full bg-slate-800"><div className="h-full rounded-full bg-cyan-400" style={{ width: `${Math.min(100, item.percentage)}%` }} /></div>
+              <div className="mt-3 grid grid-cols-2 gap-3 text-xs text-slate-400 sm:grid-cols-4">
+                <div><span className="block">Realizado</span><strong className="mt-1 block text-slate-200">{formatAnalyticsCurrency(item.realized)}</strong></div><div><span className="block">Planejado</span><strong className="mt-1 block text-slate-200">{formatAnalyticsCurrency(item.planned)}</strong></div><div><span className="block">Utilizado</span><strong className="mt-1 block text-slate-200">{item.percentage.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%</strong></div><div><span className="block">Restante</span><strong className="mt-1 block text-slate-200">{formatAnalyticsCurrency(item.remaining)}</strong></div>
+              </div>
+            </article>)}</div>
+          </section>}
+
+          <section className="rounded-2xl border border-white/10 bg-slate-900/60 p-4 sm:p-5">
+            <h2 className="font-semibold text-white">Principais responsáveis pelo aumento</h2><p className="mt-1 text-xs text-slate-500">Até três categorias com maior aumento absoluto contra o período comparativo.</p>
+            {increaseDrivers.length === 0 ? <p className="mt-4 rounded-xl border border-dashed border-white/10 p-4 text-sm text-slate-400">Nenhuma categoria aumentou no período selecionado.</p> : <div className="mt-4 grid gap-3 lg:grid-cols-3">{increaseDrivers.map((item) => <article key={item.categoryId} className="rounded-xl border border-white/10 bg-white/[0.025] p-4">
+              <h3 className="font-medium text-white">{item.categoryName}</h3><p className="mt-3 text-lg font-semibold text-rose-300">+ {formatAnalyticsCurrency(item.difference)}</p><p className="mt-1 text-xs text-slate-400">Atual {formatAnalyticsCurrency(item.current)} · anterior {formatAnalyticsCurrency(item.previous)}</p><p className="mt-2 text-xs font-medium text-slate-300">{item.percentageChange === null ? "Período anterior sem base; percentual não calculado." : `${item.percentageChange.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}% de variação`}</p>
+            </article>)}</div>}
+          </section>
+        </>
+      )}
+
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         {kind === "overview" && (
           <>
-            <AnalyticsSummaryCard label="Receitas · 12 meses" value={formatAnalyticsCurrency(incomeSummary.total)} tone="positive" />
-            <AnalyticsSummaryCard label="Despesas · 12 meses" value={formatAnalyticsCurrency(expenseSummary.total)} tone="negative" />
+            <AnalyticsSummaryCard label="Receitas · período" value={formatAnalyticsCurrency(incomeSummary.total)} tone="positive" />
+            <AnalyticsSummaryCard label="Despesas · período" value={formatAnalyticsCurrency(expenseSummary.total)} tone="negative" />
             <AnalyticsSummaryCard label="Resultado do período" value={formatAnalyticsCurrency(netResult)} tone={netResult >= 0 ? "positive" : "negative"} />
             <AnalyticsSummaryCard label="Resultado médio mensal" value={formatAnalyticsCurrency(averageSavings)} tone={averageSavings >= 0 ? "info" : "negative"} />
           </>
@@ -477,7 +605,7 @@ export default function AnalyticsScreen({ kind }: { kind: AnalyticsScreenKind })
       <div className="grid min-w-0 gap-5 xl:grid-cols-2">
         {kind === "overview" && (
           <>
-            <AnalyticsChartCard title="Receitas x Despesas" description="Evolução das últimas 12 competências.">
+            <AnalyticsChartCard title="Receitas x Despesas" description="Evolução das competências abrangidas pelo período.">
               <MonthlyLines data={monthly} lines={[{ key: "income", name: "Receitas", color: chartColors.income }, { key: "expenses", name: "Despesas", color: chartColors.expenses }]} />
             </AnalyticsChartCard>
             <AnalyticsChartCard title="Resultado mensal" description="Resultado entre receitas e despesas em cada competência.">

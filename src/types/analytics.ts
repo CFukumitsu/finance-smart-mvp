@@ -40,10 +40,19 @@ export type AnalyticsFilters = {
   accountId: string;
   categoryId: string;
   status: string;
+  startDate: string;
+  endDate: string;
+};
+
+export type AnalyticsFinancialTarget = {
+  competence_id: string;
+  target_id: string;
+  planned_value: number;
 };
 
 export type AnalyticsDataset = {
   transactions: AnalyticsTransaction[];
+  financialTargets: AnalyticsFinancialTarget[];
   openingBalance: number;
 };
 

@@ -5,6 +5,7 @@ import type {
   AnalyticsCompetence,
   AnalyticsDataset,
   AnalyticsFilters,
+  AnalyticsFinancialTarget,
   AnalyticsReferenceData,
   AnalyticsTransaction,
 } from "@/src/types/analytics";
@@ -52,10 +53,11 @@ export async function loadAnalyticsReferenceData(
 export async function loadAnalyticsDataset(
   ownerId: string,
   competenceIds: string[],
-  filters: AnalyticsFilters
+  filters: AnalyticsFilters,
+  selectedCompetenceIds: string[]
 ): Promise<AnalyticsDataset> {
   if (competenceIds.length === 0) {
-    return { transactions: [], openingBalance: 0 };
+    return { transactions: [], financialTargets: [], openingBalance: 0 };
   }
 
   let transactionsQuery = supabase
@@ -76,7 +78,9 @@ export async function loadAnalyticsDataset(
       category:categories!transactions_category_id_fkey(name, type)
     `)
     .eq("owner_id", ownerId)
-    .in("competence_id", competenceIds);
+    .in("competence_id", competenceIds)
+    .gte("due_date", filters.startDate)
+    .lte("due_date", filters.endDate);
 
   if (filters.accountId) {
     transactionsQuery = transactionsQuery.eq("account_id", filters.accountId);
@@ -94,7 +98,7 @@ export async function loadAnalyticsDataset(
     .from("account_closures")
     .select("opening_balance")
     .eq("owner_id", ownerId)
-    .eq("competence_id", competenceIds[0])
+    .eq("competence_id", selectedCompetenceIds[0] ?? competenceIds[0])
     .eq("account_type", "Conta");
 
   if (filters.accountId) {
@@ -106,11 +110,24 @@ export async function loadAnalyticsDataset(
     openingBalanceQuery,
   ]);
 
-  const error = transactionsResponse.error ?? openingBalanceResponse.error;
+  let targetsResponse: { data: unknown[] | null; error: { message: string } | null } = { data: [], error: null };
+  if (selectedCompetenceIds.length === 1) {
+    let targetsQuery = supabase
+      .from("financial_targets")
+      .select("competence_id, target_id, planned_value")
+      .eq("owner_id", ownerId)
+      .eq("target_type", "category")
+      .in("competence_id", selectedCompetenceIds);
+    if (filters.categoryId) targetsQuery = targetsQuery.eq("target_id", filters.categoryId);
+    targetsResponse = await targetsQuery;
+  }
+
+  const error = transactionsResponse.error ?? openingBalanceResponse.error ?? targetsResponse.error;
   if (error) throw new Error(error.message);
 
   return {
     transactions: (transactionsResponse.data ?? []) as unknown as AnalyticsTransaction[],
+    financialTargets: (targetsResponse.data ?? []) as AnalyticsFinancialTarget[],
     openingBalance: (openingBalanceResponse.data ?? []).reduce(
       (sum, closure) => sum + Number(closure.opening_balance ?? 0),
       0
