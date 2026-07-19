@@ -1,4 +1,5 @@
 "use client";
+/* eslint-disable react-hooks/set-state-in-effect -- Legacy page synchronizes Supabase reference data on mount. */
 
 import { useEffect, useRef, useState } from "react";
 import AppShell from "../components/layout/AppShell";
@@ -23,6 +24,8 @@ type Account = {
   due_day: number | null;
   limit_amount: number | null;
   current_balance: number | null;
+  currency: string | null;
+  has_financial_history: boolean;
   active: boolean;
 };
 
@@ -33,6 +36,7 @@ const initialForm = {
   due_day: "",
   limit_amount: "",
   current_balance: "",
+  currency: "BRL",
   active: true,
 };
 
@@ -59,13 +63,17 @@ export default function AccountsPage() {
 
     const ownerId = await getCurrentUserId();
 
-    const { data, error } = await supabase
-      .from("accounts")
-      .select("id, name, type, closing_day, due_day, limit_amount, current_balance, active")
-      .eq("owner_id", ownerId)
-      .order("active", { ascending: false })
-      .order("type", { ascending: true })
-      .order("name", { ascending: true });
+    const [accountsResponse, historyResponse] = await Promise.all([
+      supabase
+        .from("accounts")
+        .select("id, name, type, closing_day, due_day, limit_amount, current_balance, currency, active")
+        .eq("owner_id", ownerId)
+        .order("active", { ascending: false })
+        .order("type", { ascending: true })
+        .order("name", { ascending: true }),
+      supabase.rpc("get_account_currency_history_flags"),
+    ]);
+    const { data, error } = accountsResponse;
 
     if (error) {
       console.error("Erro ao carregar contas/cartões:", error);
@@ -74,7 +82,24 @@ export default function AccountsPage() {
       return;
     }
 
-    setAccounts((data ?? []) as Account[]);
+    if (historyResponse.error) {
+      console.error("Erro ao carregar histórico monetário das contas:", historyResponse.error);
+      alert("Erro ao verificar o histórico monetário das contas.");
+      setIsLoading(false);
+      return;
+    }
+
+    const accountsWithHistory = new Set(
+      ((historyResponse.data ?? []) as { account_id: string }[]).map(
+        (item) => item.account_id
+      )
+    );
+    setAccounts(
+      (data ?? []).map((account) => ({
+        ...account,
+        has_financial_history: accountsWithHistory.has(account.id),
+      })) as Account[]
+    );
     setIsLoading(false);
   }
 
@@ -117,6 +142,7 @@ export default function AccountsPage() {
       due_day: account.due_day ? String(account.due_day) : "",
       limit_amount: account.limit_amount ? String(account.limit_amount) : "",
       current_balance: account.current_balance ? String(account.current_balance) : "",
+      currency: account.currency ?? "",
       active: account.active,
     });
     setIsDrawerOpen(true);
@@ -206,8 +232,12 @@ export default function AccountsPage() {
   async function saveAccount() {
 
     const ownerId = await getCurrentUserId();
-    if (!form.name || !form.type) {
-      alert("Preencha nome e tipo.");
+    if (!form.name || !form.type || !form.currency) {
+      alert(
+        !form.currency
+          ? "Confirme a moeda desta conta antes de salvar."
+          : "Preencha nome e tipo."
+      );
       return;
     }
 
@@ -219,6 +249,7 @@ export default function AccountsPage() {
       due_day: form.due_day ? Number(form.due_day) : null,
       limit_amount: form.limit_amount ? Number(form.limit_amount) : 0,
       current_balance: form.current_balance ? Number(form.current_balance) : 0,
+      currency: form.currency.trim().toUpperCase(),
       active: form.active,
       updated_at: new Date().toISOString(),
     };
@@ -313,13 +344,6 @@ export default function AccountsPage() {
     await loadAccounts();
   }
 
-  function formatCurrency(value: number | null) {
-    return Number(value ?? 0).toLocaleString("pt-BR", {
-      style: "currency",
-      currency: "BRL",
-    });
-  }
-
   function formatMoneyInput(value: string | number | null) {
     const numberValue = Number(value ?? 0);
 
@@ -346,6 +370,13 @@ export default function AccountsPage() {
       [competenceId]: numericValue ? formatMoneyInput(numericValue) : "",
     });
   }
+
+  const editingAccount = accounts.find(
+    (account) => account.id === editingAccountId
+  );
+  const currencyLocked = Boolean(
+    editingAccount?.currency && editingAccount.has_financial_history
+  );
 
   return (
     <AppShell>
@@ -400,6 +431,9 @@ export default function AccountsPage() {
                           }`}
                       >
                         {account.active ? "Ativa" : "Inativa"}
+                      </span>
+                      <span className={`rounded-full px-3 py-1 text-xs font-bold ${account.currency ? "bg-cyan-500/10 text-cyan-300" : "bg-amber-500/10 text-amber-200"}`}>
+                        {account.currency ?? "Moeda não confirmada"}
                       </span>
                     </div>
                   </div>
@@ -470,6 +504,7 @@ export default function AccountsPage() {
               <tr>
                 <th className="px-5 py-4">Nome</th>
                 <th className="px-5 py-4">Tipo</th>
+                <th className="px-5 py-4">Moeda</th>
                 <th className="px-5 py-4">Fechamento</th>
                 <th className="px-5 py-4">Vencimento</th>
                 <th className="px-5 py-4">Status</th>
@@ -491,6 +526,9 @@ export default function AccountsPage() {
                   <tr key={account.id} className="hover:bg-white/[0.03]">
                     <td className="px-5 py-4 font-medium text-white">{account.name}</td>
                     <td className="px-5 py-4 text-slate-300">{account.type}</td>
+                    <td className={`px-5 py-4 ${account.currency ? "text-slate-300" : "font-semibold text-amber-200"}`}>
+                      {account.currency ?? "Não confirmada"}
+                    </td>
                     <td className="px-5 py-4 text-slate-300">
                       {account.closing_day ? `Dia ${account.closing_day}` : "-"}
                     </td>
@@ -640,6 +678,31 @@ export default function AccountsPage() {
                 <option value="Conta">Conta</option>
                 <option value="Cartão">Cartão</option>
               </select>
+
+              <label className="space-y-1 text-sm text-slate-300">
+                <span>Moeda</span>
+                <select
+                  value={form.currency}
+                  disabled={currencyLocked}
+                  onChange={(event) => setForm({ ...form, currency: event.target.value.toUpperCase() })}
+                  className="w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none"
+                >
+                  <option value="">Selecione e confirme</option>
+                  <option value="BRL">BRL — Real</option>
+                  <option value="USD">USD — Dólar</option>
+                  <option value="EUR">EUR — Euro</option>
+                </select>
+                {!form.currency && (
+                  <span className="block text-xs text-amber-200">
+                    Confirme a moeda desta conta antes de utilizá-la em integrações.
+                  </span>
+                )}
+                {currencyLocked && (
+                  <span className="block text-xs text-slate-400">
+                    A moeda desta conta não pode ser alterada porque ela já possui histórico financeiro.
+                  </span>
+                )}
+              </label>
 
               <input
                 value={form.closing_day}

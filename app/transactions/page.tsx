@@ -1,4 +1,5 @@
 "use client";
+/* eslint-disable react-hooks/set-state-in-effect -- Legacy page synchronizes filters and Supabase data through effects. */
 
 import { Suspense, useEffect, useState } from "react";
 import { ChevronLeft, ChevronRight, SlidersHorizontal } from "lucide-react";
@@ -62,6 +63,9 @@ type Transaction = {
   competence: { name: string } | null;
   origin_account_id?: string | null;
   destination_account_id?: string | null;
+  card_payment_account_id?: string | null;
+  bankroll_integration_group_id?: string | null;
+  bankroll_operation_type?: "deposit" | "withdrawal" | null;
 };
 
 type AccountClosure = {
@@ -374,6 +378,8 @@ function TransactionsPageContent() {
           competence_id,
           origin_account_id,
           destination_account_id,
+          bankroll_integration_group_id,
+          bankroll_operation_type,
           account:accounts!transactions_account_id_fkey(name, type),
           category:categories!transactions_category_id_fkey(name),
           competence:competences!transactions_competence_id_fkey(name)
@@ -630,6 +636,12 @@ function TransactionsPageContent() {
 
   async function openEditDrawer(transaction: Transaction) {
 
+    if (transaction.bankroll_integration_group_id) {
+      alert("Esta operação está vinculada ao Financeiro e deve ser editada pelo módulo Bankroll.");
+      router.push(`/bankroll/transactions?action=${transaction.bankroll_operation_type ?? "deposit"}`);
+      return;
+    }
+
     if (isTransactionLocked(transaction)) {
       alert("Esta conta/cartão já está fechado nesta competência.");
       return;
@@ -646,7 +658,7 @@ function TransactionsPageContent() {
       status: transaction.status ?? "Pago",
       installments: "2",
       account_id: transaction.account_id ?? "",
-      card_payment_account_id: (transaction as any).card_payment_account_id ?? "",
+      card_payment_account_id: transaction.card_payment_account_id ?? "",
       origin_account_id: transaction.origin_account_id ?? "",
       destination_account_id: transaction.destination_account_id ?? "",
       category_id: transaction.category_id ?? "",
@@ -1637,6 +1649,7 @@ function TransactionsPageContent() {
                         <span className="rounded-full bg-white/[0.04] px-2.5 py-0.5 text-xs font-semibold text-slate-400">
                           {transaction.status ?? "-"}
                         </span>
+                        {transaction.bankroll_integration_group_id && <span className="rounded-full bg-cyan-500/10 px-2.5 py-0.5 text-xs font-semibold text-cyan-300">Origem: Bankroll Poker</span>}
                       </div>
                     </td>
 
@@ -1798,7 +1811,7 @@ function TransactionsPageContent() {
 
               {form.type === "Pagamento de Fatura" && (
                 <select
-                  value={(form as any).card_payment_account_id}
+                  value={form.card_payment_account_id}
                   onChange={(event) =>
                     setForm({
                       ...form,

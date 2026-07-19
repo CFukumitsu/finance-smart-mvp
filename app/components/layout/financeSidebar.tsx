@@ -18,6 +18,7 @@ import {
   Car,
   MapPin,
   ChartNoAxesCombined,
+  Spade,
 } from "lucide-react";
 
 const menuItems = [
@@ -37,6 +38,26 @@ const menuItems = [
     href: "/transactions",
   },
   {
+    label: "Conciliação",
+    icon: Landmark,
+    href: "/reconciliation",
+  },
+  {
+    label: "Bankroll Poker",
+    icon: Spade,
+    href: "/bankroll",
+  },
+  {
+    label: "Fechamentos",
+    icon: LockKeyhole,
+    href: "/closings",
+  },
+  {
+    label: "Recorrências",
+    icon: Repeat,
+    href: "/recurrences",
+  },
+  {
     label: "Contas e Cartões",
     icon: WalletCards,
     href: "/accounts",
@@ -50,21 +71,6 @@ const menuItems = [
     label: "Competências",
     icon: CalendarRange,
     href: "/competences",
-  },
-  {
-    label: "Recorrências",
-    icon: Repeat,
-    href: "/recurrences",
-  },
-  {
-    label: "Fechamentos",
-    icon: LockKeyhole,
-    href: "/closings",
-  },
-  {
-    label: "Conciliação",
-    icon: Landmark,
-    href: "/reconciliation",
   },
 ];
 

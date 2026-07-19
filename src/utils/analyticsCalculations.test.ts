@@ -188,6 +188,23 @@ test("ignora transferência inconsistente sem inventar movimento", () => {
   assert.equal(result.cashOut, 0);
 });
 
+test("depósito integrado afeta caixa da conta sem virar despesa", () => {
+  const result = cashFor([transaction({ id: "bankroll-deposit", competence_id: "june", type: "Transferência", value: 500, account_id: "checking", bankroll_integration_group_id: "group-deposit", bankroll_operation_type: "deposit", status: "Pago" })], "checking");
+  assert.equal(result.expenses, 0);
+  assert.equal(result.cashOut, 500);
+});
+
+test("saque integrado afeta caixa da conta sem virar receita", () => {
+  const result = cashFor([transaction({ id: "bankroll-withdrawal", competence_id: "june", type: "Transferência", value: 500, account_id: "checking", bankroll_integration_group_id: "group-withdrawal", bankroll_operation_type: "withdrawal", status: "Recebido" })], "checking");
+  assert.equal(result.income, 0);
+  assert.equal(result.cashIn, 500);
+});
+
+test("integração Financeiro-Bankroll não infla o fluxo consolidado", () => {
+  const result = cashFor([transaction({ id: "bankroll-deposit", competence_id: "june", type: "Transferência", value: 500, account_id: "checking", bankroll_integration_group_id: "group-deposit", bankroll_operation_type: "deposit", status: "Pago" })], "");
+  assert.equal(result.cashBalance, 0);
+});
+
 test("fluxo padrão considera somente recebimentos e pagamentos realizados", () => {
   const result = cashFor(
     [

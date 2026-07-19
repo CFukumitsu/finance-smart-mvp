@@ -69,6 +69,8 @@ export async function loadAnalyticsDataset(
       category_id,
       origin_account_id,
       destination_account_id,
+      bankroll_integration_group_id,
+      bankroll_operation_type,
       description,
       due_date,
       type,

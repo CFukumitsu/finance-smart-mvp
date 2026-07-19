@@ -191,7 +191,7 @@ export default function ImportAccessPage() {
 
       const accountIdByLegacyId = new Map<number, string>();
 
-      (createdAccounts ?? []).forEach((account: any) => {
+      (createdAccounts ?? []).forEach((account: { id: string; legacy_id: number | null }) => {
         accountIdByLegacyId.set(Number(account.legacy_id), account.id);
       });
 
@@ -231,7 +231,7 @@ export default function ImportAccessPage() {
 
       const categoryIdByLegacyId = new Map<number, string>();
 
-      (createdCategories ?? []).forEach((category: any) => {
+      (createdCategories ?? []).forEach((category: { id: string; legacy_id: number | null }) => {
         categoryIdByLegacyId.set(Number(category.legacy_id), category.id);
       });
 
