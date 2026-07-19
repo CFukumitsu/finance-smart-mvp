@@ -645,11 +645,34 @@ async function syncStatementItems(
     const priority = { Conciliado: 0, Sugerido: 1, Pendente: 1, Ignorado: 2 };
     return priority[left.status] - priority[right.status];
   });
-  const { reusedItems, newPayloads } = matchStatementItemOccurrences(
+  const { reusedItems, newPayloads, matches } = matchStatementItemOccurrences(
     prioritizedExistingItems,
     payloads
   );
   let createdItemIds: string[] = [];
+
+  for (const match of matches) {
+    if (match.matchType !== "equivalent_description") continue;
+
+    const { error: refreshError } = await supabase
+      .from("credit_card_statement_items")
+      .update({
+        statement_date: match.payload.statement_date,
+        statement_description: match.payload.statement_description,
+        normalized_description: match.payload.normalized_description,
+        statement_value: match.payload.statement_value,
+        source_hash: match.payload.source_hash,
+        updated_at: match.payload.updated_at,
+      })
+      .eq("id", match.existing.id)
+      .eq("owner_id", ownerId)
+      .eq("account_id", accountId)
+      .eq("competence_id", competenceId);
+
+    if (refreshError) {
+      throw refreshError;
+    }
+  }
 
   if (newPayloads.length > 0) {
     const { data: createdItems, error: insertError } = await supabase

@@ -72,35 +72,115 @@ function getStatementOccurrenceKey(item: StatementOccurrenceComparable) {
   ].join("|");
 }
 
+function getStatementValueDateKey(item: StatementOccurrenceComparable) {
+  return `${item.statement_date}|${Number(item.statement_value).toFixed(2)}`;
+}
+
+function normalizeComparableDescription(item: StatementOccurrenceComparable) {
+  return normalizeHeader(
+    item.normalized_description ?? item.statement_description
+  )
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function descriptionsRepresentSamePurchase(
+  left: StatementOccurrenceComparable,
+  right: StatementOccurrenceComparable
+) {
+  const leftDescription = normalizeComparableDescription(left);
+  const rightDescription = normalizeComparableDescription(right);
+
+  if (leftDescription === rightDescription) return true;
+
+  const shorter =
+    leftDescription.length <= rightDescription.length
+      ? leftDescription
+      : rightDescription;
+  const longer =
+    shorter === leftDescription ? rightDescription : leftDescription;
+
+  if (shorter.length < 8) return false;
+  if (longer.startsWith(`${shorter} `)) return true;
+
+  const compactShorter = shorter.replace(/\s/g, "");
+  const compactLonger = longer.replace(/\s/g, "");
+  let commonPrefixLength = 0;
+
+  while (
+    commonPrefixLength < compactShorter.length &&
+    compactShorter[commonPrefixLength] === compactLonger[commonPrefixLength]
+  ) {
+    commonPrefixLength += 1;
+  }
+
+  return commonPrefixLength / compactShorter.length >= 0.8;
+}
+
 export function matchStatementItemOccurrences<
   E extends StatementOccurrenceComparable,
   P extends StatementOccurrenceComparable,
 >(existingItems: E[], payloads: P[]) {
   const existingByKey = new Map<string, E[]>();
+  const existingByValueDate = new Map<string, E[]>();
 
   existingItems.forEach((item) => {
     const key = getStatementOccurrenceKey(item);
     const matches = existingByKey.get(key) ?? [];
     matches.push(item);
     existingByKey.set(key, matches);
+
+    const valueDateKey = getStatementValueDateKey(item);
+    const valueDateMatches = existingByValueDate.get(valueDateKey) ?? [];
+    valueDateMatches.push(item);
+    existingByValueDate.set(valueDateKey, valueDateMatches);
   });
 
   const reusedItems: E[] = [];
   const newPayloads: P[] = [];
+  const usedExistingItems = new Set<E>();
+  const matches: Array<{
+    existing: E;
+    payload: P;
+    matchType: "exact" | "equivalent_description";
+  }> = [];
 
   payloads.forEach((payload) => {
     const key = getStatementOccurrenceKey(payload);
-    const matches = existingByKey.get(key);
-    const existing = matches?.shift();
+    const exactMatches = existingByKey.get(key);
+    let existing = exactMatches?.find(
+      (candidate) => !usedExistingItems.has(candidate)
+    );
+    let matchType: "exact" | "equivalent_description" = "exact";
+
+    if (!existing) {
+      const equivalentCandidates = (
+        existingByValueDate.get(getStatementValueDateKey(payload)) ?? []
+      ).filter(
+        (candidate) =>
+          !usedExistingItems.has(candidate) &&
+          descriptionsRepresentSamePurchase(candidate, payload)
+      );
+      const candidateDescriptions = new Set(
+        equivalentCandidates.map(normalizeComparableDescription)
+      );
+
+      if (candidateDescriptions.size === 1) {
+        existing = equivalentCandidates[0];
+        matchType = "equivalent_description";
+      }
+    }
 
     if (existing) {
+      usedExistingItems.add(existing);
       reusedItems.push(existing);
+      matches.push({ existing, payload, matchType });
     } else {
       newPayloads.push(payload);
     }
   });
 
-  return { reusedItems, newPayloads };
+  return { reusedItems, newPayloads, matches };
 }
 
 function normalizeHeader(value: unknown) {

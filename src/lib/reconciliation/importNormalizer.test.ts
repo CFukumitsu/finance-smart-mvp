@@ -148,3 +148,100 @@ test("seleciona somente as 58 ocorrências atuais quando existem 81 persistidas"
   assert.equal(reusedItems.length, 58);
   assert.equal(newPayloads.length, 0);
 });
+
+test("reutiliza item quando a operadora acrescenta cidade e país à descrição", () => {
+  const existingItems = [
+    {
+      id: "legacy-short-description",
+      statement_date: "2026-07-03",
+      statement_description: "SHOPPING INTERLAGOS",
+      normalized_description: "SHOPPING INTERLAGOS",
+      statement_value: 54.8,
+    },
+  ];
+  const payloads = [
+    {
+      statement_date: "2026-07-03",
+      statement_description: "SHOPPING INTERLAGOS    SAO PAULO     BRA",
+      normalized_description: "SHOPPING INTERLAGOS    SAO PAULO     BRA",
+      statement_value: 54.8,
+    },
+  ];
+
+  const result = matchStatementItemOccurrences(existingItems, payloads);
+
+  assert.equal(result.reusedItems.length, 1);
+  assert.equal(result.newPayloads.length, 0);
+  assert.equal(result.matches[0].matchType, "equivalent_description");
+});
+
+test("tolera pequena variação antes do sufixo de localização", () => {
+  const existingItems = [
+    {
+      id: "legacy-merchant",
+      statement_date: "2026-06-08",
+      statement_description: "MP *BARBARABORTHOL02/02",
+      normalized_description: "MP *BARBARABORTHOL02/02",
+      statement_value: 725,
+    },
+  ];
+  const payloads = [
+    {
+      statement_date: "2026-06-08",
+      statement_description: "MP *BARBARABORTHOLO 02/02 Osasco BR",
+      normalized_description: "MP *BARBARABORTHOLO 02/02 Osasco BR",
+      statement_value: 725,
+    },
+  ];
+
+  const result = matchStatementItemOccurrences(existingItems, payloads);
+
+  assert.equal(result.reusedItems.length, 1);
+  assert.equal(result.newPayloads.length, 0);
+});
+
+test("não combina estabelecimentos diferentes com mesma data e valor", () => {
+  const existingItems = [
+    {
+      id: "merchant-a",
+      statement_date: "2026-07-03",
+      statement_description: "SHOPPING INTERLAGOS",
+      normalized_description: "SHOPPING INTERLAGOS",
+      statement_value: 54.8,
+    },
+  ];
+  const payloads = [
+    {
+      statement_date: "2026-07-03",
+      statement_description: "RESTAURANTE CENTRAL SAO PAULO BRA",
+      normalized_description: "RESTAURANTE CENTRAL SAO PAULO BRA",
+      statement_value: 54.8,
+    },
+  ];
+
+  const result = matchStatementItemOccurrences(existingItems, payloads);
+
+  assert.equal(result.reusedItems.length, 0);
+  assert.equal(result.newPayloads.length, 1);
+});
+
+test("preserva duas ocorrências equivalentes do mesmo estabelecimento", () => {
+  const existingItems = [1, 2].map((occurrence) => ({
+    id: `legacy-${occurrence}`,
+    statement_date: "2026-07-03",
+    statement_description: "BURGER KING",
+    normalized_description: "BURGER KING",
+    statement_value: 49.9,
+  }));
+  const payloads = [1, 2].map(() => ({
+    statement_date: "2026-07-03",
+    statement_description: "BURGER KING SAO PAULO BRA",
+    normalized_description: "BURGER KING SAO PAULO BRA",
+    statement_value: 49.9,
+  }));
+
+  const result = matchStatementItemOccurrences(existingItems, payloads);
+
+  assert.equal(result.reusedItems.length, 2);
+  assert.equal(result.newPayloads.length, 0);
+});
