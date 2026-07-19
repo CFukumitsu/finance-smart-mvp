@@ -29,6 +29,28 @@ function getCashMovement(
   if (transaction.type === "Transferência") {
     if (!accountId) return { cashIn: 0, cashOut: 0 };
 
+    if (
+      transaction.bankroll_integration_group_id ||
+      transaction.bankroll_operation_type
+    ) {
+      const isPendingIncluded = includePending && transaction.status === "Pendente";
+      const isSettled =
+        transaction.status === "Pago" ||
+        transaction.status === "Recebido" ||
+        isPendingIncluded;
+      if (!isSettled) return { cashIn: 0, cashOut: 0 };
+      if (transaction.account_id !== accountId) {
+        return { cashIn: 0, cashOut: 0 };
+      }
+      if (transaction.bankroll_operation_type === "deposit") {
+        return { cashIn: 0, cashOut: value };
+      }
+      if (transaction.bankroll_operation_type === "withdrawal") {
+        return { cashIn: value, cashOut: 0 };
+      }
+      return { cashIn: 0, cashOut: 0 };
+    }
+
     const originAccountId = transaction.origin_account_id;
     const destinationAccountId = transaction.destination_account_id;
     const isPendingIncluded = includePending && transaction.status === "Pendente";

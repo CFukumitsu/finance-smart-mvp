@@ -4,7 +4,7 @@ import { NextResponse, type NextRequest } from "next/server";
 const protectedRoutes = [
   "/dashboard", "/analytics", "/transactions", "/reconciliation", "/accounts",
   "/categories", "/competences", "/recurrences", "/closings", "/vehicles",
-  "/fuel", "/settings", "/account", "/admin",
+  "/fuel", "/bankroll", "/settings", "/account", "/admin",
 ];
 
 export async function proxy(request: NextRequest) {
@@ -56,8 +56,7 @@ export const config = {
   matcher: [
     "/dashboard/:path*", "/analytics/:path*", "/transactions/:path*", "/reconciliation/:path*",
     "/accounts/:path*", "/categories/:path*", "/competences/:path*", "/recurrences/:path*",
-    "/closings/:path*", "/vehicles/:path*", "/fuel/:path*", "/settings/:path*",
+    "/closings/:path*", "/vehicles/:path*", "/fuel/:path*", "/bankroll/:path*", "/settings/:path*",
     "/account/:path*", "/admin/:path*", "/login",
   ],
 };
-
