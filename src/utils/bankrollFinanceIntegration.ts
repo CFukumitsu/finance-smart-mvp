@@ -2,8 +2,10 @@ import type {
   BankrollFinanceCreateOperation,
   BankrollFinanceIntegrationMode,
   BankrollFinanceOperationType,
+  BankrollTransactionType,
   BankrollWallet,
   EligibleFinanceAccount,
+  FinanceAccount,
 } from "../types/bankroll";
 
 export function createBankrollFinanceIdempotencyKey() {
@@ -23,10 +25,20 @@ export function buildBankrollFinanceCreateRpcParams(
   };
 }
 
-export function isEligibleFinanceAccount(account: {
-  type: string; active: boolean; currency?: string | null;
-}): account is EligibleFinanceAccount {
+export function isEligibleFinanceAccount(
+  account: FinanceAccount
+): account is EligibleFinanceAccount {
   return account.type === "Conta" && account.active && Boolean(account.currency?.match(/^[A-Z]{3}$/));
+}
+
+export function filterActiveFinanceAccountsForOwner(
+  accounts: FinanceAccount[],
+  ownerId: string
+) {
+  return accounts.filter(
+    (account) =>
+      account.owner_id === ownerId && account.type === "Conta" && account.active
+  );
 }
 
 export function getNewBankrollMovementSelection() {
@@ -40,6 +52,41 @@ export function filterEligibleFinanceAccountsForWallet(
   return wallet
     ? accounts.filter((account) => account.currency === wallet.currency)
     : accounts;
+}
+
+export function shouldLoadFinanceAccounts(input: {
+  open: boolean;
+  mode: BankrollFinanceIntegrationMode;
+  type: BankrollTransactionType | "transfer";
+}) {
+  return (
+    input.open &&
+    input.mode === "integrated" &&
+    (input.type === "deposit" || input.type === "withdrawal")
+  );
+}
+
+export function getFinanceAccountEmptyMessage(
+  accounts: FinanceAccount[],
+  wallet?: Pick<BankrollWallet, "currency"> | null
+) {
+  if (accounts.length === 0) {
+    return "Nenhuma conta financeira ativa foi encontrada.";
+  }
+
+  const eligibleAccounts = accounts.filter(isEligibleFinanceAccount);
+  if (eligibleAccounts.length === 0) {
+    return "Nenhuma conta financeira ativa possui moeda confirmada. Confirme a moeda no cadastro de Contas e Cartões.";
+  }
+
+  if (
+    wallet &&
+    !eligibleAccounts.some((account) => account.currency === wallet.currency)
+  ) {
+    return `Nenhuma conta financeira ativa em ${wallet.currency} foi encontrada.`;
+  }
+
+  return null;
 }
 
 export function validateBankrollFinanceForm(input: {

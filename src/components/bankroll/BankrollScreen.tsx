@@ -10,10 +10,10 @@ import type { BankrollDirection, BankrollSession, BankrollSessionType, BankrollT
 import { buildBankrollEvolution, buildMonthlyResults, buildTransactionView, calculateSession, calculateTournamentIndicators, calculateWalletBalance, findLargestPrize, getTransactionEffect, summarizeByCurrency } from "@/src/utils/bankrollCalculations";
 import { parseBankrollMoney, requireBankrollMoney } from "@/src/utils/bankrollMoney";
 import BankrollFinanceTransactions from "@/src/components/bankroll/BankrollFinanceTransactions";
-import type { BankrollFinanceLink, EligibleFinanceAccount } from "@/src/types/bankroll";
+import type { BankrollFinanceLink, EligibleFinanceAccount, FinanceAccount } from "@/src/types/bankroll";
 
 type View = "dashboard" | "wallets" | "sessions" | "transactions";
-type Data = { wallets: BankrollWallet[]; sessions: BankrollSession[]; transactions: BankrollTransaction[]; financeLinks: BankrollFinanceLink[]; financeAccounts: EligibleFinanceAccount[]; eligibleAccounts: EligibleFinanceAccount[] };
+type Data = { wallets: BankrollWallet[]; sessions: BankrollSession[]; transactions: BankrollTransaction[]; financeLinks: BankrollFinanceLink[]; financeAccounts: FinanceAccount[]; eligibleAccounts: EligibleFinanceAccount[] };
 const emptyData: Data = { wallets: [], sessions: [], transactions: [], financeLinks: [], financeAccounts: [], eligibleAccounts: [] };
 const field = "w-full rounded-xl border border-white/10 bg-slate-900 px-3 py-2.5 text-sm text-white outline-none focus:border-cyan-400/60";
 const card = "rounded-2xl border border-white/10 bg-slate-950/60 p-5";
