@@ -6,6 +6,7 @@ import { Pencil, Plus, Trash2, X } from "lucide-react";
 import { useModalShortcuts } from "@/src/hooks/useModalShortcuts";
 import {
   deleteTransaction,
+  loadActiveFinanceAccounts,
   saveIntegratedFinanceOperation,
   saveTransaction,
   saveTransfer,
@@ -19,9 +20,10 @@ import type {
   BankrollTransactionType,
   BankrollWallet,
   EligibleFinanceAccount,
+  FinanceAccount,
 } from "@/src/types/bankroll";
 import { buildTransactionView, getTransactionEffect } from "@/src/utils/bankrollCalculations";
-import { createBankrollFinanceIdempotencyKey, filterEligibleFinanceAccountsForWallet, getNewBankrollMovementSelection, validateBankrollFinanceForm } from "@/src/utils/bankrollFinanceIntegration";
+import { createBankrollFinanceIdempotencyKey, filterEligibleFinanceAccountsForWallet, getFinanceAccountEmptyMessage, getNewBankrollMovementSelection, isEligibleFinanceAccount, shouldLoadFinanceAccounts, validateBankrollFinanceForm } from "@/src/utils/bankrollFinanceIntegration";
 import { requireBankrollMoney } from "@/src/utils/bankrollMoney";
 
 type Data = {
@@ -29,7 +31,7 @@ type Data = {
   sessions: BankrollSession[];
   transactions: BankrollTransaction[];
   financeLinks: BankrollFinanceLink[];
-  financeAccounts: EligibleFinanceAccount[];
+  financeAccounts: FinanceAccount[];
   eligibleAccounts: EligibleFinanceAccount[];
 };
 type FormState = {
@@ -63,6 +65,9 @@ export default function BankrollFinanceTransactions({ data, reload }: { data: Da
   const [saving, setSaving] = useState(false);
   const [editing, setEditing] = useState<BankrollTransaction | null>(null);
   const [form, setForm] = useState<FormState>(() => blank());
+  const [activeFinanceAccounts, setActiveFinanceAccounts] = useState<FinanceAccount[]>([]);
+  const [loadingFinanceAccounts, setLoadingFinanceAccounts] = useState(false);
+  const [financeAccountsError, setFinanceAccountsError] = useState("");
   const [search, setSearch] = useState("");
   const [walletFilter, setWalletFilter] = useState("");
   const [typeFilter, setTypeFilter] = useState("");
@@ -103,6 +108,36 @@ export default function BankrollFinanceTransactions({ data, reload }: { data: Da
     }
   }, [data.wallets.length, searchParams, show]);
 
+  useEffect(() => {
+    if (!shouldLoadFinanceAccounts({ open, mode: form.mode, type: form.type })) {
+      return;
+    }
+
+    let active = true;
+    setLoadingFinanceAccounts(true);
+    setFinanceAccountsError("");
+    void loadActiveFinanceAccounts()
+      .then((accounts) => {
+        if (active) setActiveFinanceAccounts(accounts);
+      })
+      .catch((error: unknown) => {
+        if (!active) return;
+        setActiveFinanceAccounts([]);
+        setFinanceAccountsError(
+          error instanceof Error
+            ? error.message
+            : "Não foi possível carregar as contas financeiras."
+        );
+      })
+      .finally(() => {
+        if (active) setLoadingFinanceAccounts(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [form.mode, form.type, open]);
+
   const filtered = useMemo(() => data.transactions.filter((transaction) => {
     const wallet = data.wallets.find((item) => item.id === transaction.wallet_id);
     return (!currency || wallet?.currency === currency)
@@ -113,7 +148,14 @@ export default function BankrollFinanceTransactions({ data, reload }: { data: Da
   }), [currency, data.transactions, data.wallets, endDate, search, startDate, typeFilter]);
   const view = buildTransactionView(filtered, walletFilter);
   const selectedWallet = data.wallets.find((wallet) => wallet.id === form.walletId);
-  const eligibleAccounts = filterEligibleFinanceAccountsForWallet(data.eligibleAccounts, selectedWallet);
+  const eligibleAccounts = filterEligibleFinanceAccountsForWallet(
+    activeFinanceAccounts.filter(isEligibleFinanceAccount),
+    selectedWallet
+  );
+  const financeAccountEmptyMessage = getFinanceAccountEmptyMessage(
+    activeFinanceAccounts,
+    selectedWallet
+  );
   const integrated = ["deposit", "withdrawal"].includes(form.type) && form.mode === "integrated";
   const activeWallets = data.wallets.filter((wallet) => wallet.active || wallet.id === form.walletId);
 
@@ -126,7 +168,7 @@ export default function BankrollFinanceTransactions({ data, reload }: { data: Da
         if (!form.walletId || !form.destinationWalletId || form.walletId === form.destinationWalletId) throw new Error("Escolha carteiras diferentes.");
         await saveTransfer({ originWalletId: form.walletId, destinationWalletId: form.destinationWalletId, date: form.date, amount, description: form.description || null, notes: form.notes || null, groupId: editing?.transfer_group_id ?? undefined });
       } else if (integrated) {
-        const account = data.eligibleAccounts.find((item) => item.id === form.financeAccountId);
+        const account = eligibleAccounts.find((item) => item.id === form.financeAccountId);
         const validation = validateBankrollFinanceForm({ mode: form.mode, operationType: form.type as "deposit" | "withdrawal", account, wallet: selectedWallet, amount, date: form.date });
         if (validation) throw new Error(validation);
         const operation = { operationType: form.type as "deposit" | "withdrawal", accountId: form.financeAccountId, walletId: form.walletId, date: form.date, amount, notes: form.notes || null };
@@ -196,7 +238,29 @@ export default function BankrollFinanceTransactions({ data, reload }: { data: Da
       <div className="grid gap-4 sm:grid-cols-2"><Field label="Data"><input type="date" max={today()} className={field} value={form.date} onChange={(event) => setForm({ ...form, date: event.target.value })}/></Field><Field label="Tipo"><select disabled={Boolean(editing?.finance_link)} className={field} value={form.type} onChange={(event) => setForm({ ...form, type: event.target.value as FormState["type"] })}>{["deposit", "withdrawal", "transfer", "bonus", "adjustment", "staking_received", "staking_paid"].map((type) => <option value={type} key={type}>{labels[type]}</option>)}</select></Field></div>
       {["deposit", "withdrawal"].includes(form.type) && <Field label="Modo de registro"><select disabled={Boolean(editing)} className={field} value={form.mode} onChange={(event) => setForm({ ...form, mode: event.target.value as BankrollFinanceIntegrationMode, financeAccountId: "" })}><option value="integrated">Integrado ao Financeiro</option><option value="bankroll_only">Somente no Bankroll</option></select>{editing && <span className="block text-xs font-normal text-slate-500">O modo de uma movimentação existente não pode ser convertido.</span>}</Field>}
       <Field label={form.type === "transfer" || form.type === "withdrawal" ? "Carteira de origem" : "Carteira de destino"}><select className={field} value={form.walletId} onChange={(event) => setForm({ ...form, walletId: event.target.value, financeAccountId: "" })}><option value="">Selecione</option>{activeWallets.map((wallet) => <option value={wallet.id} key={wallet.id}>{wallet.name} ({wallet.currency})</option>)}</select></Field>
-      {integrated && <Field label={form.type === "deposit" ? "Conta financeira de origem" : "Conta financeira de destino"}><select className={field} value={form.financeAccountId} onChange={(event) => setForm({ ...form, financeAccountId: event.target.value })}><option value="">Selecione</option>{eligibleAccounts.map((account) => <option value={account.id} key={account.id}>{account.name} ({account.currency})</option>)}</select></Field>}
+      {integrated && <Field label={form.type === "deposit" ? "Conta financeira de origem" : "Conta financeira de destino"}>
+        {loadingFinanceAccounts ? (
+          <span className="block rounded-xl border border-white/10 bg-slate-900 px-3 py-2.5 text-sm font-normal text-slate-400">Carregando contas financeiras...</span>
+        ) : financeAccountsError ? (
+          <span role="alert" className="block rounded-xl border border-red-400/20 bg-red-500/10 px-3 py-2.5 text-sm font-normal text-red-200">{financeAccountsError}</span>
+        ) : activeFinanceAccounts.length === 0 ? (
+          <span className="block rounded-xl border border-amber-400/20 bg-amber-500/10 px-3 py-2.5 text-sm font-normal text-amber-200">{financeAccountEmptyMessage}</span>
+        ) : (
+          <>
+            <select className={field} value={form.financeAccountId} onChange={(event) => setForm({ ...form, financeAccountId: event.target.value })} required>
+              <option value="">Selecione</option>
+              {activeFinanceAccounts.map((account) => {
+                const selectable = eligibleAccounts.some((item) => item.id === account.id);
+                const accountLabel = account.currency
+                  ? `${account.name} (${account.currency})`
+                  : `${account.name} (moeda não confirmada)`;
+                return <option value={account.id} key={account.id} disabled={!selectable}>{accountLabel}</option>;
+              })}
+            </select>
+            {financeAccountEmptyMessage && <span className="block text-xs font-normal text-amber-300">{financeAccountEmptyMessage}</span>}
+          </>
+        )}
+      </Field>}
       {form.type === "transfer" && <Field label="Carteira de destino"><select className={field} value={form.destinationWalletId} onChange={(event) => setForm({ ...form, destinationWalletId: event.target.value })}><option value="">Selecione</option>{activeWallets.filter((wallet) => wallet.id !== form.walletId && wallet.currency === selectedWallet?.currency).map((wallet) => <option value={wallet.id} key={wallet.id}>{wallet.name}</option>)}</select></Field>}
       {form.type === "adjustment" && <Field label="Direção"><select className={field} value={form.direction} onChange={(event) => setForm({ ...form, direction: event.target.value as BankrollDirection })}><option value="in">Entrada</option><option value="out">Saída</option></select></Field>}
       <Field label="Valor"><input inputMode="decimal" className={field} value={form.amount} onChange={(event) => setForm({ ...form, amount: event.target.value.replace(/[^0-9,.]/g, "") })}/></Field>

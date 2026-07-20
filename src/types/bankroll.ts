@@ -24,9 +24,13 @@ export type BankrollTransaction = {
   created_at: string; updated_at: string;
 };
 
-export type EligibleFinanceAccount = {
-  id: string; owner_id: string; name: string; type: "Conta";
-  currency: BankrollCurrency; active: boolean;
+export type FinanceAccount = {
+  id: string; owner_id: string; name: string; type: string;
+  currency: BankrollCurrency | null; active: boolean;
+};
+
+export type EligibleFinanceAccount = Omit<FinanceAccount, "currency" | "type"> & {
+  type: "Conta"; currency: BankrollCurrency;
 };
 
 export type BankrollFinanceLink = {

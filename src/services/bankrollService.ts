@@ -1,6 +1,6 @@
 import { getCurrentUserId, supabase } from "@/src/lib/supabase";
-import type { BankrollFinanceLink, BankrollFinanceOperation, BankrollSession, BankrollTransaction, BankrollWallet, EligibleFinanceAccount, SessionInput, TransactionInput, WalletInput } from "@/src/types/bankroll";
-import { buildBankrollFinanceCreateRpcParams, isEligibleFinanceAccount } from "@/src/utils/bankrollFinanceIntegration";
+import type { BankrollFinanceLink, BankrollFinanceOperation, BankrollSession, BankrollTransaction, BankrollWallet, EligibleFinanceAccount, FinanceAccount, SessionInput, TransactionInput, WalletInput } from "@/src/types/bankroll";
+import { buildBankrollFinanceCreateRpcParams, filterActiveFinanceAccountsForOwner, isEligibleFinanceAccount } from "@/src/utils/bankrollFinanceIntegration";
 
 const friendlyError = (message: string) => {
   const known = ["Confirme a moeda desta conta antes de utilizá-la em integrações.", "A conta financeira e a carteira precisam usar a mesma moeda.", "A competência deste lançamento está fechada.", "A conta financeira já está fechada nesta competência.", "A conta financeira está inativa.", "A carteira do Bankroll está inativa.", "Saldo insuficiente na conta financeira.", "Saldo insuficiente na carteira do Bankroll.", "Operações integradas futuras não são permitidas", "Operações integradas devem usar o fluxo oficial do Bankroll.", "A integração está inconsistente."];
@@ -21,8 +21,25 @@ export async function loadBankrollData() {
   const financeLinks = (links.data ?? []) as unknown as BankrollFinanceLink[];
   const linksByTransaction = new Map(financeLinks.map((link) => [link.bankroll_transaction_id, link]));
   const bankrollTransactions = (transactions.data ?? []).map((transaction) => ({ ...transaction, finance_link: linksByTransaction.get(transaction.id) ?? null })) as BankrollTransaction[];
-  const financeAccounts = (accounts.data ?? []) as EligibleFinanceAccount[];
+  const financeAccounts = (accounts.data ?? []) as FinanceAccount[];
   return { wallets: (wallets.data ?? []) as BankrollWallet[], transactions: bankrollTransactions, sessions: (sessions.data ?? []) as BankrollSession[], financeLinks, financeAccounts, eligibleAccounts: financeAccounts.filter(isEligibleFinanceAccount) };
+}
+
+export async function loadActiveFinanceAccounts(): Promise<FinanceAccount[]> {
+  const ownerId = await getCurrentUserId();
+  const { data, error } = await supabase
+    .from("accounts")
+    .select("id, owner_id, name, type, currency, active")
+    .eq("owner_id", ownerId)
+    .eq("type", "Conta")
+    .eq("active", true)
+    .order("name");
+
+  fail(error);
+  return filterActiveFinanceAccountsForOwner(
+    (data ?? []) as FinanceAccount[],
+    ownerId
+  );
 }
 
 export async function saveWallet(input: WalletInput, id?: string) {
