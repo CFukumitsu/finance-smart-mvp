@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { BankrollFinanceCreateOperation, BankrollWallet, EligibleFinanceAccount } from "../types/bankroll";
 // @ts-expect-error Node's native TypeScript test runner requires the extension.
-import { buildBankrollFinanceCreateRpcParams, getConsolidatedPatrimonialEffect, getIntegratedFinanceEffect, isEligibleFinanceAccount, validateBankrollFinanceForm } from "./bankrollFinanceIntegration.ts";
+import { buildBankrollFinanceCreateRpcParams, filterEligibleFinanceAccountsForWallet, getConsolidatedPatrimonialEffect, getIntegratedFinanceEffect, getNewBankrollMovementSelection, isEligibleFinanceAccount, validateBankrollFinanceForm } from "./bankrollFinanceIntegration.ts";
 
 const account = { id: "a", owner_id: "o", name: "Conta", type: "Conta", currency: "BRL", active: true } as EligibleFinanceAccount;
 const wallet = { id: "w", owner_id: "o", name: "Poker", wallet_type: "online", currency: "BRL", initial_balance: 0, active: true, notes: null, created_at: "", updated_at: "" } as BankrollWallet;
@@ -11,6 +11,15 @@ test("conta ativa com moeda estruturada é elegível", () => assert.equal(isElig
 test("conta inativa não é elegível", () => assert.equal(isEligibleFinanceAccount({ ...account, active: false }), false));
 test("conta sem moeda confirmada não é elegível", () => assert.equal(isEligibleFinanceAccount({ ...account, currency: null }), false));
 test("cartão de crédito não é elegível", () => assert.equal(isEligibleFinanceAccount({ ...account, type: "Cartão" }), false));
+test("nova movimentação inicia sem conta e sem carteira", () => assert.deepEqual(getNewBankrollMovementSelection(), { walletId: "", financeAccountId: "" }));
+test("sem carteira selecionada exibe todas as contas elegíveis", () => {
+  const usdAccount = { ...account, id: "usd", currency: "USD" };
+  assert.deepEqual(filterEligibleFinanceAccountsForWallet([account, usdAccount], null).map((item) => item.id), ["a", "usd"]);
+});
+test("após seleção manual filtra contas pela moeda da carteira", () => {
+  const usdAccount = { ...account, id: "usd", currency: "USD" };
+  assert.deepEqual(filterEligibleFinanceAccountsForWallet([account, usdAccount], wallet).map((item) => item.id), ["a"]);
+});
 test("modo integrado exige conta financeira", () => assert.equal(validateBankrollFinanceForm({ mode: "integrated", operationType: "deposit", account: null, wallet, amount: 10 }), "Selecione a conta financeira de origem."));
 test("modo somente Bankroll não exige conta", () => assert.equal(validateBankrollFinanceForm({ mode: "bankroll_only", operationType: "deposit", account: null, wallet, amount: 10 }), null));
 test("moedas iguais são aceitas", () => assert.equal(validateBankrollFinanceForm({ mode: "integrated", operationType: "withdrawal", account, wallet, amount: 10 }), null));

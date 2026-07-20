@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 // @ts-expect-error Node's native TypeScript test runner requires the extension.
-import { calculateDistanceMeters, findNearestRegisteredStation, NEARBY_REGISTERED_STATION_RADIUS_METERS, sortFuelStationsByDistance, type StationWithCoordinates } from "./fuelStationProximity.ts";
+import { buildNearbyFuelStationSearchParams, calculateDistanceMeters, findNearestRegisteredStation, NEARBY_REGISTERED_STATION_RADIUS_METERS, sortFuelStationsByDistance, type StationWithCoordinates } from "./fuelStationProximity.ts";
 
 const origin = { latitude: -23.55052, longitude: -46.633308 };
 
@@ -70,4 +70,16 @@ test("ordena resultados da busca por proximidade e deixa distância ausente por 
   ]);
 
   assert.deepEqual(sorted.map((item) => item.id), ["near", "far", "unknown"]);
+});
+
+test("não prepara consulta de postos antes de existir coordenada válida", () => {
+  assert.equal(buildNearbyFuelStationSearchParams({ latitude: Number.NaN, longitude: origin.longitude }, 1500), null);
+  assert.equal(buildNearbyFuelStationSearchParams({ latitude: origin.latitude, longitude: 181 }, 1500), null);
+});
+
+test("prepara a consulta somente com coordenada validada", () => {
+  const params = buildNearbyFuelStationSearchParams(origin, 1500);
+  assert.equal(params?.get("lat"), String(origin.latitude));
+  assert.equal(params?.get("lng"), String(origin.longitude));
+  assert.equal(params?.get("radius"), "1500");
 });

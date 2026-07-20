@@ -38,6 +38,21 @@ export function hasValidCoordinates(
   );
 }
 
+export function buildNearbyFuelStationSearchParams(
+  coordinates: Coordinates,
+  radius: number
+) {
+  if (!hasValidCoordinates(coordinates) || !Number.isFinite(radius) || radius <= 0) {
+    return null;
+  }
+
+  return new URLSearchParams({
+    lat: String(coordinates.latitude),
+    lng: String(coordinates.longitude),
+    radius: String(radius),
+  });
+}
+
 export function calculateDistanceMeters(
   origin: Coordinates,
   destination: Coordinates

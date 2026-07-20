@@ -21,7 +21,7 @@ import type {
   EligibleFinanceAccount,
 } from "@/src/types/bankroll";
 import { buildTransactionView, getTransactionEffect } from "@/src/utils/bankrollCalculations";
-import { createBankrollFinanceIdempotencyKey, validateBankrollFinanceForm } from "@/src/utils/bankrollFinanceIntegration";
+import { createBankrollFinanceIdempotencyKey, filterEligibleFinanceAccountsForWallet, getNewBankrollMovementSelection, validateBankrollFinanceForm } from "@/src/utils/bankrollFinanceIntegration";
 import { requireBankrollMoney } from "@/src/utils/bankrollMoney";
 
 type Data = {
@@ -52,8 +52,8 @@ const today = () => new Date().toISOString().slice(0, 10);
 const money = (value: number, currency: string) => new Intl.NumberFormat("pt-BR", { style: "currency", currency }).format(value);
 const displayDate = (value: string) => new Intl.DateTimeFormat("pt-BR", { timeZone: "UTC" }).format(new Date(`${value}T00:00:00Z`));
 
-function blank(data: Data, type: "deposit" | "withdrawal" = "deposit"): FormState {
-  return { date: today(), walletId: data.wallets.find((wallet) => wallet.active)?.id ?? "", destinationWalletId: "", type, direction: "in", amount: "", description: "", notes: "", mode: "integrated", financeAccountId: "", idempotencyKey: createBankrollFinanceIdempotencyKey() };
+function blank(type: "deposit" | "withdrawal" = "deposit"): FormState {
+  return { date: today(), ...getNewBankrollMovementSelection(), destinationWalletId: "", type, direction: "in", amount: "", description: "", notes: "", mode: "integrated", idempotencyKey: createBankrollFinanceIdempotencyKey() };
 }
 
 export default function BankrollFinanceTransactions({ data, reload }: { data: Data; reload: () => Promise<void> }) {
@@ -62,7 +62,7 @@ export default function BankrollFinanceTransactions({ data, reload }: { data: Da
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [editing, setEditing] = useState<BankrollTransaction | null>(null);
-  const [form, setForm] = useState<FormState>(() => blank(data));
+  const [form, setForm] = useState<FormState>(() => blank());
   const [search, setSearch] = useState("");
   const [walletFilter, setWalletFilter] = useState("");
   const [typeFilter, setTypeFilter] = useState("");
@@ -75,7 +75,7 @@ export default function BankrollFinanceTransactions({ data, reload }: { data: Da
   const show = useCallback((transaction?: BankrollTransaction, quickType?: "deposit" | "withdrawal") => {
     setEditing(transaction ?? null);
     if (!transaction) {
-      setForm(blank(data, quickType));
+      setForm(blank(quickType));
     } else {
       const link = transaction.finance_link;
       setForm({
@@ -93,7 +93,7 @@ export default function BankrollFinanceTransactions({ data, reload }: { data: Da
       });
     }
     setOpen(true);
-  }, [data]);
+  }, []);
 
   useEffect(() => {
     const action = searchParams.get("action");
@@ -113,7 +113,7 @@ export default function BankrollFinanceTransactions({ data, reload }: { data: Da
   }), [currency, data.transactions, data.wallets, endDate, search, startDate, typeFilter]);
   const view = buildTransactionView(filtered, walletFilter);
   const selectedWallet = data.wallets.find((wallet) => wallet.id === form.walletId);
-  const eligibleAccounts = data.eligibleAccounts.filter((account) => !selectedWallet || account.currency === selectedWallet.currency);
+  const eligibleAccounts = filterEligibleFinanceAccountsForWallet(data.eligibleAccounts, selectedWallet);
   const integrated = ["deposit", "withdrawal"].includes(form.type) && form.mode === "integrated";
   const activeWallets = data.wallets.filter((wallet) => wallet.active || wallet.id === form.walletId);
 

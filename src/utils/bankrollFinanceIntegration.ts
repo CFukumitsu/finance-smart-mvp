@@ -29,6 +29,19 @@ export function isEligibleFinanceAccount(account: {
   return account.type === "Conta" && account.active && Boolean(account.currency?.match(/^[A-Z]{3}$/));
 }
 
+export function getNewBankrollMovementSelection() {
+  return { walletId: "", financeAccountId: "" };
+}
+
+export function filterEligibleFinanceAccountsForWallet(
+  accounts: EligibleFinanceAccount[],
+  wallet?: Pick<BankrollWallet, "currency"> | null
+) {
+  return wallet
+    ? accounts.filter((account) => account.currency === wallet.currency)
+    : accounts;
+}
+
 export function validateBankrollFinanceForm(input: {
   mode: BankrollFinanceIntegrationMode;
   operationType: BankrollFinanceOperationType;
