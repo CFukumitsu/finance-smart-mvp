@@ -13,6 +13,7 @@ import {
   buildNearbyFuelStationSearchParams,
   sortFuelStationsByDistance,
 } from "@/src/utils/fuelStationProximity";
+import { logFuelGeolocationDev } from "@/src/utils/fuelGeolocationDiagnostics";
 
 export const INITIAL_NEARBY_FUEL_STATION_RADIUS_METERS = 1500;
 
@@ -80,15 +81,36 @@ export async function searchNearbyFuelStations(
     throw new Error("A localização precisa estar pronta antes de buscar postos próximos.");
   }
 
+  const endpoint = `/api/maps/nearby-fuel-stations?${searchParams.toString()}`;
+  const startedAt = Date.now();
+  logFuelGeolocationDev("nearby_stations_request_started", {
+    endpoint,
+    latitude,
+    longitude,
+    radius,
+  });
+
   const response = await fetch(
-    `/api/maps/nearby-fuel-stations?${searchParams.toString()}`,
+    endpoint,
     { cache: "no-store" }
   );
+  logFuelGeolocationDev("nearby_stations_endpoint_response", {
+    endpoint,
+    status: response.status,
+    ok: response.ok,
+    elapsedMs: Date.now() - startedAt,
+  });
   const data = await readApiResponse<{ places?: NearbyFuelStation[] }>(
     response
   );
 
-  return sortFuelStationsByDistance(data.places ?? []);
+  const places = sortFuelStationsByDistance(data.places ?? []);
+  logFuelGeolocationDev("nearby_stations_request_completed", {
+    endpoint,
+    count: places.length,
+    elapsedMs: Date.now() - startedAt,
+  });
+  return places;
 }
 
 export async function loadGoogleFuelStationDetails(

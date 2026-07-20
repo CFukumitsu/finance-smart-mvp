@@ -15,6 +15,7 @@ import {
 import AppShell from "../../../components/layout/AppShell";
 import { useGeolocation } from "@/src/hooks/useGeolocation";
 import { PreciseGeolocationError } from "@/src/utils/preciseGeolocation";
+import { logFuelGeolocationDev } from "@/src/utils/fuelGeolocationDiagnostics";
 import { getCurrentUserId, supabase } from "@/src/lib/supabase";
 import {
   loadGoogleFuelStationDetails,
@@ -336,6 +337,12 @@ export default function FuelStationsPage() {
   }
 
   async function searchNearbyStations() {
+    logFuelGeolocationDev("location_update_clicked", {
+      flow: "fuel-station-registration",
+      isLocating,
+      isSearchingNearby,
+      editingGenericStation,
+    });
     if (editingGenericStation) {
       setLocationMessage("Outros postos não representa um local fixo e não pode receber dados do Google.");
       return;
@@ -352,6 +359,12 @@ export default function FuelStationsPage() {
         },
       });
       const { latitude, longitude } = position.coords;
+      logFuelGeolocationDev("real_coordinates_applied", {
+        flow: "fuel-station-registration",
+        latitude,
+        longitude,
+        accuracy: position.coords.accuracy,
+      });
       setNearbyOrigin({ latitude, longitude });
 
       setLocationMessage("Buscando postos de combustível próximos...");

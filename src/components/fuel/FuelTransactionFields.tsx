@@ -9,6 +9,7 @@ import {
 } from "@/src/services/fuelService";
 import { useGeolocation } from "@/src/hooks/useGeolocation";
 import { PreciseGeolocationError } from "@/src/utils/preciseGeolocation";
+import { logFuelGeolocationDev } from "@/src/utils/fuelGeolocationDiagnostics";
 import type { FuelStationOption } from "@/src/types/fuel";
 import { parsePtBrNumber } from "@/src/utils/fuelCalculations";
 import {
@@ -114,10 +115,24 @@ export default function FuelTransactionFields({
         latitude: position.coords.latitude,
         longitude: position.coords.longitude,
       };
+      logFuelGeolocationDev("real_coordinates_applied", {
+        flow: "fuel-transaction",
+        ...coordinates,
+        accuracy: position.coords.accuracy,
+      });
+      logFuelGeolocationDev("registered_stations_search_started", {
+        flow: "fuel-transaction",
+        availableStationCount: availableStations.length,
+      });
       const nearest = findNearestRegisteredStation(
         coordinates,
         availableStations
       );
+      logFuelGeolocationDev("registered_stations_search_completed", {
+        flow: "fuel-transaction",
+        availableStationCount: availableStations.length,
+        foundStation: Boolean(nearest),
+      });
       const stationId = manualStationSelectionRef.current
         ? valueRef.current.fuel_station_id
         : nearest?.station.id ?? genericStation?.id ?? "";
@@ -225,6 +240,11 @@ export default function FuelTransactionFields({
   }
 
   async function refreshLocation() {
+    logFuelGeolocationDev("location_update_clicked", {
+      flow: "fuel-transaction",
+      isLocating,
+      availableStationCount: stations.length,
+    });
     let genericStation = stations.find((station) => station.station_type === "generic") ?? null;
     if (!genericStation) {
       try {
