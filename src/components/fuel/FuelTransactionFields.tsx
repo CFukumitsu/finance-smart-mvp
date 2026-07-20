@@ -15,6 +15,10 @@ import {
   findNearestRegisteredStation,
   NEARBY_REGISTERED_STATION_RADIUS_METERS,
 } from "@/src/utils/fuelStationProximity";
+import {
+  DEFAULT_NEW_FUEL_TYPE,
+  getAutomaticVehicleSelectionPatch,
+} from "@/src/utils/fuelTransactionDefaults";
 
 export type FuelForm = {
   vehicle_id: string;
@@ -45,7 +49,7 @@ type Props = {
 export const emptyFuelForm: FuelForm = {
   vehicle_id: "",
   fuel_station_id: "",
-  fuel_type: "Gasolina comum",
+  fuel_type: DEFAULT_NEW_FUEL_TYPE,
   odometer: "",
   liters: "",
   price_per_liter: "",
@@ -79,7 +83,6 @@ export default function FuelTransactionFields({
   const valueRef = useRef(value);
   const onChangeRef = useRef(onChange);
   const manualStationSelectionRef = useRef(false);
-  const initializationStartedRef = useRef(false);
 
   useEffect(() => {
     valueRef.current = value;
@@ -150,8 +153,6 @@ export default function FuelTransactionFields({
   }
 
   useEffect(() => {
-    if (initializationStartedRef.current) return;
-    initializationStartedRef.current = true;
     let cancelled = false;
 
     async function initialize() {
@@ -184,12 +185,11 @@ export default function FuelTransactionFields({
         setStations(availableStations);
 
         const firstVehicle = availableVehicles[0];
-        if (!valueRef.current.vehicle_id && firstVehicle) {
-          applyChange({
-            vehicle_id: firstVehicle.id,
-            fuel_type: firstVehicle.fuel_type ?? "Gasolina comum",
-          });
-        }
+        const automaticVehiclePatch = getAutomaticVehicleSelectionPatch(
+          valueRef.current.vehicle_id,
+          firstVehicle?.id
+        );
+        if (automaticVehiclePatch) applyChange(automaticVehiclePatch);
 
         if (!isEditing && !valueRef.current.fuel_station_id) {
           await captureLocationAndSuggest(availableStations, genericStation);

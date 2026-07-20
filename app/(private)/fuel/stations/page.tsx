@@ -358,7 +358,7 @@ export default function FuelStationsPage() {
       setIsSearchingNearby(true);
       const places = await searchNearbyFuelStations(latitude, longitude);
       setNearbyPlaces(places);
-      setHighlightedPlaceId(null);
+      setHighlightedPlaceId(places[0]?.googlePlaceId ?? null);
       setLocationMessage(
         places.length === 0
           ? "Nenhum posto de combustível foi encontrado próximo à sua localização."

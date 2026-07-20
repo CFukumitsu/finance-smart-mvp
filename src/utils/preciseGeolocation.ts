@@ -123,7 +123,8 @@ export function requestPreciseGeolocation(
       return;
     }
 
-    const unavailable = lastError?.code === lastError?.POSITION_UNAVAILABLE;
+    const unavailable =
+      lastError !== null && lastError.code === lastError.POSITION_UNAVAILABLE;
     rejectWith(
       new PreciseGeolocationError(
         unavailable ? "POSITION_UNAVAILABLE" : "TIMEOUT",

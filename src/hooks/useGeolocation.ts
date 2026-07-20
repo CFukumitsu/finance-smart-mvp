@@ -28,6 +28,13 @@ export function useGeolocation() {
   const getPosition = useCallback(async (options?: {
     onAccuracyChange?: (accuracyMeters: number) => void;
   }) => {
+    if (globalThis.isSecureContext === false) {
+      throw new PreciseGeolocationError(
+        "POSITION_UNAVAILABLE",
+        "A localização do dispositivo exige uma conexão HTTPS segura."
+      );
+    }
+
     if (!navigator.geolocation) {
       throw new PreciseGeolocationError(
         "UNSUPPORTED",

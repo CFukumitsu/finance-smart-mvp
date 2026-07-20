@@ -118,6 +118,30 @@ test("encerra imediatamente quando a permissão é negada", async () => {
   assert.deepEqual(geolocation.clearedWatchIds, [17]);
 });
 
+test("informa timeout quando nenhuma coordenada é recebida", async () => {
+  const geolocation = new MockGeolocation();
+  const request = requestPreciseGeolocation(geolocation, { timeoutMs: 10 });
+
+  await assert.rejects(request.promise, (error: unknown) => {
+    assert.ok(error instanceof PreciseGeolocationError);
+    assert.equal(error.code, "TIMEOUT");
+    return true;
+  });
+  assert.deepEqual(geolocation.clearedWatchIds, [17]);
+});
+
+test("informa posição indisponível quando o dispositivo não fornece localização", async () => {
+  const geolocation = new MockGeolocation();
+  const request = requestPreciseGeolocation(geolocation, { timeoutMs: 10 });
+  geolocation.emitError(2);
+
+  await assert.rejects(request.promise, (error: unknown) => {
+    assert.ok(error instanceof PreciseGeolocationError);
+    assert.equal(error.code, "POSITION_UNAVAILABLE");
+    return true;
+  });
+});
+
 test("cancelamento limpa watch e timeout", async () => {
   const geolocation = new MockGeolocation();
   const request = requestPreciseGeolocation(geolocation, { timeoutMs: 100 });

@@ -9,7 +9,10 @@ import {
   isMissingFuelStationTypeColumn,
   withCompatibleFuelStationType,
 } from "@/src/utils/fuelStationCompatibility";
-import { sortFuelStationsByDistance } from "@/src/utils/fuelStationProximity";
+import {
+  buildNearbyFuelStationSearchParams,
+  sortFuelStationsByDistance,
+} from "@/src/utils/fuelStationProximity";
 
 export const INITIAL_NEARBY_FUEL_STATION_RADIUS_METERS = 1500;
 
@@ -68,11 +71,14 @@ export async function searchNearbyFuelStations(
   longitude: number,
   radius = INITIAL_NEARBY_FUEL_STATION_RADIUS_METERS
 ): Promise<NearbyFuelStation[]> {
-  const searchParams = new URLSearchParams({
-    lat: String(latitude),
-    lng: String(longitude),
-    radius: String(radius),
-  });
+  const searchParams = buildNearbyFuelStationSearchParams(
+    { latitude, longitude },
+    radius
+  );
+
+  if (!searchParams) {
+    throw new Error("A localização precisa estar pronta antes de buscar postos próximos.");
+  }
 
   const response = await fetch(
     `/api/maps/nearby-fuel-stations?${searchParams.toString()}`,
