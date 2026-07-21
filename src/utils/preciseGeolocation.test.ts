@@ -122,6 +122,19 @@ test("sucesso com precisão moderada não espera precisão perfeita", async () =
   assert.equal(geolocation.calls.length, 1);
 });
 
+test("aceita precisão aproximada quando o consumidor amplia o limite", async () => {
+  const geolocation = new MockGeolocation();
+  const request = requestPreciseGeolocation(geolocation, {
+    ...fastTimeouts(),
+    maximumAccuracyMeters: 3_500,
+  });
+
+  geolocation.emitPosition(1, 2_000);
+
+  assert.equal((await request.promise).coords.accuracy, 2_000);
+  assert.deepEqual(geolocation.clearedWatchIds, [1]);
+});
+
 test("timeout da alta precisão inicia fallback controlado", async () => {
   const geolocation = new MockGeolocation();
   const request = requestPreciseGeolocation(geolocation, fastTimeouts());

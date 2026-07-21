@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 // @ts-expect-error Node's native TypeScript test runner requires the extension.
-import { buildNearbyFuelStationSearchParams, calculateDistanceMeters, findNearestRegisteredStation, NEARBY_REGISTERED_STATION_RADIUS_METERS, sortFuelStationsByDistance, type StationWithCoordinates } from "./fuelStationProximity.ts";
+import { buildNearbyFuelStationSearchParams, calculateDistanceMeters, calculateNearbyFuelStationSearchRadius, findNearestRegisteredStation, MAXIMUM_NEARBY_FUEL_STATION_RADIUS_METERS, NEARBY_REGISTERED_STATION_RADIUS_METERS, sortFuelStationsByDistance, type StationWithCoordinates } from "./fuelStationProximity.ts";
 
 const origin = { latitude: -23.55052, longitude: -46.633308 };
 
@@ -82,4 +82,17 @@ test("prepara a consulta somente com coordenada validada", () => {
   assert.equal(params?.get("lat"), String(origin.latitude));
   assert.equal(params?.get("lng"), String(origin.longitude));
   assert.equal(params?.get("radius"), "1500");
+});
+
+test("amplia o raio da busca para compensar a imprecisão da localização", () => {
+  assert.equal(calculateNearbyFuelStationSearchRadius(2_000, 1_500), 3_500);
+  assert.equal(
+    calculateNearbyFuelStationSearchRadius(9_000, 1_500),
+    MAXIMUM_NEARBY_FUEL_STATION_RADIUS_METERS
+  );
+});
+
+test("rejeita valores inválidos ao calcular o raio da busca", () => {
+  assert.equal(calculateNearbyFuelStationSearchRadius(Number.NaN, 1_500), null);
+  assert.equal(calculateNearbyFuelStationSearchRadius(100, 0), null);
 });

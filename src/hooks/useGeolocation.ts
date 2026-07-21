@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   PreciseGeolocationError,
   requestPreciseGeolocation,
+  type PreciseGeolocationOptions,
 } from "@/src/utils/preciseGeolocation";
 import { logFuelGeolocationDev } from "@/src/utils/fuelGeolocationDiagnostics";
 
@@ -34,9 +35,7 @@ export function useGeolocation() {
     };
   }, []);
 
-  const getPosition = useCallback(async (options?: {
-    onAccuracyChange?: (accuracyMeters: number) => void;
-  }) => {
+  const getPosition = useCallback(async (options?: PreciseGeolocationOptions) => {
     logFuelGeolocationDev("location_update_started", {
       isSecureContext: globalThis.isSecureContext,
       protocol: globalThis.location?.protocol ?? null,

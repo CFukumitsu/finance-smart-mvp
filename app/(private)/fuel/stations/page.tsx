@@ -18,6 +18,7 @@ import { PreciseGeolocationError } from "@/src/utils/preciseGeolocation";
 import { logFuelGeolocationDev } from "@/src/utils/fuelGeolocationDiagnostics";
 import { getCurrentUserId, supabase } from "@/src/lib/supabase";
 import {
+  INITIAL_NEARBY_FUEL_STATION_RADIUS_METERS,
   loadGoogleFuelStationDetails,
   searchNearbyFuelStations,
 } from "@/src/services/fuelService";
@@ -27,6 +28,10 @@ import {
   isMissingFuelStationTypeColumn,
   withCompatibleFuelStationType,
 } from "@/src/utils/fuelStationCompatibility";
+import {
+  calculateNearbyFuelStationSearchRadius,
+  MAXIMUM_NEARBY_LOCATION_ACCURACY_METERS,
+} from "@/src/utils/fuelStationProximity";
 
 type FuelStation = {
   id: string;
@@ -354,6 +359,7 @@ export default function FuelStationsPage() {
       setNearbyOrigin(null);
       setHighlightedPlaceId(null);
       const position = await getPosition({
+        maximumAccuracyMeters: MAXIMUM_NEARBY_LOCATION_ACCURACY_METERS,
         onAccuracyChange(accuracyMeters) {
           setLocationMessage(`Precisão aproximada: ${Math.round(accuracyMeters)} metros`);
         },
@@ -369,7 +375,15 @@ export default function FuelStationsPage() {
 
       setLocationMessage("Buscando postos de combustível próximos...");
       setIsSearchingNearby(true);
-      const places = await searchNearbyFuelStations(latitude, longitude);
+      const searchRadius = calculateNearbyFuelStationSearchRadius(
+        position.coords.accuracy,
+        INITIAL_NEARBY_FUEL_STATION_RADIUS_METERS
+      );
+      const places = await searchNearbyFuelStations(
+        latitude,
+        longitude,
+        searchRadius ?? INITIAL_NEARBY_FUEL_STATION_RADIUS_METERS
+      );
       setNearbyPlaces(places);
       setHighlightedPlaceId(places[0]?.googlePlaceId ?? null);
       setLocationMessage(

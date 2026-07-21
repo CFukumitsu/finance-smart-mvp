@@ -1,4 +1,6 @@
 export const NEARBY_REGISTERED_STATION_RADIUS_METERS = 100;
+export const MAXIMUM_NEARBY_LOCATION_ACCURACY_METERS = 3_500;
+export const MAXIMUM_NEARBY_FUEL_STATION_RADIUS_METERS = 5_000;
 
 export type Coordinates = {
   latitude: number;
@@ -51,6 +53,25 @@ export function buildNearbyFuelStationSearchParams(
     lng: String(coordinates.longitude),
     radius: String(radius),
   });
+}
+
+export function calculateNearbyFuelStationSearchRadius(
+  accuracyMeters: number,
+  baseRadiusMeters: number
+) {
+  if (
+    !Number.isFinite(accuracyMeters) ||
+    accuracyMeters < 0 ||
+    !Number.isFinite(baseRadiusMeters) ||
+    baseRadiusMeters <= 0
+  ) {
+    return null;
+  }
+
+  return Math.min(
+    Math.ceil(baseRadiusMeters + accuracyMeters),
+    MAXIMUM_NEARBY_FUEL_STATION_RADIUS_METERS
+  );
 }
 
 export function calculateDistanceMeters(
