@@ -1,9 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 // @ts-expect-error Node's native TypeScript test runner requires the extension.
-import { buildNearbyFuelStationSearchParams, calculateDistanceMeters, calculateNearbyFuelStationSearchRadius, findNearestRegisteredStation, MAXIMUM_NEARBY_FUEL_STATION_RADIUS_METERS, NEARBY_REGISTERED_STATION_RADIUS_METERS, sortFuelStationsByDistance, type StationWithCoordinates } from "./fuelStationProximity.ts";
+import { buildNearbyFuelStationSearchParams, calculateDistanceMeters, calculateNearbyFuelStationSearchRadius, findNearestRegisteredStation, MAXIMUM_NEARBY_FUEL_STATION_RADIUS_METERS, MAXIMUM_NEARBY_LOCATION_ACCURACY_METERS, NEARBY_HIGH_ACCURACY_TIMEOUT_MS, NEARBY_REGISTERED_STATION_RADIUS_METERS, PREFERRED_NEARBY_LOCATION_ACCURACY_METERS, sortFuelStationsByDistance, type StationWithCoordinates } from "./fuelStationProximity.ts";
 
 const origin = { latitude: -23.55052, longitude: -46.633308 };
+
+test("mantém uma janela real para o GPS refinar a localização de postos", () => {
+  assert.equal(PREFERRED_NEARBY_LOCATION_ACCURACY_METERS, 200);
+  assert.equal(MAXIMUM_NEARBY_LOCATION_ACCURACY_METERS, 3_500);
+  assert.equal(NEARBY_HIGH_ACCURACY_TIMEOUT_MS, 30_000);
+});
 
 function station(
   id: string,

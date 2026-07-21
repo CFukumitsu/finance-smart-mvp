@@ -31,6 +31,8 @@ import {
 import {
   calculateNearbyFuelStationSearchRadius,
   MAXIMUM_NEARBY_LOCATION_ACCURACY_METERS,
+  NEARBY_HIGH_ACCURACY_TIMEOUT_MS,
+  PREFERRED_NEARBY_LOCATION_ACCURACY_METERS,
 } from "@/src/utils/fuelStationProximity";
 
 type FuelStation = {
@@ -359,7 +361,10 @@ export default function FuelStationsPage() {
       setNearbyOrigin(null);
       setHighlightedPlaceId(null);
       const position = await getPosition({
+        preferredAccuracyMeters: PREFERRED_NEARBY_LOCATION_ACCURACY_METERS,
         maximumAccuracyMeters: MAXIMUM_NEARBY_LOCATION_ACCURACY_METERS,
+        highAccuracyTimeoutMs: NEARBY_HIGH_ACCURACY_TIMEOUT_MS,
+        maximumAgeMs: 0,
         waitForPreferredAccuracy: true,
         onAccuracyChange(accuracyMeters) {
           setLocationMessage(`Precisão aproximada: ${Math.round(accuracyMeters)} metros`);
