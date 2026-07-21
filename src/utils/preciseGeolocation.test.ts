@@ -122,17 +122,43 @@ test("sucesso com precisão moderada não espera precisão perfeita", async () =
   assert.equal(geolocation.calls.length, 1);
 });
 
-test("aceita precisão aproximada quando o consumidor amplia o limite", async () => {
+test("aguarda uma leitura melhor antes de aceitar a precisão aproximada", async () => {
   const geolocation = new MockGeolocation();
   const request = requestPreciseGeolocation(geolocation, {
     ...fastTimeouts(),
     maximumAccuracyMeters: 3_500,
+    waitForPreferredAccuracy: true,
+  });
+  let resolved = false;
+  void request.promise.then(() => {
+    resolved = true;
   });
 
   geolocation.emitPosition(1, 2_000);
+  await Promise.resolve();
+  assert.equal(resolved, false);
 
-  assert.equal((await request.promise).coords.accuracy, 2_000);
+  geolocation.emitPosition(1, 75);
+
+  assert.equal((await request.promise).coords.accuracy, 75);
   assert.deepEqual(geolocation.clearedWatchIds, [1]);
+});
+
+test("usa a melhor leitura aproximada somente depois das tentativas precisas", async () => {
+  const geolocation = new MockGeolocation();
+  const request = requestPreciseGeolocation(geolocation, {
+    ...fastTimeouts(),
+    maximumAccuracyMeters: 3_500,
+    waitForPreferredAccuracy: true,
+  });
+
+  geolocation.emitPosition(1, 2_000);
+  geolocation.emitError(1, 3);
+  assert.equal(geolocation.calls.length, 2);
+
+  geolocation.emitPosition(2, 2_000);
+  assert.equal((await request.promise).coords.accuracy, 2_000);
+  assert.deepEqual(geolocation.clearedWatchIds, [1, 2]);
 });
 
 test("timeout da alta precisão inicia fallback controlado", async () => {

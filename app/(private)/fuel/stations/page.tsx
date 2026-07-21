@@ -360,6 +360,7 @@ export default function FuelStationsPage() {
       setHighlightedPlaceId(null);
       const position = await getPosition({
         maximumAccuracyMeters: MAXIMUM_NEARBY_LOCATION_ACCURACY_METERS,
+        waitForPreferredAccuracy: true,
         onAccuracyChange(accuracyMeters) {
           setLocationMessage(`Precisão aproximada: ${Math.round(accuracyMeters)} metros`);
         },

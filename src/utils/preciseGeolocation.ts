@@ -49,6 +49,7 @@ type GeolocationWatcher = Pick<Geolocation, "watchPosition" | "clearWatch">;
 export type PreciseGeolocationOptions = {
   preferredAccuracyMeters?: number;
   maximumAccuracyMeters?: number;
+  waitForPreferredAccuracy?: boolean;
   highAccuracyTimeoutMs?: number;
   fallbackTimeoutMs?: number;
   maximumAgeMs?: number;
@@ -117,6 +118,7 @@ export function requestPreciseGeolocation(
     options.preferredAccuracyMeters ?? PREFERRED_GEOLOCATION_ACCURACY_METERS;
   const maximumAccuracyMeters =
     options.maximumAccuracyMeters ?? MAXIMUM_GEOLOCATION_ACCURACY_METERS;
+  const waitForPreferredAccuracy = options.waitForPreferredAccuracy ?? false;
   const highAccuracyTimeoutMs =
     options.highAccuracyTimeoutMs ?? HIGH_ACCURACY_GEOLOCATION_TIMEOUT_MS;
   const fallbackTimeoutMs =
@@ -222,6 +224,10 @@ export function requestPreciseGeolocation(
 
     if (bestPosition) {
       const bestAccuracyMeters = Math.round(bestPosition.coords.accuracy);
+      if (bestPosition.coords.accuracy <= maximumAccuracyMeters) {
+        resolveWith(bestPosition, phase);
+        return;
+      }
       rejectWith(
         new PreciseGeolocationError(
           "INACCURATE",
@@ -295,7 +301,12 @@ export function requestPreciseGeolocation(
           }
           options.onAccuracyChange?.(position.coords.accuracy);
 
-          if (position.coords.accuracy <= maximumAccuracyMeters) {
+          const requiredAccuracyMeters =
+            phase === "high-accuracy" && waitForPreferredAccuracy
+              ? preferredAccuracyMeters
+              : maximumAccuracyMeters;
+
+          if (position.coords.accuracy <= requiredAccuracyMeters) {
             resolveWith(position, phase);
             return;
           }
@@ -306,6 +317,7 @@ export function requestPreciseGeolocation(
             accuracy: position.coords.accuracy,
             preferredAccuracyMeters,
             maximumAccuracyMeters,
+            requiredAccuracyMeters,
           });
         },
         (error) => {
@@ -366,6 +378,7 @@ export function requestPreciseGeolocation(
     requestId,
     preferredAccuracyMeters,
     maximumAccuracyMeters,
+    waitForPreferredAccuracy,
   });
   startPhase("high-accuracy");
 
