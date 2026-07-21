@@ -46,7 +46,7 @@ export class PreciseGeolocationError extends Error {
 
 type GeolocationWatcher = Pick<Geolocation, "watchPosition" | "clearWatch">;
 
-type PreciseGeolocationOptions = {
+export type PreciseGeolocationOptions = {
   preferredAccuracyMeters?: number;
   maximumAccuracyMeters?: number;
   highAccuracyTimeoutMs?: number;
