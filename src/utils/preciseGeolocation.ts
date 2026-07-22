@@ -231,7 +231,7 @@ export function requestPreciseGeolocation(
       rejectWith(
         new PreciseGeolocationError(
           "INACCURATE",
-          `A localização recebida não foi utilizável (precisão aproximada de ${bestAccuracyMeters} metros). Toque em Atualizar localização para tentar novamente.`,
+          `O celular forneceu apenas uma localização aproximada, com precisão de ${bestAccuracyMeters} metros. Ative a localização precisa para o navegador e tente novamente em um local com melhor sinal de GPS.`,
           bestAccuracyMeters
         ),
         phase
@@ -301,10 +301,9 @@ export function requestPreciseGeolocation(
           }
           options.onAccuracyChange?.(position.coords.accuracy);
 
-          const requiredAccuracyMeters =
-            phase === "high-accuracy" && waitForPreferredAccuracy
-              ? preferredAccuracyMeters
-              : maximumAccuracyMeters;
+          const requiredAccuracyMeters = waitForPreferredAccuracy
+          ? preferredAccuracyMeters
+          : maximumAccuracyMeters;
 
           if (position.coords.accuracy <= requiredAccuracyMeters) {
             resolveWith(position, phase);
