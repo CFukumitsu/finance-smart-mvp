@@ -30,7 +30,6 @@ import {
 } from "@/src/utils/fuelStationCompatibility";
 import {
   calculateNearbyFuelStationSearchRadius,
-  MAXIMUM_NEARBY_LOCATION_ACCURACY_METERS,
   NEARBY_HIGH_ACCURACY_TIMEOUT_MS,
   PREFERRED_NEARBY_LOCATION_ACCURACY_METERS,
 } from "@/src/utils/fuelStationProximity";
@@ -415,14 +414,26 @@ export default function FuelStationsPage() {
       setHighlightedPlaceId(null);
       const position = await getPosition({
         preferredAccuracyMeters: PREFERRED_NEARBY_LOCATION_ACCURACY_METERS,
-        maximumAccuracyMeters: MAXIMUM_NEARBY_LOCATION_ACCURACY_METERS,
+
+        // No cadastro, uma posição aproximada é suficiente para abrir o mapa.
+        // O usuário poderá arrastar o mapa e buscar postos em outra área.
+        maximumAccuracyMeters: 10_000,
+
         highAccuracyTimeoutMs: NEARBY_HIGH_ACCURACY_TIMEOUT_MS,
+        fallbackTimeoutMs: 12_000,
         maximumAgeMs: 0,
-        waitForPreferredAccuracy: true,
-        allowLowAccuracyFallback: false,
+        waitForPreferredAccuracy: false,
+        allowLowAccuracyFallback: true,
+
         onAccuracyChange(accuracyMeters) {
           setLocationMessage(
-            `Precisão aproximada: ${Math.round(accuracyMeters)} metros`,
+            accuracyMeters <= PREFERRED_NEARBY_LOCATION_ACCURACY_METERS
+              ? `Localização obtida com precisão aproximada de ${Math.round(
+                  accuracyMeters,
+                )} metros.`
+              : `Localização inicial aproximada: ${Math.round(
+                  accuracyMeters,
+                )} metros. Você poderá ajustar a região arrastando o mapa.`,
           );
         },
       });
@@ -434,6 +445,16 @@ export default function FuelStationsPage() {
         accuracy: position.coords.accuracy,
       });
       setNearbyOrigin({ latitude, longitude });
+
+      if (
+        position.coords.accuracy > PREFERRED_NEARBY_LOCATION_ACCURACY_METERS
+      ) {
+        setLocationMessage(
+          `A localização do celular está aproximada em ${Math.round(
+            position.coords.accuracy,
+          )} metros. O mapa será aberto nessa região; arraste-o até o local desejado para buscar outros postos.`,
+        );
+      }
 
       await searchNearbyStationsAtCoordinates(
         latitude,
