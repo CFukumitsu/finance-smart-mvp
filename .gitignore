@@ -51,3 +51,8 @@ next-env.d.ts
 # Finance Smart
 backup/
 supabase/.temp/
+
+# Scripts locais de clonagem de dados
+scripts/clone-dev-user-to-local.ts
+scripts/clone-prod-user-to-dev.ts
+scripts/clone-prod-user-to-dev.test.ts
