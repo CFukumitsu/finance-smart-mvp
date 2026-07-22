@@ -344,6 +344,56 @@ export default function FuelStationsPage() {
     })} km`;
   }
 
+  async function searchNearbyStationsAtCoordinates(
+    latitude: number,
+    longitude: number,
+    accuracyMeters: number | null = null,
+  ) {
+    setLocationMessage("Buscando postos de combustível nesta área...");
+    setIsSearchingNearby(true);
+    setNearbyPlaces([]);
+    setHighlightedPlaceId(null);
+
+    try {
+      const searchRadius =
+        accuracyMeters === null
+          ? INITIAL_NEARBY_FUEL_STATION_RADIUS_METERS
+          : calculateNearbyFuelStationSearchRadius(
+              accuracyMeters,
+              INITIAL_NEARBY_FUEL_STATION_RADIUS_METERS,
+            );
+
+      const places = await searchNearbyFuelStations(
+        latitude,
+        longitude,
+        searchRadius ?? INITIAL_NEARBY_FUEL_STATION_RADIUS_METERS,
+      );
+
+      setNearbyPlaces(places);
+      setHighlightedPlaceId(places[0]?.googlePlaceId ?? null);
+
+      setLocationMessage(
+        places.length === 0
+          ? "Nenhum posto foi encontrado nesta área. Arraste o mapa e tente novamente."
+          : `${places.length} posto${
+              places.length === 1 ? "" : "s"
+            } encontrado${
+              places.length === 1 ? "" : "s"
+            }. Selecione um para preencher o formulário.`,
+      );
+    } catch (error) {
+      console.error("Erro ao buscar postos na área:", error);
+
+      setLocationMessage(
+        error instanceof Error
+          ? error.message
+          : "Não foi possível buscar postos nesta área.",
+      );
+    } finally {
+      setIsSearchingNearby(false);
+    }
+  }
+
   async function searchNearbyStations() {
     logFuelGeolocationDev("location_update_clicked", {
       flow: "fuel-station-registration",
@@ -385,23 +435,10 @@ export default function FuelStationsPage() {
       });
       setNearbyOrigin({ latitude, longitude });
 
-      setLocationMessage("Buscando postos de combustível próximos...");
-      setIsSearchingNearby(true);
-      const searchRadius = calculateNearbyFuelStationSearchRadius(
-        position.coords.accuracy,
-        INITIAL_NEARBY_FUEL_STATION_RADIUS_METERS,
-      );
-      const places = await searchNearbyFuelStations(
+      await searchNearbyStationsAtCoordinates(
         latitude,
         longitude,
-        searchRadius ?? INITIAL_NEARBY_FUEL_STATION_RADIUS_METERS,
-      );
-      setNearbyPlaces(places);
-      setHighlightedPlaceId(places[0]?.googlePlaceId ?? null);
-      setLocationMessage(
-        places.length === 0
-          ? "Nenhum posto de combustível foi encontrado próximo à sua localização."
-          : `${places.length} posto${places.length === 1 ? "" : "s"} encontrado${places.length === 1 ? "" : "s"}. Selecione um para preencher o formulário.`,
+        position.coords.accuracy,
       );
     } catch (error) {
       if (
@@ -416,8 +453,6 @@ export default function FuelStationsPage() {
           ? error.message
           : "Não foi possível localizar postos próximos.",
       );
-    } finally {
-      setIsSearchingNearby(false);
     }
   }
 
@@ -1138,12 +1173,23 @@ export default function FuelStationsPage() {
                   </div>
                 </div>
 
-                {nearbyPlaces.length > 0 && nearbyOrigin && (
+                {nearbyOrigin && (
                   <div className="mt-4 grid min-w-0 gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)]">
                     <div
                       className="max-h-[clamp(16rem,42vh,28rem)] space-y-2 overflow-y-auto pr-1"
                       aria-label="Postos próximos"
                     >
+                      {nearbyPlaces.length === 0 && (
+                        <div className="rounded-xl border border-white/10 bg-slate-950 p-4 text-sm text-slate-400">
+                          Nenhum posto encontrado nesta área. Arraste o mapa até
+                          a região desejada e toque em{" "}
+                          <strong className="text-cyan-300">
+                            Buscar postos nesta área
+                          </strong>
+                          .
+                        </div>
+                      )}
+
                       {nearbyPlaces.map((place) => {
                         const distance = formatDistance(place.distanceMeters);
                         const isSelecting =
@@ -1217,7 +1263,11 @@ export default function FuelStationsPage() {
                       registeredPlaceIds={registeredPlaceIds}
                       onHighlight={setHighlightedPlaceId}
                       onSelect={selectNearbyStation}
+                      onSearchArea={({ lat, lng }) =>
+                        searchNearbyStationsAtCoordinates(lat, lng)
+                      }
                       selectingPlaceId={selectingPlaceId}
+                      isSearchingArea={isSearchingNearby}
                     />
                   </div>
                 )}

@@ -6,11 +6,22 @@ import type { NearbyFuelStation } from "@/src/types/fuel";
 
 type Coordinates = { lat: number; lng: number };
 
+type GoogleMapsEventListener = {
+  remove: () => void;
+};
+
+type GoogleLatLng = {
+  lat: () => number;
+  lng: () => number;
+};
+
 type GoogleMap = {
   fitBounds: (bounds: unknown, padding?: number) => void;
   panTo: (position: Coordinates) => void;
+  getCenter: () => GoogleLatLng | undefined;
   getZoom: () => number | undefined;
   setZoom: (zoom: number) => void;
+  addListener: (event: string, handler: () => void) => GoogleMapsEventListener;
 };
 
 type GoogleMarker = {
@@ -20,7 +31,7 @@ type GoogleMarker = {
 type GoogleMapsApi = {
   Map: new (
     element: HTMLElement,
-    options: { center: Coordinates; zoom: number; mapTypeControl: boolean }
+    options: { center: Coordinates; zoom: number; mapTypeControl: boolean },
   ) => GoogleMap;
   Marker: new (options: {
     map: GoogleMap;
@@ -35,7 +46,9 @@ type GoogleMapsApi = {
       strokeWeight: number;
       scale: number;
     };
-  }) => GoogleMarker & { addListener: (event: string, handler: () => void) => void };
+  }) => GoogleMarker & {
+    addListener: (event: string, handler: () => void) => void;
+  };
   LatLngBounds: new () => { extend: (position: Coordinates) => void };
   SymbolPath: { CIRCLE: unknown };
 };
@@ -53,7 +66,9 @@ type Props = {
   registeredPlaceIds: Set<string>;
   onHighlight: (googlePlaceId: string) => void;
   onSelect: (place: NearbyFuelStation) => void;
+  onSearchArea: (coordinates: Coordinates) => void | Promise<void>;
   selectingPlaceId: string | null;
+  isSearchingArea: boolean;
 };
 
 function formatDistance(distanceMeters: number | null) {
@@ -71,18 +86,28 @@ export default function NearbyFuelStationsMap({
   registeredPlaceIds,
   onHighlight,
   onSelect,
+  onSearchArea,
   selectingPlaceId,
+  isSearchingArea,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<GoogleMap | null>(null);
   const markersRef = useRef<GoogleMarker[]>([]);
+  const mapListenersRef = useRef<GoogleMapsEventListener[]>([]);
+  const hasInitialViewportRef = useRef(false);
+  const userDraggedMapRef = useRef(false);
+
   const [apiKey, setApiKey] = useState("");
   const [mapError, setMapError] = useState("");
   const [isScriptReady, setIsScriptReady] = useState(false);
+  const [searchCenter, setSearchCenter] = useState<Coordinates | null>(null);
+  const [hasMovedMap, setHasMovedMap] = useState(false);
 
   const highlightedPlace = useMemo(
-    () => places.find((place) => place.googlePlaceId === highlightedPlaceId) ?? null,
-    [highlightedPlaceId, places]
+    () =>
+      places.find((place) => place.googlePlaceId === highlightedPlaceId) ??
+      null,
+    [highlightedPlaceId, places],
   );
 
   useEffect(() => {
@@ -90,7 +115,10 @@ export default function NearbyFuelStationsMap({
 
     fetch("/api/maps/browser-config", { cache: "no-store" })
       .then(async (response) => {
-        const data = (await response.json()) as { apiKey?: string; error?: string };
+        const data = (await response.json()) as {
+          apiKey?: string;
+          error?: string;
+        };
         if (!response.ok || !data.apiKey) {
           throw new Error(data.error || "Mapa indisponível.");
         }
@@ -98,7 +126,9 @@ export default function NearbyFuelStationsMap({
       })
       .catch(() => {
         if (!cancelled) {
-          setMapError("O mapa não pôde ser carregado. Você ainda pode usar a lista.");
+          setMapError(
+            "O mapa não pôde ser carregado. Você ainda pode usar a lista.",
+          );
         }
       });
 
@@ -106,6 +136,62 @@ export default function NearbyFuelStationsMap({
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    const maps = window.google?.maps;
+    const container = containerRef.current;
+
+    if (!isScriptReady || !maps || !container || mapRef.current) {
+      return;
+    }
+
+    const userPosition = {
+      lat: userLocation.latitude,
+      lng: userLocation.longitude,
+    };
+
+    const map = new maps.Map(container, {
+      center: userPosition,
+      zoom: 15,
+      mapTypeControl: false,
+    });
+
+    mapRef.current = map;
+
+    mapListenersRef.current.push(
+      map.addListener("dragstart", () => {
+        userDraggedMapRef.current = true;
+      }),
+    );
+
+    mapListenersRef.current.push(
+      map.addListener("idle", () => {
+        if (!userDraggedMapRef.current) {
+          return;
+        }
+
+        const center = map.getCenter();
+
+        if (!center) {
+          return;
+        }
+
+        setSearchCenter({
+          lat: center.lat(),
+          lng: center.lng(),
+        });
+
+        setHasMovedMap(true);
+        userDraggedMapRef.current = false;
+      }),
+    );
+
+    return () => {
+      mapListenersRef.current.forEach((listener) => listener.remove());
+      mapListenersRef.current = [];
+      mapRef.current = null;
+    };
+  }, [isScriptReady, userLocation.latitude, userLocation.longitude]);
 
   useEffect(() => {
     const maps = window.google?.maps;
@@ -119,14 +205,12 @@ export default function NearbyFuelStationsMap({
       lat: userLocation.latitude,
       lng: userLocation.longitude,
     };
-    const map =
-      mapRef.current ??
-      new maps.Map(container, {
-        center: userPosition,
-        zoom: 15,
-        mapTypeControl: false,
-      });
-    mapRef.current = map;
+    const map = mapRef.current;
+
+    if (!map) {
+      return;
+    }
+
     const bounds = new maps.LatLngBounds();
     bounds.extend(userPosition);
 
@@ -144,7 +228,7 @@ export default function NearbyFuelStationsMap({
           strokeWeight: 3,
           scale: 8,
         },
-      })
+      }),
     );
 
     for (const place of places) {
@@ -159,7 +243,11 @@ export default function NearbyFuelStationsMap({
         zIndex: isHighlighted ? 500 : 1,
         icon: {
           path: maps.SymbolPath.CIRCLE,
-          fillColor: isRegistered ? "#10b981" : isHighlighted ? "#f59e0b" : "#f97316",
+          fillColor: isRegistered
+            ? "#10b981"
+            : isHighlighted
+              ? "#f59e0b"
+              : "#f97316",
           fillOpacity: 1,
           strokeColor: "#ffffff",
           strokeWeight: isHighlighted ? 4 : 2,
@@ -171,10 +259,24 @@ export default function NearbyFuelStationsMap({
       bounds.extend(position);
     }
 
-    map.fitBounds(bounds, 48);
-    map.panTo(userPosition);
-    if ((map.getZoom() ?? 0) < 14) map.setZoom(14);
-  }, [highlightedPlaceId, isScriptReady, onHighlight, places, registeredPlaceIds, userLocation]);
+    if (!hasInitialViewportRef.current) {
+      map.fitBounds(bounds, 48);
+      map.panTo(userPosition);
+
+      if ((map.getZoom() ?? 0) < 14) {
+        map.setZoom(14);
+      }
+
+      hasInitialViewportRef.current = true;
+    }
+  }, [
+    highlightedPlaceId,
+    isScriptReady,
+    onHighlight,
+    places,
+    registeredPlaceIds,
+    userLocation,
+  ]);
 
   useEffect(() => {
     if (
@@ -203,11 +305,42 @@ export default function NearbyFuelStationsMap({
 
   return (
     <div className="min-w-0 space-y-3">
-      <div
-        ref={containerRef}
-        className="h-[clamp(16rem,42vh,28rem)] w-full overflow-hidden rounded-xl bg-slate-800"
-        aria-label="Mapa dos postos próximos"
-      />
+      <div className="relative">
+        <div
+          ref={containerRef}
+          className="h-[clamp(16rem,42vh,28rem)] w-full overflow-hidden rounded-xl bg-slate-800"
+          aria-label="Mapa dos postos próximos"
+        />
+
+        <div
+          className="pointer-events-none absolute left-1/2 top-1/2 z-10 -translate-x-1/2 -translate-y-full"
+          aria-hidden="true"
+        >
+          <div className="flex flex-col items-center">
+            <div className="rounded-full border-2 border-white bg-cyan-500 p-1.5 shadow-lg">
+              <div className="h-2.5 w-2.5 rounded-full bg-white" />
+            </div>
+
+            <div className="h-3 w-0.5 bg-white shadow" />
+          </div>
+        </div>
+      </div>
+
+      {hasMovedMap && searchCenter && (
+        <button
+          type="button"
+          onClick={async () => {
+            await onSearchArea(searchCenter);
+            setHasMovedMap(false);
+          }}
+          disabled={isSearchingArea}
+          className="flex w-full items-center justify-center rounded-xl bg-cyan-600 px-4 py-3 text-sm font-semibold text-white hover:bg-cyan-500 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {isSearchingArea
+            ? "Buscando postos nesta área..."
+            : "Buscar postos nesta área"}
+        </button>
+      )}
       {!isScriptReady && (
         <p className="text-sm text-slate-400">Carregando mapa...</p>
       )}
@@ -215,13 +348,16 @@ export default function NearbyFuelStationsMap({
         <div className="rounded-xl border border-amber-400/30 bg-slate-950 p-3">
           <p className="font-semibold text-white">{highlightedPlace.name}</p>
           <p className="mt-1 text-xs text-slate-400">
-            {highlightedPlace.formattedAddress || "Endereço não informado pelo Google"}
+            {highlightedPlace.formattedAddress ||
+              "Endereço não informado pelo Google"}
           </p>
           <p className="mt-1 text-xs font-medium text-cyan-300">
             {formatDistance(highlightedPlace.distanceMeters)}
           </p>
           {registeredPlaceIds.has(highlightedPlace.googlePlaceId) && (
-            <p className="mt-1 text-xs font-semibold text-emerald-300">Já cadastrado</p>
+            <p className="mt-1 text-xs font-semibold text-emerald-300">
+              Já cadastrado
+            </p>
           )}
           <button
             type="button"
@@ -244,7 +380,9 @@ export default function NearbyFuelStationsMap({
           strategy="afterInteractive"
           onReady={() => setIsScriptReady(true)}
           onError={() =>
-            setMapError("O mapa não pôde ser carregado. Você ainda pode usar a lista.")
+            setMapError(
+              "O mapa não pôde ser carregado. Você ainda pode usar a lista.",
+            )
           }
         />
       )}
