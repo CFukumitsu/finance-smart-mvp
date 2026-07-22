@@ -369,6 +369,7 @@ export default function FuelStationsPage() {
         highAccuracyTimeoutMs: NEARBY_HIGH_ACCURACY_TIMEOUT_MS,
         maximumAgeMs: 0,
         waitForPreferredAccuracy: true,
+        allowLowAccuracyFallback: false,
         onAccuracyChange(accuracyMeters) {
           setLocationMessage(
             `Precisão aproximada: ${Math.round(accuracyMeters)} metros`,

@@ -2,7 +2,7 @@ const isDevelopment = process.env.NODE_ENV === "development";
 
 function logFuelGeolocationDev(
   event: string,
-  details: Record<string, unknown> = {}
+  details: Record<string, unknown> = {},
 ) {
   if (!isDevelopment) return;
 
@@ -35,7 +35,7 @@ export class PreciseGeolocationError extends Error {
   constructor(
     code: PreciseGeolocationErrorCode,
     message: string,
-    accuracyMeters: number | null = null
+    accuracyMeters: number | null = null,
   ) {
     super(message);
     this.name = "PreciseGeolocationError";
@@ -50,6 +50,7 @@ export type PreciseGeolocationOptions = {
   preferredAccuracyMeters?: number;
   maximumAccuracyMeters?: number;
   waitForPreferredAccuracy?: boolean;
+  allowLowAccuracyFallback?: boolean;
   highAccuracyTimeoutMs?: number;
   fallbackTimeoutMs?: number;
   maximumAgeMs?: number;
@@ -91,26 +92,26 @@ function errorForCode(code: PreciseGeolocationErrorCode) {
   if (code === "PERMISSION_DENIED") {
     return new PreciseGeolocationError(
       code,
-      "A permissão de localização foi negada. Libere o acesso nas configurações do navegador."
+      "A permissão de localização foi negada. Libere o acesso nas configurações do navegador.",
     );
   }
 
   if (code === "POSITION_UNAVAILABLE") {
     return new PreciseGeolocationError(
       code,
-      "Não foi possível determinar sua localização atual. Toque em Atualizar localização para tentar novamente."
+      "Não foi possível determinar sua localização atual. Toque em Atualizar localização para tentar novamente.",
     );
   }
 
   return new PreciseGeolocationError(
     "TIMEOUT",
-    "A localização demorou muito para responder. Toque em Atualizar localização para tentar novamente."
+    "A localização demorou muito para responder. Toque em Atualizar localização para tentar novamente.",
   );
 }
 
 export function requestPreciseGeolocation(
   geolocation: GeolocationWatcher,
-  options: PreciseGeolocationOptions = {}
+  options: PreciseGeolocationOptions = {},
 ): PreciseGeolocationRequest {
   const requestId = nextRequestId++;
   const startedAt = Date.now();
@@ -119,6 +120,7 @@ export function requestPreciseGeolocation(
   const maximumAccuracyMeters =
     options.maximumAccuracyMeters ?? MAXIMUM_GEOLOCATION_ACCURACY_METERS;
   const waitForPreferredAccuracy = options.waitForPreferredAccuracy ?? false;
+  const allowLowAccuracyFallback = options.allowLowAccuracyFallback ?? true;
   const highAccuracyTimeoutMs =
     options.highAccuracyTimeoutMs ?? HIGH_ACCURACY_GEOLOCATION_TIMEOUT_MS;
   const fallbackTimeoutMs =
@@ -217,7 +219,7 @@ export function requestPreciseGeolocation(
       bestAccuracy: bestPosition?.coords.accuracy ?? null,
     });
 
-    if (phase === "high-accuracy") {
+    if (phase === "high-accuracy" && allowLowAccuracyFallback) {
       startPhase("fallback");
       return;
     }
@@ -232,9 +234,9 @@ export function requestPreciseGeolocation(
         new PreciseGeolocationError(
           "INACCURATE",
           `O celular forneceu apenas uma localização aproximada, com precisão de ${bestAccuracyMeters} metros. Ative a localização precisa para o navegador e tente novamente em um local com melhor sinal de GPS.`,
-          bestAccuracyMeters
+          bestAccuracyMeters,
         ),
-        phase
+        phase,
       );
       return;
     }
@@ -292,18 +294,24 @@ export function requestPreciseGeolocation(
           });
 
           if (!isUsablePosition(position)) {
-            logFuelGeolocationDev("invalid_position_ignored", { requestId, phase });
+            logFuelGeolocationDev("invalid_position_ignored", {
+              requestId,
+              phase,
+            });
             return;
           }
 
-          if (!bestPosition || position.coords.accuracy < bestPosition.coords.accuracy) {
+          if (
+            !bestPosition ||
+            position.coords.accuracy < bestPosition.coords.accuracy
+          ) {
             bestPosition = position;
           }
           options.onAccuracyChange?.(position.coords.accuracy);
 
           const requiredAccuracyMeters = waitForPreferredAccuracy
-          ? preferredAccuracyMeters
-          : maximumAccuracyMeters;
+            ? preferredAccuracyMeters
+            : maximumAccuracyMeters;
 
           if (position.coords.accuracy <= requiredAccuracyMeters) {
             resolveWith(position, phase);
@@ -344,13 +352,13 @@ export function requestPreciseGeolocation(
             rejectWith(errorForCode(classification), phase);
           } else if (classification === "TIMEOUT") {
             finishTimeout(phase, "native");
-          } else if (phase === "high-accuracy") {
+          } else if (phase === "high-accuracy" && allowLowAccuracyFallback) {
             startPhase("fallback");
           } else {
             rejectWith(errorForCode(classification), phase);
           }
         },
-        positionOptions
+        positionOptions,
       );
 
       if (settled || sequence !== phaseSequence) {
@@ -365,7 +373,7 @@ export function requestPreciseGeolocation(
         elapsedMs: elapsedMs(),
         message: error instanceof Error ? error.message : String(error),
       });
-      if (phase === "high-accuracy") {
+      if (phase === "high-accuracy" && allowLowAccuracyFallback) {
         startPhase("fallback");
       } else {
         rejectWith(errorForCode("POSITION_UNAVAILABLE"), phase);
@@ -378,6 +386,7 @@ export function requestPreciseGeolocation(
     preferredAccuracyMeters,
     maximumAccuracyMeters,
     waitForPreferredAccuracy,
+    allowLowAccuracyFallback,
   });
   startPhase("high-accuracy");
 
@@ -391,9 +400,9 @@ export function requestPreciseGeolocation(
       rejectWith(
         new PreciseGeolocationError(
           "CANCELLED",
-          "A busca de localização foi cancelada."
+          "A busca de localização foi cancelada.",
         ),
-        "request"
+        "request",
       );
     },
   };
