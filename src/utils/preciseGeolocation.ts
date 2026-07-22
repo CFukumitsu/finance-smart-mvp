@@ -55,6 +55,12 @@ export type PreciseGeolocationOptions = {
   fallbackTimeoutMs?: number;
   maximumAgeMs?: number;
   nativeTimeoutBufferMs?: number;
+
+  // Permite que fluxos específicos aguardem mais de uma leitura antes
+  // de aceitar uma posição aproximada inicial.
+  minimumSampleCount?: number;
+  minimumWaitMs?: number;
+
   onAccuracyChange?: (accuracyMeters: number) => void;
 };
 
@@ -126,8 +132,16 @@ export function requestPreciseGeolocation(
   const fallbackTimeoutMs =
     options.fallbackTimeoutMs ?? FALLBACK_GEOLOCATION_TIMEOUT_MS;
   const maximumAgeMs = options.maximumAgeMs ?? GEOLOCATION_MAXIMUM_AGE_MS;
+
   const nativeTimeoutBufferMs =
     options.nativeTimeoutBufferMs ?? GEOLOCATION_NATIVE_TIMEOUT_BUFFER_MS;
+
+  const minimumSampleCount = Math.max(
+    1,
+    Math.floor(options.minimumSampleCount ?? 1),
+  );
+
+  const minimumWaitMs = Math.max(0, options.minimumWaitMs ?? 0);
 
   let watchId: number | null = null;
   let timeoutId: ReturnType<typeof setTimeout> | null = null;
@@ -136,6 +150,7 @@ export function requestPreciseGeolocation(
   let activePhase: GeolocationPhase | null = null;
   let phaseStartedAt = 0;
   let bestPosition: GeolocationPosition | null = null;
+  let receivedSampleCount = 0;
   let resolvePromise!: (position: GeolocationPosition) => void;
   let rejectPromise!: (error: Error) => void;
 
@@ -291,6 +306,9 @@ export function requestPreciseGeolocation(
             latitude: position.coords.latitude,
             longitude: position.coords.longitude,
             accuracy: position.coords.accuracy,
+            positionTimestamp: position.timestamp,
+            positionAgeMs: Math.max(0, Date.now() - position.timestamp),
+            nextSampleNumber: receivedSampleCount + 1,
           });
 
           if (!isUsablePosition(position)) {
@@ -301,19 +319,36 @@ export function requestPreciseGeolocation(
             return;
           }
 
+          receivedSampleCount += 1;
+
           if (
             !bestPosition ||
             position.coords.accuracy < bestPosition.coords.accuracy
           ) {
             bestPosition = position;
           }
+
           options.onAccuracyChange?.(position.coords.accuracy);
 
           const requiredAccuracyMeters = waitForPreferredAccuracy
             ? preferredAccuracyMeters
             : maximumAccuracyMeters;
 
-          if (position.coords.accuracy <= requiredAccuracyMeters) {
+          const hasMinimumSamples = receivedSampleCount >= minimumSampleCount;
+
+          const hasWaitedMinimumTime = elapsedMs() >= minimumWaitMs;
+
+          const reachedPreferredAccuracy =
+            position.coords.accuracy <= preferredAccuracyMeters;
+
+          const reachedRequiredAccuracy =
+            position.coords.accuracy <= requiredAccuracyMeters;
+
+          if (
+            reachedRequiredAccuracy &&
+            (reachedPreferredAccuracy ||
+              (hasMinimumSamples && hasWaitedMinimumTime))
+          ) {
             resolveWith(position, phase);
             return;
           }
@@ -325,6 +360,13 @@ export function requestPreciseGeolocation(
             preferredAccuracyMeters,
             maximumAccuracyMeters,
             requiredAccuracyMeters,
+            receivedSampleCount,
+            minimumSampleCount,
+            elapsedMs: elapsedMs(),
+            minimumWaitMs,
+            hasMinimumSamples,
+            hasWaitedMinimumTime,
+            reachedPreferredAccuracy,
           });
         },
         (error) => {
@@ -387,6 +429,8 @@ export function requestPreciseGeolocation(
     maximumAccuracyMeters,
     waitForPreferredAccuracy,
     allowLowAccuracyFallback,
+    minimumSampleCount,
+    minimumWaitMs,
   });
   startPhase("high-accuracy");
 

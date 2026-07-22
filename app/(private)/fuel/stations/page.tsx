@@ -425,6 +425,11 @@ export default function FuelStationsPage() {
         waitForPreferredAccuracy: false,
         allowLowAccuracyFallback: true,
 
+        // No cadastro, não aceitamos imediatamente a primeira posição aproximada.
+        // O navegador terá alguns segundos para fornecer uma leitura melhor do GPS.
+        minimumSampleCount: 2,
+        minimumWaitMs: 3_000,
+
         onAccuracyChange(accuracyMeters) {
           setLocationMessage(
             accuracyMeters <= PREFERRED_NEARBY_LOCATION_ACCURACY_METERS
