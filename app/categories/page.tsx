@@ -43,18 +43,24 @@ const initialForm = {
 export default function CategoriesPage() {
   const [categories, setCategories] = useState<Category[]>([]);
   const [competences, setCompetences] = useState<Competence[]>([]);
-  const [planningCategory, setPlanningCategory] = useState<Category | null>(null);
-  const [planningValues, setPlanningValues] = useState<Record<string, string>>({});
+  const [planningCategory, setPlanningCategory] = useState<Category | null>(
+    null,
+  );
+  const [planningValues, setPlanningValues] = useState<Record<string, string>>(
+    {},
+  );
   const [isPlanningOpen, setIsPlanningOpen] = useState(false);
 
   const currentCompetenceRef = useRef<HTMLDivElement | null>(null);
   const currentDate = new Date();
   const currentCompetenceName = `${currentDate.getFullYear()}-${String(
-    currentDate.getMonth() + 1
+    currentDate.getMonth() + 1,
   ).padStart(2, "0")}`;
   const [isLoading, setIsLoading] = useState(false);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
-  const [editingCategoryId, setEditingCategoryId] = useState<string | null>(null);
+  const [editingCategoryId, setEditingCategoryId] = useState<string | null>(
+    null,
+  );
   const [form, setForm] = useState(initialForm);
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState("Ativas");
@@ -66,7 +72,8 @@ export default function CategoriesPage() {
 
     let query = supabase
       .from("categories")
-      .select(`
+      .select(
+        `
         id,
         name,
         type,
@@ -76,7 +83,8 @@ export default function CategoriesPage() {
         dashboard_order,
         active
         ,special_type
-        `)
+        `,
+      )
       .eq("owner_id", ownerId);
 
     if (statusFilter === "Ativas") {
@@ -239,7 +247,9 @@ export default function CategoriesPage() {
     setForm({
       name: category.name ?? "",
       type: category.type ?? "Despesa",
-      monthly_limit: category.monthly_limit ? String(category.monthly_limit) : "",
+      monthly_limit: category.monthly_limit
+        ? String(category.monthly_limit)
+        : "",
       monthly_goal: category.monthly_goal ? String(category.monthly_goal) : "",
       show_on_dashboard: category.show_on_dashboard,
       dashboard_order:
@@ -284,10 +294,10 @@ export default function CategoriesPage() {
 
     const { error } = editingCategoryId
       ? await supabase
-        .from("categories")
-        .update(payload)
-        .eq("id", editingCategoryId)
-        .eq("owner_id", ownerId)
+          .from("categories")
+          .update(payload)
+          .eq("id", editingCategoryId)
+          .eq("owner_id", ownerId)
       : await supabase.from("categories").insert(payload);
 
     if (error) {
@@ -345,7 +355,7 @@ export default function CategoriesPage() {
   async function deleteCategory(category: Category) {
     const ownerId = await getCurrentUserId();
     const confirmed = window.confirm(
-      `Tem certeza que deseja excluir "${category.name}"? Se já existir lançamento usando essa categoria, o banco pode bloquear.`
+      `Tem certeza que deseja excluir "${category.name}"? Se já existir lançamento usando essa categoria, o banco pode bloquear.`,
     );
 
     if (!confirmed) return;
@@ -358,7 +368,9 @@ export default function CategoriesPage() {
 
     if (error) {
       console.error("Erro ao excluir categoria:", error);
-      alert("Não foi possível excluir. Use Inativar se já houver lançamentos vinculados.");
+      alert(
+        "Não foi possível excluir. Use Inativar se já houver lançamentos vinculados.",
+      );
       return;
     }
 
@@ -464,21 +476,24 @@ export default function CategoriesPage() {
               >
                 <div className="flex items-start justify-between gap-3">
                   <div>
-                    <h3 className="font-semibold text-white">{category.name}</h3>
+                    <h3 className="font-semibold text-white">
+                      {category.name}
+                    </h3>
                     <div className="mt-2 flex flex-wrap gap-2">
                       <span
                         className={`rounded-full px-3 py-1 text-xs font-bold ${getTypeBadgeClass(
-                          category.type
+                          category.type,
                         )}`}
                       >
                         {category.type}
                       </span>
 
                       <span
-                        className={`rounded-full px-3 py-1 text-xs font-bold ${category.active
-                          ? "bg-emerald-500/10 text-emerald-300"
-                          : "bg-slate-500/10 text-slate-400"
-                          }`}
+                        className={`rounded-full px-3 py-1 text-xs font-bold ${
+                          category.active
+                            ? "bg-emerald-500/10 text-emerald-300"
+                            : "bg-slate-500/10 text-slate-400"
+                        }`}
                       >
                         {category.active ? "Ativa" : "Inativa"}
                       </span>
@@ -493,10 +508,11 @@ export default function CategoriesPage() {
                           : "Mostrar no Dashboard"
                       }
                       onClick={() => toggleShowOnDashboard(category)}
-                      className={`flex h-9 w-9 items-center justify-center rounded-xl border ${category.show_on_dashboard
-                        ? "border-cyan-500/20 bg-cyan-500/10 text-cyan-400"
-                        : "border-slate-500/20 bg-slate-500/10 text-slate-400"
-                        }`}
+                      className={`flex h-9 w-9 items-center justify-center rounded-xl border ${
+                        category.show_on_dashboard
+                          ? "border-cyan-500/20 bg-cyan-500/10 text-cyan-400"
+                          : "border-slate-500/20 bg-slate-500/10 text-slate-400"
+                      }`}
                     >
                       <LayoutDashboard size={16} />
                     </button>
@@ -572,7 +588,10 @@ export default function CategoriesPage() {
             <tbody className="divide-y divide-white/10">
               {isLoading && (
                 <tr>
-                  <td colSpan={6} className="px-5 py-10 text-center text-slate-400">
+                  <td
+                    colSpan={6}
+                    className="px-5 py-10 text-center text-slate-400"
+                  >
                     Carregando categorias...
                   </td>
                 </tr>
@@ -581,11 +600,13 @@ export default function CategoriesPage() {
               {!isLoading &&
                 categories.map((category) => (
                   <tr key={category.id} className="hover:bg-white/[0.03]">
-                    <td className="px-5 py-4 font-medium text-white">{category.name}</td>
+                    <td className="px-5 py-4 font-medium text-white">
+                      {category.name}
+                    </td>
                     <td className="px-5 py-4">
                       <span
                         className={`rounded-full px-3 py-1 text-xs font-bold ${getTypeBadgeClass(
-                          category.type
+                          category.type,
                         )}`}
                       >
                         {category.type}
@@ -593,10 +614,11 @@ export default function CategoriesPage() {
                     </td>
                     <td className="px-5 py-4">
                       <span
-                        className={`rounded-full px-3 py-1 text-xs font-bold ${category.active
-                          ? "bg-emerald-500/10 text-emerald-300"
-                          : "bg-slate-500/10 text-slate-400"
-                          }`}
+                        className={`rounded-full px-3 py-1 text-xs font-bold ${
+                          category.active
+                            ? "bg-emerald-500/10 text-emerald-300"
+                            : "bg-slate-500/10 text-slate-400"
+                        }`}
                       >
                         {category.active ? "Ativa" : "Inativa"}
                       </span>
@@ -616,10 +638,11 @@ export default function CategoriesPage() {
                                 border
                                 transition-all duration-200
                                 hover:scale-105
-                                ${category.show_on_dashboard
-                              ? "border-cyan-500/20 bg-cyan-500/10 text-cyan-400 hover:border-cyan-400/40 hover:bg-cyan-500/20 hover:text-cyan-300"
-                              : "border-slate-500/20 bg-slate-500/10 text-slate-400 hover:border-slate-400/40 hover:bg-slate-500/20 hover:text-white"
-                            }
+                                ${
+                                  category.show_on_dashboard
+                                    ? "border-cyan-500/20 bg-cyan-500/10 text-cyan-400 hover:border-cyan-400/40 hover:bg-cyan-500/20 hover:text-cyan-300"
+                                    : "border-slate-500/20 bg-slate-500/10 text-slate-400 hover:border-slate-400/40 hover:bg-slate-500/20 hover:text-white"
+                                }
   `}
                         >
                           <LayoutDashboard size={18} />
@@ -705,7 +728,10 @@ export default function CategoriesPage() {
 
               {!isLoading && categories.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="px-5 py-10 text-center text-slate-400">
+                  <td
+                    colSpan={5}
+                    className="px-5 py-10 text-center text-slate-400"
+                  >
                     Nenhuma categoria cadastrada.
                   </td>
                 </tr>
@@ -739,31 +765,87 @@ export default function CategoriesPage() {
             <div className="space-y-4">
               <input
                 value={form.name}
-                onChange={(event) => setForm({ ...form, name: event.target.value })}
+                onChange={(event) =>
+                  setForm({ ...form, name: event.target.value })
+                }
                 placeholder="Nome"
                 className="w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none"
               />
 
-              <select
-                value={form.type}
-                onChange={(event) =>
-                  setForm({
-                    ...form,
-                    type: event.target.value as "Receita" | "Despesa" | "Transferência",
-                  })
-                }
-                className="w-full md:w-52 rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-white outline-none"
-              >
-                <option value="Receita">Receita</option>
-                <option value="Despesa">Despesa</option>
-                <option value="Transferência">Transferência</option>
-              </select>
+              <label className="block space-y-2 text-sm text-slate-300">
+                <span>Tipo</span>
 
-              <label className="space-y-2 text-sm text-slate-300">
-                <span>Função especial</span>
-                <select value={form.special_type} onChange={(event) => setForm({ ...form, special_type: event.target.value })} className="w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none">
-                  <option value="">Nenhuma</option><option value="fuel">Combustível</option><option value="vehicle_maintenance">Manutenção de veículo</option><option value="parking">Estacionamento</option><option value="toll">Pedágio</option><option value="vehicle_insurance">Seguro de veículo</option>
+                <select
+                  value={form.type}
+                  disabled={form.type === "Transferência"}
+                  onChange={(event) => {
+                    const type = event.target.value as
+                      | "Receita"
+                      | "Despesa"
+                      | "Transferência";
+
+                    setForm({
+                      ...form,
+                      type,
+                      special_type:
+                        type === "Transferência" ? "" : form.special_type,
+                    });
+                  }}
+                  className="w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none"
+                >
+                  <option value="Receita">Receita</option>
+                  <option value="Despesa">Despesa</option>
+                  <option value="Transferência">Transferência</option>
                 </select>
+              </label>
+
+              <label className="block space-y-2 text-sm text-slate-300">
+                <span>Função especial</span>
+
+                <select
+                  value={form.special_type}
+                  onChange={(event) => {
+                    const specialType = event.target.value;
+
+                    setForm({
+                      ...form,
+                      special_type: specialType,
+                      type:
+                        specialType === "poker"
+                          ? "Transferência"
+                          : specialType
+                            ? "Despesa"
+                            : form.type,
+                    });
+                  }}
+                  className="w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none"
+                >
+                  <option value="">Nenhuma</option>
+                  <option value="fuel">Combustível</option>
+                  <option value="poker">Poker</option>
+                  <option value="vehicle_maintenance">
+                    Manutenção de veículo
+                  </option>
+                  <option value="parking">Estacionamento</option>
+                  <option value="toll">Pedágio</option>
+                  <option value="vehicle_insurance">Seguro de veículo</option>
+                </select>
+
+                {form.special_type === "poker" && (
+                  <span className="block text-xs font-normal text-cyan-300">
+                    Esta categoria identificará as transferências entre contas
+                    financeiras e carteiras do Bankroll Poker. Essas
+                    movimentações não serão contabilizadas como receita ou
+                    despesa.
+                  </span>
+                )}
+
+                {form.special_type === "fuel" && (
+                  <span className="block text-xs font-normal text-cyan-300">
+                    Esta categoria será utilizada automaticamente nos
+                    lançamentos de combustível.
+                  </span>
+                )}
               </label>
 
               <input
@@ -789,11 +871,8 @@ export default function CategoriesPage() {
               />
 
               <label className="flex items-center justify-between rounded-xl border border-white/10 bg-slate-900 px-4 py-3">
-
                 <div>
-                  <p className="font-medium text-white">
-                    Mostrar no Dashboard
-                  </p>
+                  <p className="font-medium text-white">Mostrar no Dashboard</p>
 
                   <p className="text-xs text-slate-400">
                     Exibe esta categoria nos gráficos do Dashboard.
@@ -829,7 +908,9 @@ export default function CategoriesPage() {
                 <input
                   type="checkbox"
                   checked={form.active}
-                  onChange={(event) => setForm({ ...form, active: event.target.checked })}
+                  onChange={(event) =>
+                    setForm({ ...form, active: event.target.checked })
+                  }
                 />
                 Ativa
               </label>
@@ -885,20 +966,26 @@ export default function CategoriesPage() {
                         ? currentCompetenceRef
                         : null
                     }
-                    className={`grid grid-cols-1 gap-3 rounded-2xl border p-4 md:grid-cols-[1fr_220px] ${competence.name === currentCompetenceName
-                      ? "border-cyan-500/40 bg-cyan-500/10"
-                      : "border-white/10 bg-slate-900/70"
-                      }`}
+                    className={`grid grid-cols-1 gap-3 rounded-2xl border p-4 md:grid-cols-[1fr_220px] ${
+                      competence.name === currentCompetenceName
+                        ? "border-cyan-500/40 bg-cyan-500/10"
+                        : "border-white/10 bg-slate-900/70"
+                    }`}
                   >
                     <div>
-                      <p className="font-semibold text-white">{competence.name}</p>
+                      <p className="font-semibold text-white">
+                        {competence.name}
+                      </p>
                       <p className="text-xs text-slate-500">Valor planejado</p>
                     </div>
 
                     <input
                       value={planningValues[competence.id] ?? ""}
                       onChange={(event) =>
-                        handlePlanningValueChange(competence.id, event.target.value)
+                        handlePlanningValueChange(
+                          competence.id,
+                          event.target.value,
+                        )
                       }
                       type="text"
                       inputMode="numeric"
