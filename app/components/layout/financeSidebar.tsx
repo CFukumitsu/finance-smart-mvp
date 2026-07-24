@@ -48,6 +48,11 @@ const menuItems = [
     href: "/bankroll",
   },
   {
+    label: "Investimentos",
+    icon: ChartNoAxesCombined,
+    href: "/investments",
+  },
+  {
     label: "Fechamentos",
     icon: LockKeyhole,
     href: "/closings",

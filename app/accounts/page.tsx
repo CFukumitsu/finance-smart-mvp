@@ -4,12 +4,7 @@
 import { useEffect, useRef, useState } from "react";
 import AppShell from "../components/layout/AppShell";
 import { getCurrentUserId, supabase } from "@/src/lib/supabase";
-import {
-  Pencil,
-  TrendingUp,
-  Power,
-  Trash2,
-} from "lucide-react";
+import { Pencil, TrendingUp, Power, Trash2 } from "lucide-react";
 
 type Competence = {
   id: string;
@@ -25,6 +20,8 @@ type Account = {
   limit_amount: number | null;
   current_balance: number | null;
   currency: string | null;
+  show_on_finance_dashboard: boolean;
+  show_on_investments_dashboard: boolean;
   has_financial_history: boolean;
   active: boolean;
 };
@@ -37,6 +34,8 @@ const initialForm = {
   limit_amount: "",
   current_balance: "",
   currency: "BRL",
+  show_on_finance_dashboard: true,
+  show_on_investments_dashboard: false,
   active: true,
 };
 
@@ -49,12 +48,14 @@ export default function AccountsPage() {
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [editingAccountId, setEditingAccountId] = useState<string | null>(null);
   const [planningAccount, setPlanningAccount] = useState<Account | null>(null);
-  const [planningValues, setPlanningValues] = useState<Record<string, string>>({});
+  const [planningValues, setPlanningValues] = useState<Record<string, string>>(
+    {},
+  );
   const [isPlanningOpen, setIsPlanningOpen] = useState(false);
   const currentCompetenceRef = useRef<HTMLDivElement | null>(null);
   const currentDate = new Date();
   const currentCompetenceName = `${currentDate.getFullYear()}-${String(
-    currentDate.getMonth() + 1
+    currentDate.getMonth() + 1,
   ).padStart(2, "0")}`;
   const [form, setForm] = useState(initialForm);
 
@@ -66,7 +67,9 @@ export default function AccountsPage() {
     const [accountsResponse, historyResponse] = await Promise.all([
       supabase
         .from("accounts")
-        .select("id, name, type, closing_day, due_day, limit_amount, current_balance, currency, active")
+        .select(
+          "id, name, type, closing_day, due_day, limit_amount, current_balance, currency, show_on_finance_dashboard, show_on_investments_dashboard, active",
+        )
         .eq("owner_id", ownerId)
         .order("active", { ascending: false })
         .order("type", { ascending: true })
@@ -83,7 +86,10 @@ export default function AccountsPage() {
     }
 
     if (historyResponse.error) {
-      console.error("Erro ao carregar histórico monetário das contas:", historyResponse.error);
+      console.error(
+        "Erro ao carregar histórico monetário das contas:",
+        historyResponse.error,
+      );
       alert("Erro ao verificar o histórico monetário das contas.");
       setIsLoading(false);
       return;
@@ -91,14 +97,14 @@ export default function AccountsPage() {
 
     const accountsWithHistory = new Set(
       ((historyResponse.data ?? []) as { account_id: string }[]).map(
-        (item) => item.account_id
-      )
+        (item) => item.account_id,
+      ),
     );
     setAccounts(
       (data ?? []).map((account) => ({
         ...account,
         has_financial_history: accountsWithHistory.has(account.id),
-      })) as Account[]
+      })) as Account[],
     );
     setIsLoading(false);
   }
@@ -141,15 +147,19 @@ export default function AccountsPage() {
       closing_day: account.closing_day ? String(account.closing_day) : "",
       due_day: account.due_day ? String(account.due_day) : "",
       limit_amount: account.limit_amount ? String(account.limit_amount) : "",
-      current_balance: account.current_balance ? String(account.current_balance) : "",
+      current_balance: account.current_balance
+        ? String(account.current_balance)
+        : "",
       currency: account.currency ?? "",
+      show_on_finance_dashboard: account.show_on_finance_dashboard ?? true,
+      show_on_investments_dashboard:
+        account.show_on_investments_dashboard ?? false,
       active: account.active,
     });
     setIsDrawerOpen(true);
   }
 
   async function openPlanningModal(account: Account) {
-
     const ownerId = await getCurrentUserId();
     setPlanningAccount(account);
     setIsPlanningOpen(true);
@@ -192,7 +202,6 @@ export default function AccountsPage() {
   }
 
   async function savePlanning() {
-
     const ownerId = await getCurrentUserId();
     if (!planningAccount) return;
 
@@ -213,11 +222,11 @@ export default function AccountsPage() {
 
     if (error) {
       console.error("Erro ao salvar planejamento:", error);
-    
+
       alert(
-        `Erro ao salvar planejamento:\n\n${error.message}\n\n${error.details ?? ""}`
+        `Erro ao salvar planejamento:\n\n${error.message}\n\n${error.details ?? ""}`,
       );
-    
+
       return;
     }
 
@@ -230,13 +239,12 @@ export default function AccountsPage() {
   }
 
   async function saveAccount() {
-
     const ownerId = await getCurrentUserId();
     if (!form.name || !form.type || !form.currency) {
       alert(
         !form.currency
           ? "Confirme a moeda desta conta antes de salvar."
-          : "Preencha nome e tipo."
+          : "Preencha nome e tipo.",
       );
       return;
     }
@@ -250,22 +258,20 @@ export default function AccountsPage() {
       limit_amount: form.limit_amount ? Number(form.limit_amount) : 0,
       current_balance: form.current_balance ? Number(form.current_balance) : 0,
       currency: form.currency.trim().toUpperCase(),
+      show_on_finance_dashboard: form.show_on_finance_dashboard,
+      show_on_investments_dashboard: form.show_on_investments_dashboard,
       active: form.active,
       updated_at: new Date().toISOString(),
     };
     const { data: savedAccount, error } = editingAccountId
       ? await supabase
-        .from("accounts")
-        .update(payload)
-        .eq("id", editingAccountId)
-        .eq("owner_id", ownerId)
-        .select("id")
-        .single()
-      : await supabase
-        .from("accounts")
-        .insert(payload)
-        .select("id")
-        .single();
+          .from("accounts")
+          .update(payload)
+          .eq("id", editingAccountId)
+          .eq("owner_id", ownerId)
+          .select("id")
+          .single()
+      : await supabase.from("accounts").insert(payload).select("id").single();
 
     if (error) {
       console.error("Erro ao salvar conta/cartão:", error);
@@ -287,7 +293,7 @@ export default function AccountsPage() {
           },
           {
             onConflict: "owner_id,competence_id,target_type,target_id",
-          }
+          },
         );
 
       if (targetError) {
@@ -302,7 +308,6 @@ export default function AccountsPage() {
   }
 
   async function toggleActive(account: Account) {
-
     const ownerId = await getCurrentUserId();
     const { error } = await supabase
       .from("accounts")
@@ -323,21 +328,24 @@ export default function AccountsPage() {
   }
 
   async function deleteAccount(account: Account) {
-
     const ownerId = await getCurrentUserId();
     const confirmed = window.confirm(
-      `Tem certeza que deseja excluir "${account.name}"? Se já existir lançamento usando essa conta/cartão, o banco pode bloquear.`
+      `Tem certeza que deseja excluir "${account.name}"? Se já existir lançamento usando essa conta/cartão, o banco pode bloquear.`,
     );
 
     if (!confirmed) return;
 
-    const { error } = await supabase.from("accounts").delete()
+    const { error } = await supabase
+      .from("accounts")
+      .delete()
       .eq("id", account.id)
       .eq("owner_id", ownerId);
 
     if (error) {
       console.error("Erro ao excluir conta/cartão:", error);
-      alert("Não foi possível excluir. Use Inativar se já houver lançamentos vinculados.");
+      alert(
+        "Não foi possível excluir. Use Inativar se já houver lançamentos vinculados.",
+      );
       return;
     }
 
@@ -356,10 +364,7 @@ export default function AccountsPage() {
   }
 
   function parseMoneyInput(value: string) {
-    return Number(
-      value
-        .replace(/\D/g, "")
-    ) / 100;
+    return Number(value.replace(/\D/g, "")) / 100;
   }
 
   function handlePlanningValueChange(competenceId: string, value: string) {
@@ -372,10 +377,10 @@ export default function AccountsPage() {
   }
 
   const editingAccount = accounts.find(
-    (account) => account.id === editingAccountId
+    (account) => account.id === editingAccountId,
   );
   const currencyLocked = Boolean(
-    editingAccount?.currency && editingAccount.has_financial_history
+    editingAccount?.currency && editingAccount.has_financial_history,
   );
 
   return (
@@ -416,23 +421,27 @@ export default function AccountsPage() {
 
                     <div className="mt-2 flex flex-wrap gap-2">
                       <span
-                        className={`rounded-full px-3 py-1 text-xs font-bold ${account.type === "Conta"
-                          ? "bg-blue-500/10 text-blue-300"
-                          : "bg-purple-500/10 text-purple-300"
-                          }`}
+                        className={`rounded-full px-3 py-1 text-xs font-bold ${
+                          account.type === "Conta"
+                            ? "bg-blue-500/10 text-blue-300"
+                            : "bg-purple-500/10 text-purple-300"
+                        }`}
                       >
                         {account.type}
                       </span>
 
                       <span
-                        className={`rounded-full px-3 py-1 text-xs font-bold ${account.active
-                          ? "bg-emerald-500/10 text-emerald-300"
-                          : "bg-slate-500/10 text-slate-400"
-                          }`}
+                        className={`rounded-full px-3 py-1 text-xs font-bold ${
+                          account.active
+                            ? "bg-emerald-500/10 text-emerald-300"
+                            : "bg-slate-500/10 text-slate-400"
+                        }`}
                       >
                         {account.active ? "Ativa" : "Inativa"}
                       </span>
-                      <span className={`rounded-full px-3 py-1 text-xs font-bold ${account.currency ? "bg-cyan-500/10 text-cyan-300" : "bg-amber-500/10 text-amber-200"}`}>
+                      <span
+                        className={`rounded-full px-3 py-1 text-xs font-bold ${account.currency ? "bg-cyan-500/10 text-cyan-300" : "bg-amber-500/10 text-amber-200"}`}
+                      >
                         {account.currency ?? "Moeda não confirmada"}
                       </span>
                     </div>
@@ -515,7 +524,10 @@ export default function AccountsPage() {
             <tbody className="divide-y divide-white/10">
               {isLoading && (
                 <tr>
-                  <td colSpan={8} className="px-5 py-10 text-center text-slate-400">
+                  <td
+                    colSpan={8}
+                    className="px-5 py-10 text-center text-slate-400"
+                  >
                     Carregando contas/cartões...
                   </td>
                 </tr>
@@ -524,9 +536,13 @@ export default function AccountsPage() {
               {!isLoading &&
                 accounts.map((account) => (
                   <tr key={account.id} className="hover:bg-white/[0.03]">
-                    <td className="px-5 py-4 font-medium text-white">{account.name}</td>
+                    <td className="px-5 py-4 font-medium text-white">
+                      {account.name}
+                    </td>
                     <td className="px-5 py-4 text-slate-300">{account.type}</td>
-                    <td className={`px-5 py-4 ${account.currency ? "text-slate-300" : "font-semibold text-amber-200"}`}>
+                    <td
+                      className={`px-5 py-4 ${account.currency ? "text-slate-300" : "font-semibold text-amber-200"}`}
+                    >
                       {account.currency ?? "Não confirmada"}
                     </td>
                     <td className="px-5 py-4 text-slate-300">
@@ -537,10 +553,11 @@ export default function AccountsPage() {
                     </td>
                     <td className="px-5 py-4">
                       <span
-                        className={`rounded-full px-3 py-1 text-xs font-bold ${account.active
-                          ? "bg-emerald-500/10 text-emerald-300"
-                          : "bg-slate-500/10 text-slate-400"
-                          }`}
+                        className={`rounded-full px-3 py-1 text-xs font-bold ${
+                          account.active
+                            ? "bg-emerald-500/10 text-emerald-300"
+                            : "bg-slate-500/10 text-slate-400"
+                        }`}
                       >
                         {account.active ? "Ativa" : "Inativa"}
                       </span>
@@ -629,7 +646,10 @@ export default function AccountsPage() {
 
               {!isLoading && accounts.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="px-5 py-10 text-center text-slate-400">
+                  <td
+                    colSpan={6}
+                    className="px-5 py-10 text-center text-slate-400"
+                  >
                     Nenhuma conta/cartão cadastrada.
                   </td>
                 </tr>
@@ -645,7 +665,9 @@ export default function AccountsPage() {
             <div className="mb-6 flex items-center justify-between">
               <div>
                 <h2 className="text-2xl font-bold text-white">
-                  {editingAccountId ? "Editar conta/cartão" : "Nova conta/cartão"}
+                  {editingAccountId
+                    ? "Editar conta/cartão"
+                    : "Nova conta/cartão"}
                 </h2>
                 <p className="text-sm text-slate-400">
                   Configure os dados da conta ou cartão.
@@ -663,7 +685,9 @@ export default function AccountsPage() {
             <div className="space-y-4">
               <input
                 value={form.name}
-                onChange={(event) => setForm({ ...form, name: event.target.value })}
+                onChange={(event) =>
+                  setForm({ ...form, name: event.target.value })
+                }
                 placeholder="Nome"
                 className="w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none"
               />
@@ -671,7 +695,10 @@ export default function AccountsPage() {
               <select
                 value={form.type}
                 onChange={(event) =>
-                  setForm({ ...form, type: event.target.value as "Conta" | "Cartão" })
+                  setForm({
+                    ...form,
+                    type: event.target.value as "Conta" | "Cartão",
+                  })
                 }
                 className="w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none"
               >
@@ -684,7 +711,12 @@ export default function AccountsPage() {
                 <select
                   value={form.currency}
                   disabled={currencyLocked}
-                  onChange={(event) => setForm({ ...form, currency: event.target.value.toUpperCase() })}
+                  onChange={(event) =>
+                    setForm({
+                      ...form,
+                      currency: event.target.value.toUpperCase(),
+                    })
+                  }
                   className="w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none"
                 >
                   <option value="">Selecione e confirme</option>
@@ -694,19 +726,81 @@ export default function AccountsPage() {
                 </select>
                 {!form.currency && (
                   <span className="block text-xs text-amber-200">
-                    Confirme a moeda desta conta antes de utilizá-la em integrações.
+                    Confirme a moeda desta conta antes de utilizá-la em
+                    integrações.
                   </span>
                 )}
                 {currencyLocked && (
                   <span className="block text-xs text-slate-400">
-                    A moeda desta conta não pode ser alterada porque ela já possui histórico financeiro.
+                    A moeda desta conta não pode ser alterada porque ela já
+                    possui histórico financeiro.
                   </span>
                 )}
               </label>
 
+              <div className="space-y-3 rounded-2xl border border-white/10 bg-white/[0.02] p-4">
+                <div>
+                  <p className="text-sm font-semibold text-white">
+                    Exibição nos dashboards
+                  </p>
+                  <p className="mt-1 text-xs text-slate-400">
+                    Escolha livremente em quais painéis esta conta ou cartão
+                    deverá aparecer.
+                  </p>
+                </div>
+
+                <label className="flex items-start gap-3 rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-slate-300">
+                  <input
+                    type="checkbox"
+                    checked={form.show_on_finance_dashboard}
+                    onChange={(event) =>
+                      setForm({
+                        ...form,
+                        show_on_finance_dashboard: event.target.checked,
+                      })
+                    }
+                    className="mt-0.5"
+                  />
+
+                  <span>
+                    <span className="block font-semibold text-white">
+                      Mostrar no dashboard financeiro
+                    </span>
+                    <span className="mt-1 block text-xs text-slate-400">
+                      Controla a exibição no painel principal do Finance.
+                    </span>
+                  </span>
+                </label>
+
+                <label className="flex items-start gap-3 rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-slate-300">
+                  <input
+                    type="checkbox"
+                    checked={form.show_on_investments_dashboard}
+                    onChange={(event) =>
+                      setForm({
+                        ...form,
+                        show_on_investments_dashboard: event.target.checked,
+                      })
+                    }
+                    className="mt-0.5"
+                  />
+
+                  <span>
+                    <span className="block font-semibold text-white">
+                      Mostrar no dashboard de investimentos
+                    </span>
+                    <span className="mt-1 block text-xs text-slate-400">
+                      Disponibiliza esta conta para o módulo de investimentos.
+                    </span>
+                  </span>
+                </label>
+              </div>
+
               <input
                 value={form.closing_day}
-                onChange={(event) => setForm({ ...form, closing_day: event.target.value })}
+                onChange={(event) =>
+                  setForm({ ...form, closing_day: event.target.value })
+                }
                 placeholder="Dia de fechamento, se cartão"
                 type="number"
                 min={1}
@@ -716,7 +810,9 @@ export default function AccountsPage() {
 
               <input
                 value={form.due_day}
-                onChange={(event) => setForm({ ...form, due_day: event.target.value })}
+                onChange={(event) =>
+                  setForm({ ...form, due_day: event.target.value })
+                }
                 placeholder="Dia de vencimento, se cartão"
                 type="number"
                 min={1}
@@ -728,7 +824,9 @@ export default function AccountsPage() {
                 <input
                   type="checkbox"
                   checked={form.active}
-                  onChange={(event) => setForm({ ...form, active: event.target.checked })}
+                  onChange={(event) =>
+                    setForm({ ...form, active: event.target.checked })
+                  }
                 />
                 Ativa
               </label>
@@ -779,21 +877,31 @@ export default function AccountsPage() {
                 {competences.map((competence) => (
                   <div
                     key={competence.id}
-                    ref={competence.name === currentCompetenceName ? currentCompetenceRef : null}
-                    className={`grid grid-cols-1 gap-3 rounded-2xl border p-4 md:grid-cols-[1fr_220px] ${competence.name === currentCompetenceName
-                      ? "border-cyan-500/40 bg-cyan-500/10"
-                      : "border-white/10 bg-slate-900/70"
-                      }`}
+                    ref={
+                      competence.name === currentCompetenceName
+                        ? currentCompetenceRef
+                        : null
+                    }
+                    className={`grid grid-cols-1 gap-3 rounded-2xl border p-4 md:grid-cols-[1fr_220px] ${
+                      competence.name === currentCompetenceName
+                        ? "border-cyan-500/40 bg-cyan-500/10"
+                        : "border-white/10 bg-slate-900/70"
+                    }`}
                   >
                     <div>
-                      <p className="font-semibold text-white">{competence.name}</p>
+                      <p className="font-semibold text-white">
+                        {competence.name}
+                      </p>
                       <p className="text-xs text-slate-500">Valor planejado</p>
                     </div>
 
                     <input
                       value={planningValues[competence.id] ?? ""}
                       onChange={(event) =>
-                        handlePlanningValueChange(competence.id, event.target.value)
+                        handlePlanningValueChange(
+                          competence.id,
+                          event.target.value,
+                        )
                       }
                       type="text"
                       inputMode="numeric"
