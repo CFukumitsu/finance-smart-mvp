@@ -24,7 +24,6 @@ type Account = {
   limit_amount: number | null;
   current_balance: number | null;
   currency: string | null;
-  show_on_finance_dashboard: boolean;
   show_on_investments_dashboard: boolean;
   has_financial_history: boolean;
   active: boolean;
@@ -38,7 +37,6 @@ const initialForm = {
   limit_amount: "",
   current_balance: "",
   currency: "BRL",
-  show_on_finance_dashboard: true,
   show_on_investments_dashboard: false,
   active: true,
 };
@@ -74,7 +72,7 @@ export default function AccountsPage() {
         supabase
           .from("accounts")
           .select(
-            "id, name, type, closing_day, due_day, limit_amount, current_balance, currency, show_on_finance_dashboard, show_on_investments_dashboard, active",
+            "id, name, type, closing_day, due_day, limit_amount, current_balance, currency, show_on_investments_dashboard, active",
           )
           .eq("owner_id", ownerId)
           .order("active", { ascending: false })
@@ -157,7 +155,6 @@ export default function AccountsPage() {
         ? String(account.current_balance)
         : "",
       currency: account.currency ?? "",
-      show_on_finance_dashboard: account.show_on_finance_dashboard ?? true,
       show_on_investments_dashboard:
         account.show_on_investments_dashboard ?? false,
       active: account.active,
@@ -277,7 +274,6 @@ export default function AccountsPage() {
       limit_amount: form.limit_amount ? Number(form.limit_amount) : 0,
       current_balance: form.current_balance ? Number(form.current_balance) : 0,
       currency: form.currency.trim().toUpperCase(),
-      show_on_finance_dashboard: form.show_on_finance_dashboard,
       show_on_investments_dashboard: form.show_on_investments_dashboard,
       active: form.active,
       updated_at: new Date().toISOString(),
@@ -768,36 +764,13 @@ export default function AccountsPage() {
               <div className="space-y-3 rounded-2xl border border-white/10 bg-white/[0.02] p-4">
                 <div>
                   <p className="text-sm font-semibold text-white">
-                    Exibição nos dashboards
+                    Exibição no dashboard de investimentos
                   </p>
                   <p className="mt-1 text-xs text-slate-400">
-                    Escolha livremente em quais painéis esta conta ou cartão
-                    deverá aparecer.
+                    Escolha se esta conta ou cartão deverá aparecer no módulo
+                    de investimentos.
                   </p>
                 </div>
-
-                <label className="flex items-start gap-3 rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-slate-300">
-                  <input
-                    type="checkbox"
-                    checked={form.show_on_finance_dashboard}
-                    onChange={(event) =>
-                      setForm({
-                        ...form,
-                        show_on_finance_dashboard: event.target.checked,
-                      })
-                    }
-                    className="mt-0.5"
-                  />
-
-                  <span>
-                    <span className="block font-semibold text-white">
-                      Mostrar no dashboard financeiro
-                    </span>
-                    <span className="mt-1 block text-xs text-slate-400">
-                      Controla a exibição no painel principal do Finance.
-                    </span>
-                  </span>
-                </label>
 
                 <label className="flex items-start gap-3 rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-slate-300">
                   <input
