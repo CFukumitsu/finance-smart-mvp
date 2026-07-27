@@ -20,6 +20,7 @@ import {
   calculateAccountFinalBalance,
   filterTransactionsUntilDate,
 } from "@/src/utils/balanceCalculations";
+import { getCompetenceDateRange } from "@/src/utils/competence";
 
 type Account = {
   id: string;
@@ -349,15 +350,18 @@ function TransactionsPageContent() {
     setDescriptionSuggestions(uniqueSuggestions);
   }
 
-  async function loadTransactions(filters?: {
-    competenceId?: string;
-    accountId?: string;
-    type?: string;
-    status?: string;
-    categoryId?: string;
-    search?: string;
-    listMode?: "competence" | "latest";
-  }) {
+  async function loadTransactions(
+    filters?: {
+      competenceId?: string;
+      accountId?: string;
+      type?: string;
+      status?: string;
+      categoryId?: string;
+      search?: string;
+      listMode?: "competence" | "latest";
+    },
+    competenceOptions: Competence[] = competences,
+  ) {
     setIsLoading(true);
 
     const ownerId = await getCurrentUserId();
@@ -396,7 +400,27 @@ function TransactionsPageContent() {
     }
 
     if (filters?.competenceId && filters?.listMode !== "latest") {
-      query = query.eq("competence_id", filters.competenceId);
+      const selectedCompetence = competenceOptions.find(
+        (competence) => competence.id === filters.competenceId,
+      );
+
+      if (!selectedCompetence) {
+        console.error(
+          "Erro ao carregar lançamentos: competência selecionada não encontrada.",
+          filters.competenceId,
+        );
+        alert("Erro ao identificar o período da competência selecionada.");
+        setIsLoading(false);
+        return;
+      }
+
+      const range = getCompetenceDateRange(
+        selectedCompetence.year,
+        selectedCompetence.month,
+      );
+      query = query
+        .gte("due_date", range.startDate)
+        .lte("due_date", range.endDate);
     }
 
     if (filters?.accountId) {
@@ -539,14 +563,17 @@ function TransactionsPageContent() {
         competence_id: defaultCompetenceId,
       }));
 
-      await loadTransactions({
-        competenceId: defaultCompetenceId,
-        accountId: "",
-        type: "",
-        status: "",
-        search: "",
-        listMode: "competence",
-      });
+      await loadTransactions(
+        {
+          competenceId: defaultCompetenceId,
+          accountId: "",
+          type: "",
+          status: "",
+          search: "",
+          listMode: "competence",
+        },
+        competencesResponse.data as Competence[],
+      );
     }
 
     setIsLoading(false);
@@ -1257,6 +1284,10 @@ function TransactionsPageContent() {
     .reduce((sum, transaction) => sum + Number(transaction.value), 0);
 
   const totalDirectExpenses = transactions
+    .filter((transaction) => transaction.type === "Despesa")
+    .reduce((sum, transaction) => sum + Number(transaction.value), 0);
+
+  const totalCashExpenses = transactions
     .filter(
       (transaction) =>
         transaction.type === "Despesa" &&
@@ -1269,7 +1300,7 @@ function TransactionsPageContent() {
     .reduce((sum, transaction) => sum + Number(transaction.value), 0);
 
   const cashFlowResult =
-    totalIncome - totalDirectExpenses - totalInvoicePayments;
+    totalIncome - totalCashExpenses - totalInvoicePayments;
 
   const totalTransfers = transactions
     .filter((transaction) => transaction.type === "Transferência")

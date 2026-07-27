@@ -28,3 +28,13 @@ export function countCompetenceMonths(startReference: string, endReference: stri
   return (endYear - startYear) * 12 + endMonth - startMonth + 1;
 }
 
+export function getCompetenceDateRange(year: number, month: number) {
+  const competence = toCompetenceKey(
+    `${year}-${String(month).padStart(2, "0")}`,
+  );
+
+  return {
+    startDate: `${competence}-01`,
+    endDate: new Date(Date.UTC(year, month, 0)).toISOString().slice(0, 10),
+  };
+}

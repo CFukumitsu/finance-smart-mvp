@@ -11,6 +11,11 @@ import {
   TrendingUp,
   LayoutDashboard,
 } from "lucide-react";
+import {
+  getCategoryMonthlyFormValues,
+  getCategoryMonthlyPayload,
+  type CategoryFormType,
+} from "@/src/utils/categoryForm";
 
 type Competence = {
   id: string;
@@ -244,13 +249,15 @@ export default function CategoriesPage() {
 
   function openEditDrawer(category: Category) {
     setEditingCategoryId(category.id);
+    const monthlyFields = getCategoryMonthlyFormValues(
+      category.type,
+      category.monthly_limit ? String(category.monthly_limit) : "",
+      category.monthly_goal ? String(category.monthly_goal) : "",
+    );
     setForm({
       name: category.name ?? "",
       type: category.type ?? "Despesa",
-      monthly_limit: category.monthly_limit
-        ? String(category.monthly_limit)
-        : "",
-      monthly_goal: category.monthly_goal ? String(category.monthly_goal) : "",
+      ...monthlyFields,
       show_on_dashboard: category.show_on_dashboard,
       dashboard_order:
         category.dashboard_order !== null
@@ -267,6 +274,42 @@ export default function CategoriesPage() {
     setIsDrawerOpen(false);
   }
 
+  function handleCategoryTypeChange(type: CategoryFormType) {
+    setForm((current) => ({
+      ...current,
+      type,
+      special_type:
+        type === "Transferência" ? "" : current.special_type,
+      ...getCategoryMonthlyFormValues(
+        type,
+        current.monthly_limit,
+        current.monthly_goal,
+      ),
+    }));
+  }
+
+  function handleSpecialTypeChange(specialType: string) {
+    setForm((current) => {
+      const type: CategoryFormType =
+        specialType === "poker"
+          ? "Transferência"
+          : specialType
+            ? "Despesa"
+            : current.type;
+
+      return {
+        ...current,
+        special_type: specialType,
+        type,
+        ...getCategoryMonthlyFormValues(
+          type,
+          current.monthly_limit,
+          current.monthly_goal,
+        ),
+      };
+    });
+  }
+
   async function saveCategory() {
     const ownerId = await getCurrentUserId();
 
@@ -275,13 +318,17 @@ export default function CategoriesPage() {
       return;
     }
 
+    const monthlyFields = getCategoryMonthlyPayload(
+      form.type,
+      form.monthly_limit,
+      form.monthly_goal,
+    );
     const payload = {
       owner_id: ownerId,
       name: form.name.trim(),
       type: form.type,
       special_type: form.special_type || null,
-      monthly_limit: form.monthly_limit ? Number(form.monthly_limit) : 0,
-      monthly_goal: form.monthly_goal ? Number(form.monthly_goal) : 0,
+      ...monthlyFields,
       show_on_dashboard: form.show_on_dashboard,
       dashboard_order: form.dashboard_order
         ? Number(form.dashboard_order)
@@ -779,17 +826,9 @@ export default function CategoriesPage() {
                   value={form.type}
                   disabled={form.type === "Transferência"}
                   onChange={(event) => {
-                    const type = event.target.value as
-                      | "Receita"
-                      | "Despesa"
-                      | "Transferência";
-
-                    setForm({
-                      ...form,
-                      type,
-                      special_type:
-                        type === "Transferência" ? "" : form.special_type,
-                    });
+                    handleCategoryTypeChange(
+                      event.target.value as CategoryFormType,
+                    );
                   }}
                   className="w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none"
                 >
@@ -804,20 +843,9 @@ export default function CategoriesPage() {
 
                 <select
                   value={form.special_type}
-                  onChange={(event) => {
-                    const specialType = event.target.value;
-
-                    setForm({
-                      ...form,
-                      special_type: specialType,
-                      type:
-                        specialType === "poker"
-                          ? "Transferência"
-                          : specialType
-                            ? "Despesa"
-                            : form.type,
-                    });
-                  }}
+                  onChange={(event) =>
+                    handleSpecialTypeChange(event.target.value)
+                  }
                   className="w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none"
                 >
                   <option value="">Nenhuma</option>
@@ -848,27 +876,33 @@ export default function CategoriesPage() {
                 )}
               </label>
 
-              <input
-                value={form.monthly_limit}
-                onChange={(event) =>
-                  setForm({ ...form, monthly_limit: event.target.value })
-                }
-                placeholder="Limite mensal"
-                type="number"
-                step="0.01"
-                className="w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none"
-              />
+              {(form.type === "Despesa" ||
+                form.type === "Transferência") && (
+                <input
+                  value={form.monthly_limit}
+                  onChange={(event) =>
+                    setForm({ ...form, monthly_limit: event.target.value })
+                  }
+                  placeholder="Limite mensal"
+                  type="number"
+                  step="0.01"
+                  className="w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none"
+                />
+              )}
 
-              <input
-                value={form.monthly_goal}
-                onChange={(event) =>
-                  setForm({ ...form, monthly_goal: event.target.value })
-                }
-                placeholder="Meta mensal"
-                type="number"
-                step="0.01"
-                className="w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none"
-              />
+              {(form.type === "Receita" ||
+                form.type === "Transferência") && (
+                <input
+                  value={form.monthly_goal}
+                  onChange={(event) =>
+                    setForm({ ...form, monthly_goal: event.target.value })
+                  }
+                  placeholder="Meta mensal"
+                  type="number"
+                  step="0.01"
+                  className="w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none"
+                />
+              )}
 
               <label className="flex items-center justify-between rounded-xl border border-white/10 bg-slate-900 px-4 py-3">
                 <div>

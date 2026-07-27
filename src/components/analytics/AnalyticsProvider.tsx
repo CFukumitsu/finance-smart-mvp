@@ -58,7 +58,7 @@ function competenceEnd(competence: AnalyticsCompetence) {
 
 function getTrailingCompetences(competences: AnalyticsCompetence[], competenceId: string) {
   const index = competences.findIndex((item) => item.id === competenceId);
-  return index < 0 ? [] : competences.slice(index, index + 12).reverse();
+  return index < 0 ? [] : competences.slice(index, index + 3).reverse();
 }
 
 export function AnalyticsProvider({ children }: { children: React.ReactNode }) {

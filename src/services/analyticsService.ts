@@ -60,40 +60,59 @@ export async function loadAnalyticsDataset(
     return { transactions: [], financialTargets: [], openingBalance: 0 };
   }
 
-  let transactionsQuery = supabase
-    .from("transactions")
-    .select(`
-      id,
-      competence_id,
-      account_id,
-      category_id,
-      origin_account_id,
-      destination_account_id,
-      bankroll_integration_group_id,
-      bankroll_operation_type,
-      description,
-      due_date,
-      type,
-      value,
-      status,
-      account:accounts!transactions_account_id_fkey(name, type),
-      category:categories!transactions_category_id_fkey(name, type)
-    `)
-    .eq("owner_id", ownerId)
-    .in("competence_id", competenceIds)
-    .gte("due_date", filters.startDate)
-    .lte("due_date", filters.endDate);
+  const pageSize = 1000;
+  const transactions: AnalyticsTransaction[] = [];
+  let transactionsError: { message: string } | null = null;
 
-  if (filters.accountId) {
-    transactionsQuery = transactionsQuery.eq("account_id", filters.accountId);
-  }
+  for (let from = 0; ; from += pageSize) {
+    let transactionsQuery = supabase
+      .from("transactions")
+      .select(`
+        id,
+        competence_id,
+        account_id,
+        category_id,
+        origin_account_id,
+        destination_account_id,
+        bankroll_integration_group_id,
+        bankroll_operation_type,
+        description,
+        due_date,
+        type,
+        value,
+        status,
+        account:accounts!transactions_account_id_fkey(name, type),
+        category:categories!transactions_category_id_fkey(name, type)
+      `)
+      .eq("owner_id", ownerId)
+      .in("competence_id", competenceIds)
+      .gte("due_date", filters.startDate)
+      .lte("due_date", filters.endDate)
+      .order("due_date", { ascending: true })
+      .order("id", { ascending: true })
+      .range(from, from + pageSize - 1);
 
-  if (filters.categoryId) {
-    transactionsQuery = transactionsQuery.eq("category_id", filters.categoryId);
-  }
+    if (filters.accountId) {
+      transactionsQuery = transactionsQuery.eq("account_id", filters.accountId);
+    }
 
-  if (filters.status) {
-    transactionsQuery = transactionsQuery.eq("status", filters.status);
+    if (filters.categoryId) {
+      transactionsQuery = transactionsQuery.eq("category_id", filters.categoryId);
+    }
+
+    if (filters.status) {
+      transactionsQuery = transactionsQuery.eq("status", filters.status);
+    }
+
+    const pageResponse = await transactionsQuery;
+    if (pageResponse.error) {
+      transactionsError = pageResponse.error;
+      break;
+    }
+
+    const page = (pageResponse.data ?? []) as unknown as AnalyticsTransaction[];
+    transactions.push(...page);
+    if (page.length < pageSize) break;
   }
 
   let openingBalanceQuery = supabase
@@ -107,10 +126,7 @@ export async function loadAnalyticsDataset(
     openingBalanceQuery = openingBalanceQuery.eq("account_id", filters.accountId);
   }
 
-  const [transactionsResponse, openingBalanceResponse] = await Promise.all([
-    transactionsQuery,
-    openingBalanceQuery,
-  ]);
+  const openingBalanceResponse = await openingBalanceQuery;
 
   let targetsResponse: { data: unknown[] | null; error: { message: string } | null } = { data: [], error: null };
   if (selectedCompetenceIds.length === 1) {
@@ -124,11 +140,11 @@ export async function loadAnalyticsDataset(
     targetsResponse = await targetsQuery;
   }
 
-  const error = transactionsResponse.error ?? openingBalanceResponse.error ?? targetsResponse.error;
+  const error = transactionsError ?? openingBalanceResponse.error ?? targetsResponse.error;
   if (error) throw new Error(error.message);
 
   return {
-    transactions: (transactionsResponse.data ?? []) as unknown as AnalyticsTransaction[],
+    transactions,
     financialTargets: (targetsResponse.data ?? []) as AnalyticsFinancialTarget[],
     openingBalance: (openingBalanceResponse.data ?? []).reduce(
       (sum, closure) => sum + Number(closure.opening_balance ?? 0),

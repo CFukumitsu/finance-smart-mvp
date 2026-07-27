@@ -5,6 +5,10 @@ import { useEffect, useRef, useState } from "react";
 import AppShell from "../components/layout/AppShell";
 import { getCurrentUserId, supabase } from "@/src/lib/supabase";
 import { Pencil, TrendingUp, Power, Trash2 } from "lucide-react";
+import {
+  getAccountCardFields,
+  type AccountFormType,
+} from "@/src/utils/accountForm";
 
 type Competence = {
   id: string;
@@ -45,6 +49,7 @@ export default function AccountsPage() {
   const [selectedCompetenceId, setSelectedCompetenceId] = useState("");
   const [plannedValue, setPlannedValue] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [loadError, setLoadError] = useState("");
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [editingAccountId, setEditingAccountId] = useState<string | null>(null);
   const [planningAccount, setPlanningAccount] = useState<Account | null>(null);
@@ -61,52 +66,51 @@ export default function AccountsPage() {
 
   async function loadAccounts() {
     setIsLoading(true);
+    setLoadError("");
 
-    const ownerId = await getCurrentUserId();
+    try {
+      const ownerId = await getCurrentUserId();
+      const [accountsResponse, historyResponse] = await Promise.all([
+        supabase
+          .from("accounts")
+          .select(
+            "id, name, type, closing_day, due_day, limit_amount, current_balance, currency, show_on_finance_dashboard, show_on_investments_dashboard, active",
+          )
+          .eq("owner_id", ownerId)
+          .order("active", { ascending: false })
+          .order("type", { ascending: true })
+          .order("name", { ascending: true }),
+        supabase.rpc("get_account_currency_history_flags"),
+      ]);
 
-    const [accountsResponse, historyResponse] = await Promise.all([
-      supabase
-        .from("accounts")
-        .select(
-          "id, name, type, closing_day, due_day, limit_amount, current_balance, currency, show_on_finance_dashboard, show_on_investments_dashboard, active",
-        )
-        .eq("owner_id", ownerId)
-        .order("active", { ascending: false })
-        .order("type", { ascending: true })
-        .order("name", { ascending: true }),
-      supabase.rpc("get_account_currency_history_flags"),
-    ]);
-    const { data, error } = accountsResponse;
+      if (accountsResponse.error) {
+        throw new Error(accountsResponse.error.message);
+      }
 
-    if (error) {
-      console.error("Erro ao carregar contas/cartões:", error);
-      alert("Erro ao carregar contas/cartões.");
-      setIsLoading(false);
-      return;
-    }
+      if (historyResponse.error) {
+        throw new Error(historyResponse.error.message);
+      }
 
-    if (historyResponse.error) {
-      console.error(
-        "Erro ao carregar histórico monetário das contas:",
-        historyResponse.error,
+      const accountsWithHistory = new Set(
+        ((historyResponse.data ?? []) as { account_id: string }[]).map(
+          (item) => item.account_id,
+        ),
       );
-      alert("Erro ao verificar o histórico monetário das contas.");
+      setAccounts(
+        (accountsResponse.data ?? []).map((account) => ({
+          ...account,
+          has_financial_history: accountsWithHistory.has(account.id),
+        })) as Account[],
+      );
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Erro desconhecido.";
+      console.error("Erro ao carregar contas/cartões:", error);
+      setLoadError(message);
+      alert("Erro ao carregar contas/cartões.");
+    } finally {
       setIsLoading(false);
-      return;
     }
-
-    const accountsWithHistory = new Set(
-      ((historyResponse.data ?? []) as { account_id: string }[]).map(
-        (item) => item.account_id,
-      ),
-    );
-    setAccounts(
-      (data ?? []).map((account) => ({
-        ...account,
-        has_financial_history: accountsWithHistory.has(account.id),
-      })) as Account[],
-    );
-    setIsLoading(false);
   }
 
   async function loadCompetences() {
@@ -141,11 +145,13 @@ export default function AccountsPage() {
 
   function openEditDrawer(account: Account) {
     setEditingAccountId(account.id);
+    const isCard = account.type === "Cartão";
     setForm({
       name: account.name ?? "",
       type: account.type ?? "Conta",
-      closing_day: account.closing_day ? String(account.closing_day) : "",
-      due_day: account.due_day ? String(account.due_day) : "",
+      closing_day:
+        isCard && account.closing_day ? String(account.closing_day) : "",
+      due_day: isCard && account.due_day ? String(account.due_day) : "",
       limit_amount: account.limit_amount ? String(account.limit_amount) : "",
       current_balance: account.current_balance
         ? String(account.current_balance)
@@ -238,6 +244,15 @@ export default function AccountsPage() {
     setIsDrawerOpen(false);
   }
 
+  function handleAccountTypeChange(type: AccountFormType) {
+    setForm((current) => ({
+      ...current,
+      type,
+      closing_day: type === "Conta" ? "" : current.closing_day,
+      due_day: type === "Conta" ? "" : current.due_day,
+    }));
+  }
+
   async function saveAccount() {
     const ownerId = await getCurrentUserId();
     if (!form.name || !form.type || !form.currency) {
@@ -249,12 +264,16 @@ export default function AccountsPage() {
       return;
     }
 
+    const cardFields = getAccountCardFields(
+      form.type,
+      form.closing_day,
+      form.due_day,
+    );
     const payload = {
       owner_id: ownerId,
       name: form.name.trim(),
       type: form.type,
-      closing_day: form.closing_day ? Number(form.closing_day) : null,
-      due_day: form.due_day ? Number(form.due_day) : null,
+      ...cardFields,
       limit_amount: form.limit_amount ? Number(form.limit_amount) : 0,
       current_balance: form.current_balance ? Number(form.current_balance) : 0,
       currency: form.currency.trim().toUpperCase(),
@@ -401,6 +420,15 @@ export default function AccountsPage() {
             Nova conta/cartão
           </button>
         </div>
+
+        {loadError && !isLoading && (
+          <div
+            role="alert"
+            className="rounded-2xl border border-red-500/20 bg-red-500/10 p-4 text-sm text-red-200"
+          >
+            Não foi possível carregar contas/cartões: {loadError}
+          </div>
+        )}
 
         <div className="grid gap-3 md:hidden">
           {isLoading && (
@@ -695,10 +723,9 @@ export default function AccountsPage() {
               <select
                 value={form.type}
                 onChange={(event) =>
-                  setForm({
-                    ...form,
-                    type: event.target.value as "Conta" | "Cartão",
-                  })
+                  handleAccountTypeChange(
+                    event.target.value as AccountFormType,
+                  )
                 }
                 className="w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none"
               >
@@ -796,29 +823,33 @@ export default function AccountsPage() {
                 </label>
               </div>
 
-              <input
-                value={form.closing_day}
-                onChange={(event) =>
-                  setForm({ ...form, closing_day: event.target.value })
-                }
-                placeholder="Dia de fechamento, se cartão"
-                type="number"
-                min={1}
-                max={31}
-                className="w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none"
-              />
+              {form.type === "Cartão" && (
+                <>
+                  <input
+                    value={form.closing_day}
+                    onChange={(event) =>
+                      setForm({ ...form, closing_day: event.target.value })
+                    }
+                    placeholder="Dia de fechamento, se cartão"
+                    type="number"
+                    min={1}
+                    max={31}
+                    className="w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none"
+                  />
 
-              <input
-                value={form.due_day}
-                onChange={(event) =>
-                  setForm({ ...form, due_day: event.target.value })
-                }
-                placeholder="Dia de vencimento, se cartão"
-                type="number"
-                min={1}
-                max={31}
-                className="w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none"
-              />
+                  <input
+                    value={form.due_day}
+                    onChange={(event) =>
+                      setForm({ ...form, due_day: event.target.value })
+                    }
+                    placeholder="Dia de vencimento, se cartão"
+                    type="number"
+                    min={1}
+                    max={31}
+                    className="w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none"
+                  />
+                </>
+              )}
 
               <label className="flex items-center gap-3 rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-slate-300">
                 <input

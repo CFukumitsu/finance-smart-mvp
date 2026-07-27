@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 // @ts-expect-error Node's native TypeScript test runner requires the extension.
-import { addMonthsToCompetence, countCompetenceMonths, toCompetenceKey } from "./competence.ts";
+import { addMonthsToCompetence, countCompetenceMonths, getCompetenceDateRange, toCompetenceKey } from "./competence.ts";
 
 test("normaliza datas e chaves de competência", () => {
   assert.equal(toCompetenceKey("2026-07-15"), "2026-07");
@@ -17,7 +17,17 @@ test("conta intervalos de forma inclusiva", () => {
   assert.equal(countCompetenceMonths("2026-07", "2026-07"), 1);
 });
 
+test("resolve o intervalo civil completo da competência", () => {
+  assert.deepEqual(getCompetenceDateRange(2026, 7), {
+    startDate: "2026-07-01",
+    endDate: "2026-07-31",
+  });
+  assert.deepEqual(getCompetenceDateRange(2024, 2), {
+    startDate: "2024-02-01",
+    endDate: "2024-02-29",
+  });
+});
+
 test("rejeita meses inválidos", () => {
   assert.throws(() => toCompetenceKey("2026-13"), /inválida/);
 });
-
