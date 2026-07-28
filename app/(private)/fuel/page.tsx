@@ -7,7 +7,9 @@ import {
   ChartNoAxesCombined,
   Fuel,
   Gauge,
+  LayoutDashboard,
   MapPin,
+  PlusCircle,
 } from "lucide-react";
 import AppShell from "../../components/layout/AppShell";
 import { loadFuelRecords } from "@/src/services/fuelService";
@@ -42,6 +44,45 @@ const moduleItems = [
   },
 ];
 
+const mobileModuleItems = [
+  {
+    title: "Visão Geral",
+    description: "Resumo de consumo, custos e abastecimentos.",
+    href: "/fuel",
+    icon: LayoutDashboard,
+  },
+  {
+    title: "Novo abastecimento",
+    description: "Registre um novo abastecimento.",
+    href: "/transactions?new=fuel",
+    icon: PlusCircle,
+  },
+  {
+    title: "Histórico",
+    description: "Consulte os abastecimentos realizados.",
+    href: "/fuel/records",
+    icon: Gauge,
+  },
+  {
+    title: "Veículos",
+    description: "Gerencie os veículos utilizados.",
+    href: "/vehicles",
+    icon: Car,
+  },
+  {
+    title: "Postos",
+    description: "Consulte e gerencie os postos cadastrados.",
+    href: "/fuel/stations",
+    icon: MapPin,
+  },
+  {
+    title: "Análises",
+    description: "Acompanhe consumo, custos e evolução.",
+    href: "/fuel/analytics",
+    icon: ChartNoAxesCombined,
+  },
+];
+
 export default function FuelPage() {
   const [records,setRecords]=useState<FuelRecord[]>([]); const [defaultVehicle,setDefaultVehicle]=useState("Nenhum veículo padrão");
   useEffect(()=>{loadFuelRecords().then(setRecords).catch(console.error);getCurrentUserId().then(owner=>supabase.from("vehicles").select("name").eq("owner_id",owner).eq("active",true).eq("is_default",true).maybeSingle()).then(({data})=>{if(data?.name)setDefaultVehicle(data.name)}).catch(console.error)},[]);
@@ -66,11 +107,41 @@ export default function FuelPage() {
           </div>
         </div>
 
+        <nav
+          className="grid grid-cols-1 gap-3 min-[420px]:grid-cols-2 md:hidden"
+          aria-label="Navegação da Gestão de Combustível"
+        >
+          {mobileModuleItems.map((item) => {
+            const Icon = item.icon;
+
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                className="fuel-mobile-nav-card rounded-2xl border border-white/10 bg-slate-950/60 p-4 transition active:scale-[0.98]"
+              >
+                <div className="flex items-start gap-3">
+                  <div className="rounded-xl bg-amber-500/10 p-2.5 text-amber-300">
+                    <Icon size={21} />
+                  </div>
+
+                  <div className="min-w-0">
+                    <h2 className="font-bold text-white">{item.title}</h2>
+                    <p className="mt-1 text-sm leading-5 text-slate-400">
+                      {item.description}
+                    </p>
+                  </div>
+                </div>
+              </Link>
+            );
+          })}
+        </nav>
+
         <div className="grid gap-3 md:grid-cols-3">{summary.map(([label,value])=><div key={label} className="rounded-2xl border border-white/10 bg-slate-900/60 p-4"><p className="text-sm text-slate-400">{label}</p><p className="mt-1 text-xl font-bold text-white">{value}</p></div>)}</div>
 
-        <Link href="/transactions?new=fuel" className="inline-flex rounded-xl bg-amber-500 px-5 py-3 font-semibold text-slate-950">Novo abastecimento</Link>
+        <Link href="/transactions?new=fuel" className="hidden rounded-xl bg-amber-500 px-5 py-3 font-semibold text-slate-950 md:inline-flex">Novo abastecimento</Link>
 
-        <div className="grid gap-4 md:grid-cols-2">
+        <div className="hidden gap-4 md:grid md:grid-cols-2">
           {moduleItems.map((item) => {
             const Icon = item.icon;
 

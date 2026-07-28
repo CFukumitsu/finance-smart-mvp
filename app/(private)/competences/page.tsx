@@ -214,7 +214,7 @@ export default function CompetencesPage() {
           ) : filteredCompetences.length === 0 ? (
             <p className="p-6 text-center text-slate-400">Nenhuma competência encontrada.</p>
           ) : (
-            <div className="divide-y divide-white/10">
+            <div className="finance-list-compact divide-y divide-white/10">
               {filteredCompetences.map((competence) => {
                 const isClosed = closedIds.has(competence.id);
                 return (

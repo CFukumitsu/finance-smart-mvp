@@ -2,7 +2,7 @@
 /* eslint-disable react-hooks/set-state-in-effect -- Legacy page synchronizes filters and Supabase data through effects. */
 
 import { Suspense, useEffect, useState } from "react";
-import { ChevronLeft, ChevronRight, SlidersHorizontal } from "lucide-react";
+import { ChevronLeft, ChevronRight, Rows3, Search, SlidersHorizontal, X } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import AppShell from "../components/layout/AppShell";
 import { getCurrentUserId, supabase } from "@/src/lib/supabase";
@@ -99,6 +99,7 @@ function TransactionsPageContent() {
   const [categoryFilter, setCategoryFilter] = useState("");
   const [listMode, setListMode] = useState<"competence" | "latest">("competence");
   const [showFilters, setShowFilters] = useState(false);
+  const [density, setDensity] = useState<"compact" | "comfortable">("compact");
   const [plannedCardLimit, setPlannedCardLimit] = useState(0);
   const [accountClosures, setAccountClosures] = useState<AccountClosure[]>([]);
 
@@ -582,6 +583,26 @@ function TransactionsPageContent() {
   useEffect(() => {
     loadReferenceData();
   }, []);
+
+  useEffect(() => {
+    const storedDensity = localStorage.getItem("finance-smart-transactions-density");
+    if (storedDensity === "compact" || storedDensity === "comfortable") {
+      setDensity(storedDensity);
+    }
+  }, []);
+
+  useEffect(() => {
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key !== "Escape") return;
+      if (showFilters) {
+        setShowFilters(false);
+        return;
+      }
+      if (isDrawerOpen) closeDrawer();
+    }
+    document.addEventListener("keydown", closeOnEscape);
+    return () => document.removeEventListener("keydown", closeOnEscape);
+  }, [showFilters, isDrawerOpen]);
 
   useEffect(() => {
     if (searchParams.get("new") === "true" || searchParams.get("new") === "fuel") {
@@ -1325,13 +1346,32 @@ function TransactionsPageContent() {
       ? cardLimit - cardUsedLimit
       : 0;
 
+  const advancedFilterCount =
+    Number(listMode !== "competence") +
+    Number(Boolean(categoryFilter)) +
+    Number(Boolean(typeFilter)) +
+    Number(Boolean(statusFilter));
+
+  function clearAdvancedFilters() {
+    setListMode("competence");
+    setCategoryFilter("");
+    setTypeFilter("");
+    setStatusFilter("");
+  }
+
+  function toggleDensity() {
+    const nextDensity = density === "compact" ? "comfortable" : "compact";
+    setDensity(nextDensity);
+    localStorage.setItem("finance-smart-transactions-density", nextDensity);
+  }
+
   return (
     <AppShell>
-      <div className="space-y-6">
-        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+      <div className={`transactions-page transactions-density-${density} space-y-3`}>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h1 className="text-3xl font-bold text-white">Lançamentos</h1>
-            <p className="mt-1 text-sm text-slate-400">
+            <h1 className="theme-text text-2xl font-bold">Lançamentos</h1>
+            <p className="theme-muted text-sm">
               Gestão completa dos lançamentos financeiros.
             </p>
           </div>
@@ -1341,26 +1381,25 @@ function TransactionsPageContent() {
               resetForm();
               setIsDrawerOpen(true);
             }}
-            className="w-full rounded-xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white hover:bg-blue-500 md:w-auto"
+            className="w-full rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-500 sm:w-auto"
           >
             Novo lançamento
           </button>
         </div>
 
-        <div className="space-y-3">
-          <div className="w-full">
-            <div className="w-full rounded-xl border border-white/10 bg-slate-900 p-2">
-              <div className="flex items-center justify-between gap-2">
+        <div className="transactions-surface w-full rounded-xl border p-1.5">
+              <div className="flex min-w-0 items-center gap-1">
                 <button
                   type="button"
                   onClick={goToPreviousCompetence}
-                  className="flex h-9 w-9 items-center justify-center rounded-lg text-slate-400 hover:bg-white/10 hover:text-white"
+                  className="theme-muted theme-hover flex h-8 w-8 shrink-0 items-center justify-center rounded-lg"
                   title="Competência anterior"
+                  aria-label="Competência anterior"
                 >
                   <ChevronLeft size={18} />
                 </button>
 
-                <div className="flex min-w-0 flex-1 items-center justify-center gap-2 overflow-hidden">
+                <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto sm:justify-center">
                   {getVisibleMonthDates().map((date) => {
                     const foundCompetence = getCompetenceByDate(date);
                     const isSelected =
@@ -1377,12 +1416,12 @@ function TransactionsPageContent() {
                         type="button"
                         disabled={!foundCompetence}
                         onClick={() => selectCompetenceByDate(date)}
-                        className={`shrink-0 whitespace-nowrap rounded-full px-5 py-2 text-xs font-semibold transition ${isSelected
+                        className={`shrink-0 whitespace-nowrap rounded-lg px-3 py-1.5 text-xs font-semibold transition ${isSelected
                           ? "bg-blue-600 text-white"
                           : isCurrentMonth
                             ? "bg-cyan-500/10 text-cyan-300"
                             : foundCompetence
-                              ? "bg-white/[0.03] text-slate-400 hover:bg-white/10 hover:text-white"
+                              ? "theme-muted theme-hover"
                               : "cursor-not-allowed bg-white/[0.02] text-slate-700"
                           }`}
                       >
@@ -1395,48 +1434,25 @@ function TransactionsPageContent() {
                 <button
                   type="button"
                   onClick={goToNextCompetence}
-                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-slate-400 hover:bg-white/10 hover:text-white"
+                  className="theme-muted theme-hover flex h-8 w-8 shrink-0 items-center justify-center rounded-lg"
                   title="Próxima competência"
+                  aria-label="Próxima competência"
                 >
                   <ChevronRight size={18} />
                 </button>
-              </div>
-
               <button
                 type="button"
                 onClick={goToCurrentCompetence}
-                className="mt-2 w-full rounded-lg py-1 text-xs font-medium text-slate-400 hover:bg-white/10 hover:text-white"
+                className="theme-muted theme-hover shrink-0 rounded-lg px-3 py-1.5 text-xs font-semibold"
               >
-                Voltar para mês atual
+                Hoje
               </button>
-            </div>
-          </div>
-          <div className="grid gap-3 md:grid-cols-6">
-            <select
-              value={listMode}
-              onChange={(event) =>
-                setListMode(event.target.value as "competence" | "latest")
-              }
-              className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-white outline-none"
-            >
-              <option value="competence">Por data do lançamento</option>
-              <option value="latest">Últimos 20 cadastrados</option>
-            </select>
-
-            <select
-              value={accountFilter}
-              onChange={(event) => setAccountFilter(event.target.value)}
-              className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-white outline-none"
-            >
-              <option value="">Todas as contas</option>
-
-              {accounts.map((account) => (
-                <option key={account.id} value={account.id}>
-                  {account.name}
-                </option>
-              ))}
-            </select>
-
+              </div>
+        </div>
+        <div className="grid gap-2 sm:grid-cols-[minmax(220px,1fr)_minmax(210px,280px)_auto_auto]">
+          <label className="relative">
+            <span className="sr-only">Buscar lançamento</span>
+            <Search className="theme-muted pointer-events-none absolute left-3 top-1/2 -translate-y-1/2" size={16} />
             <input
               value={searchTerm}
               onChange={(event) => setSearchTerm(event.target.value)}
@@ -1453,61 +1469,51 @@ function TransactionsPageContent() {
                   });
                 }
               }}
-              placeholder="Buscar por descrição..."
-              className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-white outline-none"
+              placeholder="Buscar lançamento..."
+              className="theme-field h-10 w-full rounded-xl border py-2 pl-9 pr-3 text-sm outline-none"
             />
+          </label>
 
-            <button
-              type="button"
-              onClick={() => setShowFilters(!showFilters)}
-              className="flex items-center justify-center gap-2 rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm font-semibold text-white hover:bg-white/10 md:hidden"
-            >
-              <SlidersHorizontal size={16} />
-              Filtros
-            </button>
+          <select
+            aria-label="Conta ou cartão"
+            value={accountFilter}
+            onChange={(event) => setAccountFilter(event.target.value)}
+            className="theme-field h-10 min-w-0 rounded-xl border px-3 text-sm outline-none"
+          >
+            <option value="">Todas as contas</option>
+            {accounts.map((account) => (
+              <option key={account.id} value={account.id}>{account.name}</option>
+            ))}
+          </select>
 
-            <div className={`${showFilters ? "grid" : "hidden"} gap-3 md:contents`}>
-              <select
-                value={categoryFilter}
-                onChange={(event) => setCategoryFilter(event.target.value)}
-                className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-white outline-none"
-              >
-                <option value="">Todas as categorias</option>
+          <button
+            type="button"
+            onClick={() => setShowFilters(true)}
+            aria-expanded={showFilters}
+            className="theme-field theme-hover flex h-10 items-center justify-center gap-2 rounded-xl border px-3 text-sm font-semibold"
+          >
+            <SlidersHorizontal size={16} />
+            Mais filtros
+            {advancedFilterCount > 0 && (
+              <span className="rounded-full bg-blue-600 px-1.5 py-0.5 text-[11px] leading-none text-white">
+                {advancedFilterCount}
+              </span>
+            )}
+          </button>
 
-                {categories.map((category) => (
-                  <option key={category.id} value={category.id}>
-                    {category.name}
-                  </option>
-                ))}
-              </select>
-
-              <select
-                value={typeFilter}
-                onChange={(event) => setTypeFilter(event.target.value)}
-                className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-white outline-none"
-              >
-                <option value="">Todos os tipos</option>
-                <option value="Despesa">Despesa</option>
-                <option value="Receita">Receita</option>
-                <option value="Transferência">Transferência</option>
-                <option value="Pagamento de Fatura">Pagamento de Fatura</option>
-              </select>
-
-              <select
-                value={statusFilter}
-                onChange={(event) => setStatusFilter(event.target.value)}
-                className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-white outline-none"
-              >
-                <option value="">Todos os status</option>
-                <option value="Pendente">Pendente</option>
-                <option value="Pago">Pago</option>
-                <option value="Recebido">Recebido</option>
-              </select>
-            </div>
-          </div>
+          <button
+            type="button"
+            onClick={toggleDensity}
+            aria-pressed={density === "compact"}
+            className="theme-field theme-hover flex h-10 items-center justify-center gap-2 rounded-xl border px-3 text-sm font-semibold"
+            title={`Modo atual: ${density === "compact" ? "Compacto" : "Confortável"}`}
+          >
+            <Rows3 size={16} />
+            <span className="sm:hidden lg:inline">{density === "compact" ? "Compacto" : "Confortável"}</span>
+          </button>
         </div>
 
-        <div className="grid gap-4 md:grid-cols-4">
+        <div className="transactions-summary grid gap-2 sm:grid-cols-2 md:grid-cols-4">
           {!selectedAccount && (
             <>
               <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-5">
@@ -1627,9 +1633,9 @@ function TransactionsPageContent() {
           )}
         </div>
 
-        <div className="w-full overflow-x-auto rounded-2xl border border-white/10 bg-slate-950/60">
-          <table className="min-w-[520px] w-full table-fixed text-left text-sm md:min-w-[1040px]">
-            <thead className="sticky top-0 z-10 bg-slate-900 text-slate-300">
+        <div className="transactions-surface w-full overflow-x-auto rounded-xl border">
+          <table className="transactions-table min-w-[620px] w-full table-fixed text-left text-sm md:min-w-[1040px]">
+            <thead className="sticky top-0 z-10">
               <tr>
                 <th className="w-[70px] px-3 py-4 md:w-[110px] md:px-4">Data</th>
                 <th className="px-3 py-4 md:px-4">Descrição</th>
@@ -1640,7 +1646,7 @@ function TransactionsPageContent() {
               </tr>
             </thead>
 
-            <tbody className="divide-y divide-white/10">
+            <tbody className="divide-y">
               {isLoading && (
                 <tr>
                   <td colSpan={6} className="px-5 py-10 text-center text-slate-400">
@@ -1651,7 +1657,7 @@ function TransactionsPageContent() {
 
               {!isLoading &&
                 transactions.map((transaction, index) => (
-                  <tr key={`${transaction.id}-${index}`} className="hover:bg-white/[0.03]">
+                  <tr key={`${transaction.id}-${index}`}>
 
                     <td className="w-[70px] px-3 py-4 text-slate-300 md:w-[110px] md:px-4">
                       <span className="md:hidden">{formatShortDate(transaction.due_date)}</span>
@@ -1659,7 +1665,7 @@ function TransactionsPageContent() {
                     </td>
 
                     <td className="min-w-0 px-3 py-4 md:px-4">
-                      <div className="font-medium text-white">
+                      <div className="transaction-description theme-text truncate font-medium" title={transaction.description}>
                         {transaction.description}
                       </div>
 
@@ -1743,9 +1749,119 @@ function TransactionsPageContent() {
         </div>
       </div>
 
+      {showFilters && (
+        <div
+          className="transactions-page transactions-overlay fixed inset-0 z-50 flex justify-end"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) setShowFilters(false);
+          }}
+        >
+          <aside
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="advanced-filters-title"
+            className="transactions-drawer h-full w-full max-w-md overflow-y-auto border-l p-5 shadow-2xl"
+          >
+            <div className="mb-5 flex items-center justify-between gap-3">
+              <div>
+                <h2 id="advanced-filters-title" className="theme-text text-xl font-bold">Mais filtros</h2>
+                <p className="theme-muted text-sm">Combine os critérios sem perder suas seleções.</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowFilters(false)}
+                className="theme-muted theme-hover flex h-10 w-10 items-center justify-center rounded-xl"
+                aria-label="Fechar filtros"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <label className="block">
+                <span className="theme-muted-strong mb-1.5 block text-sm font-semibold">Ordenação</span>
+                <select
+                  value={listMode}
+                  onChange={(event) => setListMode(event.target.value as "competence" | "latest")}
+                  className="theme-field w-full rounded-xl border px-4 py-3 text-sm outline-none"
+                >
+                  <option value="competence">Por data do lançamento</option>
+                  <option value="latest">Últimos 20 cadastrados</option>
+                </select>
+              </label>
+
+              <label className="block">
+                <span className="theme-muted-strong mb-1.5 block text-sm font-semibold">Categoria</span>
+                <select
+                  value={categoryFilter}
+                  onChange={(event) => setCategoryFilter(event.target.value)}
+                  className="theme-field w-full rounded-xl border px-4 py-3 text-sm outline-none"
+                >
+                  <option value="">Todas as categorias</option>
+                  {categories.map((category) => (
+                    <option key={category.id} value={category.id}>{category.name}</option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="block">
+                <span className="theme-muted-strong mb-1.5 block text-sm font-semibold">Tipo</span>
+                <select
+                  value={typeFilter}
+                  onChange={(event) => setTypeFilter(event.target.value)}
+                  className="theme-field w-full rounded-xl border px-4 py-3 text-sm outline-none"
+                >
+                  <option value="">Todos os tipos</option>
+                  <option value="Despesa">Despesa</option>
+                  <option value="Receita">Receita</option>
+                  <option value="Transferência">Transferência</option>
+                  <option value="Pagamento de Fatura">Pagamento de Fatura</option>
+                </select>
+              </label>
+
+              <label className="block">
+                <span className="theme-muted-strong mb-1.5 block text-sm font-semibold">Status</span>
+                <select
+                  value={statusFilter}
+                  onChange={(event) => setStatusFilter(event.target.value)}
+                  className="theme-field w-full rounded-xl border px-4 py-3 text-sm outline-none"
+                >
+                  <option value="">Todos os status</option>
+                  <option value="Pendente">Pendente</option>
+                  <option value="Pago">Pago</option>
+                  <option value="Recebido">Recebido</option>
+                </select>
+              </label>
+            </div>
+
+            <div className="mt-6 flex gap-3">
+              <button
+                type="button"
+                onClick={clearAdvancedFilters}
+                className="theme-field theme-hover w-full rounded-xl border px-4 py-2.5 text-sm font-semibold"
+              >
+                Limpar filtros
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowFilters(false)}
+                className="w-full rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-500"
+              >
+                Concluir
+              </button>
+            </div>
+          </aside>
+        </div>
+      )}
+
       {isDrawerOpen && (
-        <div className="fixed inset-0 z-50 flex justify-end bg-black/60">
-          <div className="h-full w-full max-w-xl overflow-y-auto border-l border-white/10 bg-slate-950 p-6 shadow-2xl">
+        <div
+          className="transactions-page transactions-overlay fixed inset-0 z-50 flex justify-end"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) closeDrawer();
+          }}
+        >
+          <div role="dialog" aria-modal="true" className="transactions-drawer h-full w-full max-w-xl overflow-y-auto border-l p-6 shadow-2xl">
             <div className="mb-6 flex items-center justify-between">
               <div>
                 <h2 className="text-2xl font-bold text-white">

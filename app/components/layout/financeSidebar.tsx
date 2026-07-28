@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import {
   LayoutDashboard,
   ListChecks,
@@ -117,6 +117,7 @@ export default function FinanceSidebar({
   onNavigate,
 }: FinanceSidebarProps) {
   const pathname = usePathname();
+  const router = useRouter();
 
   const [isPinned, setIsPinned] = useState(false);
   const [isHovering, setIsHovering] = useState(false);
@@ -131,6 +132,12 @@ export default function FinanceSidebar({
   const isFuelMenuExpanded = isFuelRoute || isFuelMenuOpen;
 
   function handleFuelMenuClick() {
+    if (forceExpanded) {
+      router.push("/fuel");
+      onNavigate?.();
+      return;
+    }
+
     if (!isExpanded) {
       setIsHovering(true);
       setIsFuelMenuOpen(true);
@@ -144,7 +151,7 @@ export default function FinanceSidebar({
     <aside
       onMouseEnter={() => setIsHovering(true)}
       onMouseLeave={() => setIsHovering(false)}
-      className={`h-screen shrink-0 border-r border-white/10 bg-slate-950/95 px-3 py-4 shadow-2xl shadow-black/30 transition-all duration-200 ${
+      className={`app-sidebar h-screen shrink-0 border-r px-3 py-4 transition-all duration-200 ${
         isExpanded ? "w-72" : "w-20"
       }`}
     >
@@ -188,7 +195,7 @@ export default function FinanceSidebar({
           )}
         </div>
 
-        <nav className="flex-1 space-y-1 overflow-visible">
+        <nav className="min-h-0 flex-1 space-y-1 overflow-x-hidden overflow-y-auto">
           {menuItems.map((item) => {
             const isActive =
               item.href === "/"

@@ -1,8 +1,18 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  color-scheme: dark;
+  --background: #020617;
+  --foreground: #f8fafc;
+  --surface: #0f172a;
+  --surface-subtle: #111c31;
+  --surface-hover: #17233a;
+  --border: #253249;
+  --muted: #94a3b8;
+  --muted-strong: #cbd5e1;
+  --field: #0f172a;
+  --overlay: rgba(2, 6, 23, 0.72);
+  --shadow: rgba(0, 0, 0, 0.45);
 }
 
 @theme inline {
@@ -12,17 +22,657 @@
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+[data-theme="light"] {
+  color-scheme: light;
+  --background: #f4f7fb;
+  --foreground: #0f172a;
+  --surface: #ffffff;
+  --surface-subtle: #f8fafc;
+  --surface-muted: #f1f5f9;
+  --surface-hover: #f8fafc;
+  --surface-selected: #eff6ff;
+  --border: #e2e8f0;
+  --border-strong: #cbd5e1;
+  --text-primary: #0f172a;
+  --text-secondary: #475569;
+  --text-muted: #64748b;
+  --text-placeholder: #94a3b8;
+  --muted: #64748b;
+  --muted-strong: #334155;
+  --field: #ffffff;
+  --primary: #2563eb;
+  --success: #059669;
+  --danger: #dc2626;
+  --warning: #d97706;
+  --info: #0891b2;
+  --chart-grid: #e2e8f0;
+  --chart-axis: #64748b;
+  --chart-tooltip-bg: #ffffff;
+  --chart-tooltip-text: #0f172a;
+  --overlay: rgba(15, 23, 42, 0.35);
+  --shadow: rgba(15, 23, 42, 0.04);
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
+}
+
+.app-shell {
+  background: var(--background);
+  color: var(--foreground);
+}
+
+.app-header,
+.app-sidebar,
+.app-mobile-button,
+.user-menu-trigger,
+.user-menu-panel,
+.transactions-surface,
+.transactions-drawer {
+  background: var(--surface);
+  border-color: var(--border);
+  color: var(--foreground);
+}
+
+.app-header {
+  background: color-mix(in srgb, var(--background) 88%, transparent);
+}
+
+.app-sidebar {
+  background: color-mix(in srgb, var(--background) 96%, transparent);
+  box-shadow: 0 20px 40px var(--shadow);
+}
+
+.user-menu-trigger:hover,
+.user-menu-item:hover {
+  background: var(--surface-hover);
+}
+
+.transactions-page {
+  color: var(--foreground);
+}
+
+.transactions-page .theme-text {
+  color: var(--foreground);
+}
+
+.transactions-page .theme-muted {
+  color: var(--muted);
+}
+
+.transactions-page .theme-muted-strong {
+  color: var(--muted-strong);
+}
+
+.transactions-page .theme-field {
+  border-color: var(--border);
+  background: var(--field);
+  color: var(--foreground);
+}
+
+.transactions-page .theme-field::placeholder {
+  color: var(--muted);
+}
+
+.transactions-page .theme-field:focus {
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 3px rgb(59 130 246 / 0.14);
+}
+
+.transactions-page .theme-hover:hover {
+  background: var(--surface-hover);
+  color: var(--foreground);
+}
+
+.transactions-page .theme-divider {
+  border-color: var(--border);
+}
+
+.transactions-page [class~="bg-slate-950/60"],
+.transactions-page [class~="bg-slate-950"],
+.transactions-page [class~="bg-slate-900"] {
+  background: var(--surface);
+}
+
+.transactions-page [class~="border-white/10"] {
+  border-color: var(--border);
+}
+
+[data-theme="light"] .transactions-page [class~="text-white"] {
+  color: var(--foreground);
+}
+
+.transactions-page [class~="text-slate-300"] {
+  color: var(--muted-strong);
+}
+
+.transactions-page [class~="text-slate-400"] {
+  color: var(--muted);
+}
+
+.transactions-page .transactions-table tbody {
+  border-color: var(--border);
+}
+
+.transactions-page .transactions-table tbody tr:hover {
+  background: var(--surface-hover);
+}
+
+.transactions-page .transactions-table thead {
+  background: var(--surface-subtle);
+  color: var(--muted-strong);
+}
+
+.transactions-summary > div {
+  min-height: 76px;
+  padding: 0.875rem 1rem;
+  border-color: var(--border);
+  background: var(--surface);
+}
+
+.transactions-summary > div p + p {
+  margin-top: 0.25rem;
+  font-size: 1.25rem;
+  line-height: 1.5rem;
+}
+
+.transactions-density-compact .transactions-table th {
+  padding-top: 0.55rem;
+  padding-bottom: 0.55rem;
+}
+
+.transactions-density-compact .transactions-table td {
+  padding-top: 0.4rem;
+  padding-bottom: 0.4rem;
+}
+
+.transactions-density-compact .transactions-table td [class~="rounded-full"] {
+  padding: 0.1rem 0.45rem;
+  font-size: 0.675rem;
+  line-height: 1rem;
+}
+
+.transactions-density-comfortable .transactions-table th {
+  padding-top: 0.75rem;
+  padding-bottom: 0.75rem;
+}
+
+.transactions-density-comfortable .transactions-table td {
+  padding-top: 0.75rem;
+  padding-bottom: 0.75rem;
+}
+
+.transactions-overlay {
+  background: var(--overlay);
+}
+
+[data-theme="light"] .app-header .text-white,
+[data-theme="light"] .user-menu-trigger .text-white,
+[data-theme="light"] .user-menu-panel .text-slate-200 {
+  color: var(--foreground);
+}
+
+[data-theme="light"] .app-header .text-slate-400,
+[data-theme="light"] .user-menu-trigger .text-slate-400 {
+  color: var(--muted);
+}
+
+[data-theme="light"] .user-menu-panel .text-slate-400 {
+  color: var(--muted);
+}
+
+[data-theme="light"] .user-menu-panel [class~="border-white/10"] {
+  border-color: var(--border);
+}
+
+[data-theme="light"] .user-menu-panel button:not([aria-pressed="true"]):hover,
+[data-theme="light"] .app-header button:hover {
+  color: var(--foreground);
+}
+
+[data-theme="light"] .transactions-page .text-emerald-300 {
+  color: #047857;
+}
+
+[data-theme="light"] .transactions-page .text-red-300,
+[data-theme="light"] .transactions-page .text-red-400 {
+  color: #dc2626;
+}
+
+[data-theme="light"] .transactions-page .text-blue-300,
+[data-theme="light"] .transactions-page .text-blue-400 {
+  color: #2563eb;
+}
+
+[data-theme="light"] .transactions-page .text-cyan-300 {
+  color: #0369a1;
+}
+
+[data-theme="light"] .transactions-page .text-orange-300 {
+  color: #c2410c;
+}
+
+/* Finance Smart Light Pro
+   These rules translate the existing dark-first Tailwind utilities only when
+   the resolved theme is light. The dark theme remains entirely unchanged. */
+[data-theme="light"] .app-shell {
+  background: var(--background);
+  color: var(--text-primary);
+}
+
+[data-theme="light"] .app-header {
+  background: color-mix(in srgb, var(--surface) 96%, transparent);
+  border-color: var(--border);
+  box-shadow: 0 1px 2px var(--shadow);
+  color: var(--text-primary);
+}
+
+[data-theme="light"] .app-mobile-button,
+[data-theme="light"] .user-menu-trigger,
+[data-theme="light"] .user-menu-panel {
+  background: var(--surface);
+  border-color: var(--border);
+  color: var(--text-primary);
+}
+
+[data-theme="light"] .user-menu-panel {
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.1);
+}
+
+[data-theme="light"] .user-menu-trigger:hover,
+[data-theme="light"] .user-menu-item:hover,
+[data-theme="light"] .user-menu-panel button:not([aria-pressed="true"]):hover {
+  background: var(--surface-subtle);
+}
+
+/* The brand navigation intentionally remains dark in every theme. */
+[data-theme="light"] .app-sidebar {
+  background: #0f172a;
+  border-color: #253249;
+  box-shadow: 0 20px 40px rgba(15, 23, 42, 0.18);
+  color: #f8fafc;
+}
+
+[data-theme="light"] .app-sidebar .text-white {
+  color: #f8fafc;
+}
+
+[data-theme="light"] .app-sidebar .text-slate-400 {
+  color: #94a3b8;
+}
+
+[data-theme="light"] .app-sidebar .text-slate-500 {
+  color: #64748b;
+}
+
+[data-theme="light"] .app-sidebar .text-cyan-300 {
+  color: #67e8f9;
+}
+
+[data-theme="light"] .app-sidebar .text-amber-300 {
+  color: #fcd34d;
+}
+
+[data-theme="light"] .app-sidebar a:hover,
+[data-theme="light"] .app-sidebar button:hover {
+  color: #e2e8f0;
+}
+
+/* Dark-first content surfaces become clean white layers. */
+[data-theme="light"] main [class~="bg-slate-950"],
+[data-theme="light"] main [class~="bg-slate-950/40"],
+[data-theme="light"] main [class~="bg-slate-950/60"],
+[data-theme="light"] main [class~="bg-slate-950/80"],
+[data-theme="light"] main [class~="bg-slate-900"],
+[data-theme="light"] main [class~="bg-slate-900/40"],
+[data-theme="light"] main [class~="bg-slate-900/50"],
+[data-theme="light"] main [class~="bg-slate-900/60"],
+[data-theme="light"] main [class~="bg-slate-900/70"],
+[data-theme="light"] main [class~="bg-slate-800"] {
+  background: var(--surface);
+}
+
+[data-theme="light"] main [class~="bg-slate-700"],
+[data-theme="light"] main [class~="bg-slate-100"],
+[data-theme="light"] main [class~="bg-white/5"],
+[data-theme="light"] main [class~="bg-white/10"],
+[data-theme="light"] main [class~="bg-white/[.03]"],
+[data-theme="light"] main [class~="bg-white/[0.02]"],
+[data-theme="light"] main [class~="bg-white/[0.025]"],
+[data-theme="light"] main [class~="bg-white/[0.03]"],
+[data-theme="light"] main [class~="bg-white/[0.04]"],
+[data-theme="light"] main [class~="bg-white/[0.07]"] {
+  background: var(--surface-muted);
+}
+
+[data-theme="light"] main [class~="border-white/10"],
+[data-theme="light"] main [class~="border-white/15"],
+[data-theme="light"] main [class~="border-white/20"],
+[data-theme="light"] main [class~="divide-white/5"],
+[data-theme="light"] main [class~="divide-white/10"] {
+  border-color: var(--border);
+}
+
+[data-theme="light"] main [class~="shadow-2xl"],
+[data-theme="light"] main [class~="shadow-xl"],
+[data-theme="light"] main [class~="shadow-lg"] {
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
+}
+
+/* Primary and supporting copy. Colored controls retain their white labels. */
+[data-theme="light"] main [class~="text-white"]:not(button):not(a):not([class*="bg-blue-"]):not([class*="bg-cyan-"]):not([class*="bg-emerald-"]):not([class*="bg-red-"]):not([class*="bg-orange-"]):not([class*="bg-amber-"]):not([class*="bg-gradient"]):not([class*="from-"]) {
+  color: var(--text-primary);
+}
+
+[data-theme="light"] main button[class~="text-white"]:not([class*="bg-blue-"]):not([class*="bg-cyan-"]):not([class*="bg-emerald-"]):not([class*="bg-red-"]):not([class*="bg-orange-"]):not([class*="bg-amber-"]):not([class*="bg-gradient"]),
+[data-theme="light"] main a[class~="text-white"]:not([class*="bg-blue-"]):not([class*="bg-cyan-"]):not([class*="bg-emerald-"]):not([class*="bg-red-"]):not([class*="bg-orange-"]):not([class*="bg-amber-"]):not([class*="bg-gradient"]) {
+  color: var(--text-secondary);
+}
+
+[data-theme="light"] main [class~="text-slate-100"],
+[data-theme="light"] main [class~="text-slate-200"],
+[data-theme="light"] main [class~="text-slate-300"] {
+  color: var(--text-secondary);
+}
+
+[data-theme="light"] main [class~="text-slate-400"],
+[data-theme="light"] main [class~="text-slate-500"],
+[data-theme="light"] main [class~="text-slate-600"] {
+  color: var(--text-muted);
+}
+
+[data-theme="light"] main [class~="text-slate-700"],
+[data-theme="light"] main [class~="text-slate-900"],
+[data-theme="light"] main [class~="text-slate-950"] {
+  color: var(--text-primary);
+}
+
+/* Semantic colors and compact badges. */
+[data-theme="light"] main [class~="text-emerald-200"],
+[data-theme="light"] main [class~="text-emerald-300"],
+[data-theme="light"] main [class~="text-emerald-400"] {
+  color: #047857;
+}
+
+[data-theme="light"] main [class~="bg-emerald-500/10"],
+[data-theme="light"] main [class~="bg-emerald-500/15"],
+[data-theme="light"] main [class~="bg-emerald-500/20"] {
+  background: #d1fae5;
+}
+
+[data-theme="light"] main [class~="text-red-200"],
+[data-theme="light"] main [class~="text-red-300"],
+[data-theme="light"] main [class~="text-red-400"] {
+  color: #b91c1c;
+}
+
+[data-theme="light"] main [class~="bg-red-500/5"],
+[data-theme="light"] main [class~="bg-red-500/10"],
+[data-theme="light"] main [class~="bg-red-500/15"],
+[data-theme="light"] main [class~="bg-red-500/20"] {
+  background: #fee2e2;
+}
+
+[data-theme="light"] main [class~="text-amber-200"],
+[data-theme="light"] main [class~="text-amber-300"],
+[data-theme="light"] main [class~="text-amber-400"],
+[data-theme="light"] main [class~="text-orange-300"],
+[data-theme="light"] main [class~="text-orange-400"] {
+  color: #b45309;
+}
+
+[data-theme="light"] main [class~="bg-amber-500/5"],
+[data-theme="light"] main [class~="bg-amber-500/10"],
+[data-theme="light"] main [class~="bg-amber-500/15"],
+[data-theme="light"] main [class~="bg-amber-500/20"],
+[data-theme="light"] main [class~="bg-orange-500/10"] {
+  background: #fef3c7;
+}
+
+[data-theme="light"] main [class~="text-blue-200"],
+[data-theme="light"] main [class~="text-blue-300"],
+[data-theme="light"] main [class~="text-blue-400"] {
+  color: #1d4ed8;
+}
+
+[data-theme="light"] main [class~="bg-blue-500/5"],
+[data-theme="light"] main [class~="bg-blue-500/10"],
+[data-theme="light"] main [class~="bg-blue-500/15"],
+[data-theme="light"] main [class~="bg-blue-500/20"] {
+  background: #dbeafe;
+}
+
+[data-theme="light"] main [class~="text-cyan-200"],
+[data-theme="light"] main [class~="text-cyan-300"],
+[data-theme="light"] main [class~="text-cyan-400"] {
+  color: #0e7490;
+}
+
+[data-theme="light"] main [class~="text-cyan-100"],
+[data-theme="light"] main [class~="text-cyan-100/70"],
+[data-theme="light"] main [class~="text-cyan-200/60"] {
+  color: var(--text-muted);
+}
+
+[data-theme="light"] main [class~="text-rose-200"],
+[data-theme="light"] main [class~="text-rose-300"] {
+  color: #be123c;
+}
+
+[data-theme="light"] main [class~="bg-rose-500/10"] {
+  background: #ffe4e6;
+}
+
+[data-theme="light"] main article [class~="opacity-80"],
+[data-theme="light"] main article [class~="opacity-90"] {
+  opacity: 1;
+}
+
+[data-theme="light"] main [class~="bg-cyan-500/5"],
+[data-theme="light"] main [class~="bg-cyan-500/10"],
+[data-theme="light"] main [class~="bg-cyan-500/15"],
+[data-theme="light"] main [class~="bg-cyan-500/20"] {
+  background: #cffafe;
+}
+
+[data-theme="light"] main [class~="text-purple-300"] {
+  color: #7e22ce;
+}
+
+[data-theme="light"] main [class~="bg-purple-500/10"] {
+  background: #f3e8ff;
+}
+
+[data-theme="light"] main [class~="text-yellow-300"] {
+  color: #a16207;
+}
+
+[data-theme="light"] main [class~="bg-yellow-400/10"],
+[data-theme="light"] main [class~="bg-yellow-500/10"] {
+  background: #fef9c3;
+}
+
+/* Tables keep their sizing and density; only their visual layer changes. */
+[data-theme="light"] main table {
+  color: var(--text-primary);
+}
+
+[data-theme="light"] main table thead {
+  background: var(--surface-subtle);
+  color: #334155;
+}
+
+[data-theme="light"] main table tbody {
+  background: var(--surface);
+}
+
+[data-theme="light"] main table tbody tr {
+  border-color: var(--border);
+}
+
+[data-theme="light"] main table tbody tr:hover {
+  background: var(--surface-subtle);
+}
+
+[data-theme="light"] main table tbody tr[aria-selected="true"] {
+  background: var(--surface-selected);
+}
+
+/* Shared compact density for data lists outside the configurable transactions table. */
+.finance-table-compact th {
+  padding: 0.55rem 0.75rem;
+}
+
+.finance-table-compact td {
+  padding: 0.375rem 0.75rem;
+}
+
+.finance-list-compact > div {
+  min-height: 3.25rem;
+  padding-top: 0.375rem;
+  padding-bottom: 0.375rem;
+}
+
+.finance-list-compact > div p:first-child {
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+}
+
+.finance-list-compact > div p + p {
+  margin-top: 0;
+  line-height: 1rem;
+}
+
+[data-theme="light"] main .fuel-mobile-nav-card {
+  background: var(--surface);
+  border-color: var(--border);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
+[data-theme="light"] main .fuel-mobile-nav-card:active {
+  background: var(--surface-selected);
+}
+
+/* Inputs, filters and form controls. */
+[data-theme="light"] main input:not([type="checkbox"]):not([type="radio"]),
+[data-theme="light"] main select,
+[data-theme="light"] main textarea {
+  background: var(--surface);
+  border-color: var(--border-strong);
+  color: var(--text-primary);
+}
+
+[data-theme="light"] main input::placeholder,
+[data-theme="light"] main textarea::placeholder {
+  color: var(--text-placeholder);
+}
+
+[data-theme="light"] main input:not([type="checkbox"]):not([type="radio"]):hover,
+[data-theme="light"] main select:hover,
+[data-theme="light"] main textarea:hover {
+  border-color: var(--text-placeholder);
+}
+
+[data-theme="light"] main input:not([type="checkbox"]):not([type="radio"]):focus,
+[data-theme="light"] main select:focus,
+[data-theme="light"] main textarea:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+}
+
+[data-theme="light"] main input:disabled,
+[data-theme="light"] main select:disabled,
+[data-theme="light"] main textarea:disabled,
+[data-theme="light"] main button:disabled {
+  background: var(--surface-muted);
+  border-color: var(--border);
+  color: var(--text-muted);
+}
+
+[data-theme="light"] main label {
+  color: #334155;
+}
+
+[data-theme="light"] main [class~="hover:bg-white/5"]:hover,
+[data-theme="light"] main [class~="hover:bg-white/10"]:hover,
+[data-theme="light"] main [class~="hover:bg-slate-800"]:hover,
+[data-theme="light"] main [class~="hover:bg-slate-900"]:hover {
+  background: var(--surface-subtle);
+}
+
+[data-theme="light"] main [class~="hover:text-white"]:hover {
+  color: var(--text-primary);
+}
+
+[data-theme="light"] main [class~="bg-blue-600"],
+[data-theme="light"] main [class~="bg-blue-500"] {
+  background: var(--primary);
+  color: #ffffff;
+}
+
+[data-theme="light"] main [class~="hover:bg-blue-500"]:hover,
+[data-theme="light"] main [class~="hover:bg-blue-600"]:hover {
+  background: #1d4ed8;
+  color: #ffffff;
+}
+
+/* Overlays, dialogs, dropdowns and drawers. */
+[data-theme="light"] main [class~="bg-black/60"],
+[data-theme="light"] main [class~="bg-black/70"],
+[data-theme="light"] main [class~="bg-black/80"],
+[data-theme="light"] main .transactions-overlay {
+  background: var(--overlay);
+}
+
+[data-theme="light"] main [role="dialog"],
+[data-theme="light"] main [role="menu"],
+[data-theme="light"] main .transactions-drawer,
+[data-theme="light"] main .transactions-surface {
+  background: var(--surface);
+  border-color: var(--border);
+  color: var(--text-primary);
+}
+
+/* Recharts renders several dark values as SVG presentation attributes or
+   inline tooltip styles; these narrowly-scoped overrides are required. */
+[data-theme="light"] main .recharts-cartesian-grid line {
+  stroke: var(--chart-grid);
+}
+
+[data-theme="light"] main .recharts-cartesian-axis line,
+[data-theme="light"] main .recharts-cartesian-axis path {
+  stroke: var(--chart-axis);
+}
+
+[data-theme="light"] main .recharts-cartesian-axis-tick text {
+  fill: var(--chart-axis);
+}
+
+[data-theme="light"] main .recharts-default-tooltip {
+  background: var(--chart-tooltip-bg) !important;
+  border-color: var(--border) !important;
+  color: var(--chart-tooltip-text) !important;
+  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.08);
+}
+
+[data-theme="light"] main .recharts-default-tooltip *,
+[data-theme="light"] main .recharts-legend-item-text {
+  color: var(--chart-tooltip-text) !important;
+}
+
+[data-theme="light"] * {
+  scrollbar-color: #94a3b8 #e2e8f0;
+}
+
+[data-theme="light"] *::-webkit-scrollbar-track {
+  background: #e2e8f0;
+}
+
+[data-theme="light"] *::-webkit-scrollbar-thumb {
+  background: #94a3b8;
+  border-color: #e2e8f0;
 }
 
 /* Cursor padrão */

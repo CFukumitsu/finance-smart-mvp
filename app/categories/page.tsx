@@ -622,7 +622,7 @@ export default function CategoriesPage() {
         </div>
 
         <div className="hidden overflow-x-auto rounded-2xl border border-white/10 bg-slate-950/60 md:block">
-          <table className="min-w-[950px] w-full text-left text-sm">
+          <table className="finance-table-compact min-w-[950px] w-full text-left text-sm">
             <thead className="bg-white/5 text-slate-300">
               <tr>
                 <th className="px-5 py-4">Nome</th>
@@ -647,7 +647,10 @@ export default function CategoriesPage() {
               {!isLoading &&
                 categories.map((category) => (
                   <tr key={category.id} className="hover:bg-white/[0.03]">
-                    <td className="px-5 py-4 font-medium text-white">
+                    <td
+                      className="max-w-[320px] truncate px-5 py-4 font-medium text-white"
+                      title={category.name}
+                    >
                       {category.name}
                     </td>
                     <td className="px-5 py-4">

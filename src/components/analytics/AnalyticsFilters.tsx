@@ -91,7 +91,7 @@ export default function AnalyticsFilters({
         </label>
       )}
 
-      <div className="flex min-w-0 flex-wrap gap-2 sm:col-span-2 xl:col-span-6" aria-label="Atalhos de período">
+      <div className="flex min-w-0 flex-wrap justify-center gap-2 sm:col-span-2 xl:col-span-6" aria-label="Atalhos de período">
         {([
           ["current-month", "Este mês"],
           ["last-7", "Últimos 7 dias"],

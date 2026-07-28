@@ -532,7 +532,7 @@ export default function AccountsPage() {
         </div>
 
         <div className="hidden w-full overflow-x-auto rounded-2xl border border-white/10 bg-slate-950/60 md:block">
-          <table className="min-w-[1100px] w-full text-left text-sm">
+          <table className="finance-table-compact min-w-[1100px] w-full text-left text-sm">
             <thead className="bg-white/5 text-slate-300">
               <tr>
                 <th className="px-5 py-4">Nome</th>

@@ -10,6 +10,7 @@ import { signOut } from "@/src/services/authService";
 import type { UserProfile } from "@/src/types/identity";
 import { getAvatarUrl, getFullName, getRoleLabel } from "@/src/utils/identity";
 import ProfileAvatar from "./ProfileAvatar";
+import ThemeSelector from "@/src/components/theme/ThemeSelector";
 
 export default function UserMenu() {
   const router = useRouter();
@@ -49,7 +50,7 @@ export default function UserMenu() {
 
   return (
     <div ref={rootRef} className="relative min-w-0">
-      <button type="button" aria-expanded={open} aria-haspopup="menu" onClick={() => setOpen((value) => !value)} className="flex max-w-[calc(100vw-5.5rem)] items-center gap-2 rounded-2xl border border-white/10 bg-slate-950/80 px-2.5 py-2 text-left hover:bg-white/5 sm:max-w-xs sm:gap-3 sm:px-3">
+      <button type="button" aria-expanded={open} aria-haspopup="menu" onClick={() => setOpen((value) => !value)} className="user-menu-trigger flex max-w-[calc(100vw-5.5rem)] items-center gap-2 rounded-xl border px-2.5 py-1.5 text-left sm:max-w-xs sm:gap-3 sm:px-3">
         <ProfileAvatar src={avatar} name={name} email={user?.email} size="sm" />
         <span className="min-w-0 flex-1">
           <span className="block truncate text-sm font-semibold text-white">{name}</span>
@@ -59,10 +60,12 @@ export default function UserMenu() {
       </button>
 
       {open && (
-        <div role="menu" className="absolute right-0 z-[70] mt-2 w-64 max-w-[calc(100vw-2rem)] overflow-hidden rounded-2xl border border-white/10 bg-slate-900 p-2 shadow-2xl shadow-black/50">
+        <div role="menu" className="user-menu-panel absolute right-0 z-[70] mt-2 w-64 max-w-[calc(100vw-2rem)] overflow-hidden rounded-2xl border p-2 shadow-2xl">
           <MenuLink href="/account" icon={UserRound} label="Minha Conta" close={() => setOpen(false)} />
           <MenuLink href="/account/security" icon={ShieldCheck} label="Segurança" close={() => setOpen(false)} />
           {profile?.role === "admin" && <MenuLink href="/admin/users" icon={Users} label="Usuários" close={() => setOpen(false)} />}
+          <div className="my-1 border-t border-white/10" />
+          <ThemeSelector />
           <div className="my-1 border-t border-white/10" />
           <button type="button" role="menuitem" onClick={handleLogout} className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold text-red-300 hover:bg-red-500/10"><LogOut size={17} /> Sair</button>
         </div>
@@ -72,5 +75,5 @@ export default function UserMenu() {
 }
 
 function MenuLink({ href, icon: Icon, label, close }: { href: string; icon: typeof UserRound; label: string; close: () => void }) {
-  return <Link role="menuitem" href={href} onClick={close} className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold text-slate-200 hover:bg-white/5"><Icon size={17} /> {label}</Link>;
+  return <Link role="menuitem" href={href} onClick={close} className="user-menu-item flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold text-slate-200"><Icon size={17} /> {label}</Link>;
 }

@@ -7,11 +7,11 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
   return (
-    <div className="min-h-screen w-full overflow-x-hidden bg-slate-950 text-white">
+    <div className="app-shell min-h-screen w-full overflow-x-clip">
       {/* Botão mobile */}
       <button
         onClick={() => setIsMobileMenuOpen(true)}
-        className="fixed left-4 top-4 z-50 rounded-xl border border-white/10 bg-slate-900 px-3 py-2 text-sm font-bold text-white shadow-lg md:hidden"
+        className="app-mobile-button fixed left-4 top-4 z-50 rounded-xl border px-3 py-2 text-sm font-bold shadow-lg md:hidden"
       >
         ☰
       </button>
@@ -24,9 +24,9 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         />
       )}
 
-      <div className="flex min-h-screen w-full overflow-x-hidden">
+      <div className="flex min-h-screen w-full overflow-x-clip">
         {/* Sidebar desktop */}
-        <div className="hidden md:block">
+        <div className="sticky top-0 hidden h-screen self-start md:block">
           <FinanceSidebar />
         </div>
 
@@ -42,11 +42,11 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
         <main className="min-w-0 flex-1 overflow-x-hidden">
           <main className="min-w-0 flex-1 overflow-x-hidden">
-            <div className="sticky top-0 z-30 flex justify-end border-b border-white/10 bg-slate-950/80 px-4 py-3 backdrop-blur sm:px-5 lg:px-8">
+            <div className="app-header sticky top-0 z-30 flex justify-end border-b px-4 py-2 backdrop-blur sm:px-5 lg:px-8">
               <UserMenu />
             </div>
 
-            <section className="w-full max-w-full px-4 pb-6 pt-6 sm:px-5 lg:px-8">
+            <section className="w-full max-w-full px-4 pb-5 pt-4 sm:px-5 lg:px-8">
               {children}
             </section>
           </main>
