@@ -45,3 +45,9 @@ Antes da publicação na Play Store:
 
 Sem o `assetlinks.json`, o Android abre o site como Custom Tab com a barra
 do navegador, em vez de uma TWA em tela cheia.
+
+Com a chave local de upload configurada, gere os artefatos release com:
+
+```powershell
+npm run android:build:release
+```

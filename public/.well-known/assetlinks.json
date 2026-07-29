@@ -1,0 +1,14 @@
+[
+  {
+    "relation": [
+      "delegate_permission/common.handle_all_urls"
+    ],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.fktsystem.financesmart",
+      "sha256_cert_fingerprints": [
+        "57:19:D1:FC:18:4D:25:A4:E1:0E:55:A7:C7:51:05:22:1E:F0:17:E4:66:3C:23:6E:AE:A0:B3:B9:0C:7E:11:65"
+      ]
+    }
+  }
+]

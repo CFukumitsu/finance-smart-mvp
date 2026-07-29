@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "android:build:debug": "powershell -ExecutionPolicy Bypass -File scripts/build-android-debug.ps1"
+    "android:build:debug": "powershell -ExecutionPolicy Bypass -File scripts/build-android-debug.ps1",
+    "android:build:release": "powershell -ExecutionPolicy Bypass -File scripts/build-android-release.ps1"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.0",

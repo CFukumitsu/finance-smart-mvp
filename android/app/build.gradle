@@ -50,6 +50,15 @@ def twaManifest = [
     orientation: 'any',
 ]
 
+def releaseStoreFile = System.getenv('FINANCE_SMART_STORE_FILE')
+def releaseStorePassword = System.getenv('FINANCE_SMART_STORE_PASSWORD')
+def releaseKeyAlias = System.getenv('FINANCE_SMART_KEY_ALIAS')
+def releaseKeyPassword = System.getenv('FINANCE_SMART_KEY_PASSWORD')
+def releaseSigningConfigured = releaseStoreFile &&
+        releaseStorePassword &&
+        releaseKeyAlias &&
+        releaseKeyPassword
+
 android {
     compileSdkVersion 36
     namespace "com.fktsystem.financesmart"
@@ -150,9 +159,22 @@ android {
 
         
     }
+    signingConfigs {
+        release {
+            if (releaseSigningConfigured) {
+                storeFile file(releaseStoreFile)
+                storePassword releaseStorePassword
+                keyAlias releaseKeyAlias
+                keyPassword releaseKeyPassword
+            }
+        }
+    }
     buildTypes {
         release {
             minifyEnabled true
+            if (releaseSigningConfigured) {
+                signingConfig signingConfigs.release
+            }
         }
     }
     compileOptions {
