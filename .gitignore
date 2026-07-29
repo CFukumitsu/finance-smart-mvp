@@ -48,6 +48,18 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
+# Android / Bubblewrap
+.android-tools/
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/android-keystore
+android/*.jks
+android/*.keystore
+android/*.apk
+android/*.aab
+
 # Finance Smart
 backup/
 supabase/.temp/
