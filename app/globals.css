@@ -179,19 +179,43 @@ body {
 }
 
 .transactions-density-compact .transactions-table th {
-  padding-top: 0.55rem;
-  padding-bottom: 0.55rem;
-}
-
-.transactions-density-compact .transactions-table td {
   padding-top: 0.4rem;
   padding-bottom: 0.4rem;
 }
 
-.transactions-density-compact .transactions-table td [class~="rounded-full"] {
-  padding: 0.1rem 0.45rem;
-  font-size: 0.675rem;
+.transactions-density-compact .transactions-table td {
+  padding-top: 0.2rem;
+  padding-bottom: 0.2rem;
+  vertical-align: middle;
+}
+
+.transactions-density-compact .transactions-table tbody tr {
+  height: 3rem;
+}
+
+.transactions-density-compact .transactions-table .transaction-description {
+  font-size: 0.75rem;
   line-height: 1rem;
+}
+
+.transactions-density-compact .transactions-table .transaction-badges {
+  gap: 0.25rem;
+}
+
+.transactions-density-compact .transactions-table td [class~="rounded-full"] {
+  padding: 0.05rem 0.35rem;
+  font-size: 0.625rem;
+  line-height: 0.875rem;
+}
+
+.transactions-density-compact .transactions-table .transaction-action {
+  padding: 0.2rem;
+  font-size: 0.75rem;
+  line-height: 1;
+}
+
+.transactions-density-compact .transactions-table td:last-child > div {
+  gap: 0.25rem;
 }
 
 .transactions-density-comfortable .transactions-table th {

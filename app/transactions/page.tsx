@@ -1704,28 +1704,51 @@ function TransactionsPageContent() {
                     </td>
 
                     <td className="min-w-0 px-3 py-4 md:px-4">
-                      <div className="transaction-description theme-text truncate font-medium" title={transaction.description}>
-                        {transaction.description}
-                      </div>
-
-                      <div className="mt-1 flex flex-wrap gap-2">
-                        <span
-                          className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${transaction.type === "Receita"
-                            ? "bg-emerald-500/10 text-emerald-300"
-                            : transaction.type === "Transferência"
-                              ? "bg-blue-500/10 text-blue-300"
-                              : transaction.type === "Pagamento de Fatura"
-                                ? "bg-cyan-500/10 text-cyan-300"
-                                : "bg-red-500/10 text-red-300"
-                            }`}
+                      <div
+                        className={
+                          density === "compact"
+                            ? "flex min-w-0 items-center gap-1.5 overflow-hidden"
+                            : ""
+                        }
+                      >
+                        <div
+                          className={`transaction-description theme-text truncate font-medium ${
+                            density === "compact" ? "min-w-0 flex-1" : ""
+                          }`}
+                          title={transaction.description}
                         >
-                          {transaction.type}
-                        </span>
+                          {transaction.description}
+                        </div>
 
-                        <span className="rounded-full bg-white/[0.04] px-2.5 py-0.5 text-xs font-semibold text-slate-400">
-                          {transaction.status ?? "-"}
-                        </span>
-                        {transaction.bankroll_integration_group_id && <span className="rounded-full bg-cyan-500/10 px-2.5 py-0.5 text-xs font-semibold text-cyan-300">Origem: Bankroll Poker</span>}
+                        <div
+                          className={`transaction-badges flex ${
+                            density === "compact"
+                              ? "shrink-0 flex-nowrap items-center gap-1"
+                              : "mt-1 flex-wrap gap-2"
+                          }`}
+                        >
+                          <span
+                            className={`whitespace-nowrap rounded-full px-2.5 py-0.5 text-xs font-semibold ${transaction.type === "Receita"
+                              ? "bg-emerald-500/10 text-emerald-300"
+                              : transaction.type === "Transferência"
+                                ? "bg-blue-500/10 text-blue-300"
+                                : transaction.type === "Pagamento de Fatura"
+                                  ? "bg-cyan-500/10 text-cyan-300"
+                                  : "bg-red-500/10 text-red-300"
+                              }`}
+                          >
+                            {transaction.type}
+                          </span>
+
+                          <span className="whitespace-nowrap rounded-full bg-white/[0.04] px-2.5 py-0.5 text-xs font-semibold text-slate-400">
+                            {transaction.status ?? "-"}
+                          </span>
+                          {transaction.bankroll_integration_group_id && (
+                            <span className="whitespace-nowrap rounded-full bg-cyan-500/10 px-2.5 py-0.5 text-xs font-semibold text-cyan-300">
+                              Origem: Bankroll Poker
+                            </span>
+                          )}
+                        </div>
                       </div>
                     </td>
 
@@ -1758,7 +1781,7 @@ function TransactionsPageContent() {
                           <button
                             onClick={() => openEditDrawer(transaction)}
                             title="Editar"
-                            className="rounded-lg p-2 text-blue-400 hover:bg-blue-500/10 hover:text-blue-300"
+                            className="transaction-action rounded-lg p-2 text-blue-400 hover:bg-blue-500/10 hover:text-blue-300"
                           >
                             ✏️
                           </button>
@@ -1766,7 +1789,7 @@ function TransactionsPageContent() {
                           <button
                             onClick={() => handleDeleteTransaction(transaction)}
                             title="Excluir"
-                            className="rounded-lg p-2 text-red-400 hover:bg-red-500/10 hover:text-red-300"
+                            className="transaction-action rounded-lg p-2 text-red-400 hover:bg-red-500/10 hover:text-red-300"
                           >
                             🗑️
                           </button>
