@@ -1418,19 +1418,20 @@ function Sessions({
           close={close}
           saving={saving}
           submit={submit}
+          compact
         >
-          <div className="grid gap-4 sm:grid-cols-2">
-            <Input label="Data">
+          <div className="grid gap-2 sm:grid-cols-2">
+            <Input label="Data" compact>
               <input
                 type="date"
-                className={field}
+                className={`${field} h-10 py-1.5`}
                 value={form.date}
                 onChange={(e) => setForm({ ...form, date: e.target.value })}
               />
             </Input>
-            <Input label="Carteira">
+            <Input label="Carteira" compact>
               <select
-                className={field}
+                className={`${field} h-10 py-1.5`}
                 value={form.wallet_id}
                 onChange={(e) =>
                   setForm({ ...form, wallet_id: e.target.value })
@@ -1446,9 +1447,9 @@ function Sessions({
                   ))}
               </select>
             </Input>
-            <Input label="Tipo">
+            <Input label="Tipo" compact>
               <select
-                className={field}
+                className={`${field} h-10 py-1.5`}
                 value={form.session_type}
                 onChange={(e) => {
                   const sessionType = e.target.value as BankrollSessionType;
@@ -1472,9 +1473,9 @@ function Sessions({
               </select>
             </Input>
 
-            <Input label="Modalidade">
+            <Input label="Modalidade" compact>
               <select
-                className={field}
+                className={`${field} h-10 py-1.5`}
                 value={form.game_type}
                 onChange={(e) =>
                   setForm({
@@ -1493,106 +1494,133 @@ function Sessions({
               </select>
             </Input>
           </div>
-          <Input
-            label={
-              form.session_type === "cash_game"
-                ? "Local ou mesa"
-                : "Nome do torneio / evento"
-            }
-          >
-            <input
-              className={field}
-              value={form.event_name}
-              onChange={(e) => setForm({ ...form, event_name: e.target.value })}
-            />
-          </Input>
-          <Input label="Formato">
-            <select
-              className={field}
-              value={form.format}
-              onChange={(e) =>
-                setForm({
-                  ...form,
-                  format: e.target.value,
-                })
+          <div className="grid gap-2 sm:grid-cols-2">
+            <Input
+              compact
+              label={
+                form.session_type === "cash_game"
+                  ? "Local ou mesa"
+                  : "Nome do torneio / evento"
               }
             >
-              <option value="">Não informado</option>
+              <input
+                className={`${field} h-10 py-1.5`}
+                value={form.event_name}
+                onChange={(e) =>
+                  setForm({ ...form, event_name: e.target.value })
+                }
+              />
+            </Input>
+            <Input label="Formato" compact>
+              <select
+                className={`${field} h-10 py-1.5`}
+                value={form.format}
+                onChange={(e) =>
+                  setForm({
+                    ...form,
+                    format: e.target.value,
+                  })
+                }
+              >
+                <option value="">Não informado</option>
 
-              {displayedFormats.map((value) => (
-                <option value={value} key={value}>
-                  {value}
-                </option>
-              ))}
-            </select>
-          </Input>
+                {displayedFormats.map((value) => (
+                  <option value={value} key={value}>
+                    {value}
+                  </option>
+                ))}
+              </select>
+            </Input>
+          </div>
           {form.session_type === "cash_game" ? (
-            <div className="grid gap-4 sm:grid-cols-2">
+            <div className="grid gap-2 sm:grid-cols-2">
               <MoneyInput
+                compact
                 label="Entrada"
                 value={form.cash_buy_in}
                 set={(v) => setForm({ ...form, cash_buy_in: v })}
               />
               <MoneyInput
+                compact
                 label="Saída"
                 value={form.cash_out}
                 set={(v) => setForm({ ...form, cash_out: v })}
               />
+              <MoneyInput
+                compact
+                label="Taxas"
+                value={form.fees}
+                set={(v) => setForm({ ...form, fees: v })}
+              />
+              <Input label="Duração (minutos)" compact>
+                <input
+                  type="number"
+                  min="0"
+                  className={`${field} h-10 py-1.5`}
+                  value={form.duration}
+                  onChange={(e) =>
+                    setForm({ ...form, duration: e.target.value })
+                  }
+                />
+              </Input>
             </div>
           ) : (
-            <>
-              <div className="grid gap-4 sm:grid-cols-2">
-                <MoneyInput
-                  label="Buy-in"
-                  value={form.buy_in}
-                  set={(v) => setForm({ ...form, buy_in: v })}
-                />
-                <MoneyInput
-                  label="Premiação"
-                  value={form.prize}
-                  set={(v) => setForm({ ...form, prize: v })}
-                />
-                <Input label="Reentradas">
-                  <input
-                    type="number"
-                    min="0"
-                    className={field}
-                    value={form.reentries}
-                    onChange={(e) =>
-                      setForm({ ...form, reentries: e.target.value })
-                    }
-                  />
-                </Input>
-                <MoneyInput
-                  label="Valor por reentrada"
-                  value={form.reentry_cost}
-                  set={(v) => setForm({ ...form, reentry_cost: v })}
-                />
-                <MoneyInput
-                  label="Add-on"
-                  value={form.add_on_cost}
-                  set={(v) => setForm({ ...form, add_on_cost: v })}
-                />
-              </div>
-            </>
-          )}
-          <div className="grid gap-4 sm:grid-cols-2">
-            <MoneyInput
-              label="Taxas"
-              value={form.fees}
-              set={(v) => setForm({ ...form, fees: v })}
-            />
-            <Input label="Duração (minutos)">
-              <input
-                type="number"
-                min="0"
-                className={field}
-                value={form.duration}
-                onChange={(e) => setForm({ ...form, duration: e.target.value })}
+            <div className="grid gap-2 sm:grid-cols-2">
+              <MoneyInput
+                compact
+                label="Buy-in"
+                value={form.buy_in}
+                set={(v) => setForm({ ...form, buy_in: v })}
               />
-            </Input>
-          </div>
-          <div className="grid grid-cols-3 gap-2 rounded-xl bg-cyan-500/5 p-3 text-sm">
+              <MoneyInput
+                compact
+                label="Taxas"
+                value={form.fees}
+                set={(v) => setForm({ ...form, fees: v })}
+              />
+              <Input label="Reentradas" compact>
+                <input
+                  type="number"
+                  min="0"
+                  className={`${field} h-10 py-1.5`}
+                  value={form.reentries}
+                  onChange={(e) =>
+                    setForm({ ...form, reentries: e.target.value })
+                  }
+                />
+              </Input>
+              <MoneyInput
+                compact
+                label="Valor por reentrada"
+                value={form.reentry_cost}
+                set={(v) => setForm({ ...form, reentry_cost: v })}
+              />
+              <MoneyInput
+                compact
+                label="Add-on"
+                value={form.add_on_cost}
+                set={(v) => setForm({ ...form, add_on_cost: v })}
+              />
+              <MoneyInput
+                compact
+                label="Premiação"
+                value={form.prize}
+                set={(v) => setForm({ ...form, prize: v })}
+              />
+              <Input label="Duração (minutos)" compact>
+                <input
+                  type="number"
+                  min="0"
+                  className={`${field} h-10 py-1.5`}
+                  value={form.duration}
+                  onChange={(e) =>
+                    setForm({ ...form, duration: e.target.value })
+                  }
+                />
+              </Input>
+            </div>
+          )}
+          <div className="grid grid-cols-3 gap-2 rounded-xl bg-cyan-500/5 px-3 py-2 text-xs leading-4">
             <span>
               Investido
               <br />
@@ -1611,10 +1639,15 @@ function Sessions({
               </span>
             )}
           </div>
-          <Input label="Observações">
+          <Input label="Observações" compact>
             <textarea
-              className={field}
+              rows={1}
+              className={`${field} min-h-10 resize-none overflow-hidden py-2`}
               value={form.notes}
+              onInput={(e) => {
+                e.currentTarget.style.height = "40px";
+                e.currentTarget.style.height = `${e.currentTarget.scrollHeight}px`;
+              }}
               onChange={(e) => setForm({ ...form, notes: e.target.value })}
             />
           </Input>
@@ -1795,12 +1828,20 @@ function Empty({
 function Input({
   label,
   children,
+  compact = false,
 }: {
   label: string;
   children: React.ReactNode;
+  compact?: boolean;
 }) {
   return (
-    <label className="block space-y-1.5 text-sm font-semibold text-slate-300">
+    <label
+      className={`block font-semibold text-slate-300 ${
+        compact
+          ? "space-y-0.5 text-xs leading-4"
+          : "space-y-1.5 text-sm"
+      }`}
+    >
       <span>{label}</span>
       {children}
     </label>
@@ -1810,16 +1851,18 @@ function MoneyInput({
   label,
   value,
   set,
+  compact = false,
 }: {
   label: string;
   value: string;
   set: (v: string) => void;
+  compact?: boolean;
 }) {
   return (
-    <Input label={label}>
+    <Input label={label} compact={compact}>
       <input
         inputMode="decimal"
-        className={field}
+        className={`${field} ${compact ? "h-10 py-1.5" : ""}`}
         value={value}
         onChange={(e) => set(e.target.value.replace(/[^0-9,.]/g, ""))}
       />
@@ -1832,12 +1875,14 @@ function Modal({
   saving,
   submit,
   children,
+  compact = false,
 }: {
   title: string;
   close: () => void;
   saving: boolean;
   submit: () => void;
   children: React.ReactNode;
+  compact?: boolean;
 }) {
   return (
     <div
@@ -1846,30 +1891,50 @@ function Modal({
       aria-label={title}
       className="fixed inset-0 z-[80] flex items-end justify-center bg-black/70 p-0 sm:items-center sm:p-4"
     >
-      <div className="max-h-[92vh] w-full max-w-2xl overflow-y-auto rounded-t-3xl border border-white/10 bg-slate-950 p-5 shadow-2xl sm:rounded-3xl">
-        <div className="mb-5 flex items-center justify-between">
+      <div
+        className={`w-full max-w-2xl overflow-y-auto rounded-t-3xl border border-white/10 bg-slate-950 shadow-2xl sm:rounded-3xl ${
+          compact
+            ? "max-h-[calc(100dvh-1rem)] px-4 py-3 sm:max-h-[calc(100dvh-2rem)] sm:px-5"
+            : "max-h-[92vh] p-5"
+        }`}
+      >
+        <div
+          className={`flex items-center justify-between ${
+            compact ? "mb-2" : "mb-5"
+          }`}
+        >
           <h2 className="text-xl font-black text-white">{title}</h2>
           <button
             aria-label="Fechar"
             onClick={close}
-            className="rounded-lg p-2 text-slate-400 hover:bg-white/10"
+            className={`rounded-lg text-slate-400 hover:bg-white/10 ${
+              compact ? "p-1.5" : "p-2"
+            }`}
           >
             <X />
           </button>
         </div>
-        <div className="space-y-4">{children}</div>
-        <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+        <div className={compact ? "space-y-2" : "space-y-4"}>{children}</div>
+        <div
+          className={`flex flex-col-reverse gap-2 sm:flex-row sm:justify-end ${
+            compact ? "mt-3" : "mt-6"
+          }`}
+        >
           <button
             onClick={close}
             disabled={saving}
-            className="rounded-xl border border-white/10 px-4 py-2.5 text-sm font-bold text-slate-300"
+            className={`rounded-xl border border-white/10 px-4 text-sm font-bold text-slate-300 ${
+              compact ? "py-2" : "py-2.5"
+            }`}
           >
             Cancelar
           </button>
           <button
             onClick={submit}
             disabled={saving}
-            className="rounded-xl bg-cyan-500 px-5 py-2.5 text-sm font-black text-slate-950 disabled:opacity-50"
+            className={`rounded-xl bg-cyan-500 px-5 text-sm font-black text-slate-950 disabled:opacity-50 ${
+              compact ? "py-2" : "py-2.5"
+            }`}
           >
             {saving ? "Salvando..." : "Salvar"}
           </button>
