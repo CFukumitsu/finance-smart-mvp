@@ -1601,12 +1601,6 @@ function Sessions({
                 value={form.add_on_cost}
                 set={(v) => setForm({ ...form, add_on_cost: v })}
               />
-              <MoneyInput
-                compact
-                label="Premiação"
-                value={form.prize}
-                set={(v) => setForm({ ...form, prize: v })}
-              />
               <Input label="Duração (minutos)" compact>
                 <input
                   type="number"
@@ -1618,6 +1612,12 @@ function Sessions({
                   }
                 />
               </Input>
+              <MoneyInput
+                compact
+                label="Premiação"
+                value={form.prize}
+                set={(v) => setForm({ ...form, prize: v })}
+              />
             </div>
           )}
           <div className="grid grid-cols-3 gap-2 rounded-xl bg-cyan-500/5 px-3 py-2 text-xs leading-4">
