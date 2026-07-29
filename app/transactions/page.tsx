@@ -1,7 +1,7 @@
 "use client";
 /* eslint-disable react-hooks/set-state-in-effect -- Legacy page synchronizes filters and Supabase data through effects. */
 
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight, Rows3, Search, SlidersHorizontal, X } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import AppShell from "../components/layout/AppShell";
@@ -21,6 +21,7 @@ import {
   filterTransactionsUntilDate,
 } from "@/src/utils/balanceCalculations";
 import { getCompetenceDateRange } from "@/src/utils/competence";
+import { sortLatestTransactionsForDisplay } from "@/src/utils/transactionFilters";
 
 type Account = {
   id: string;
@@ -92,6 +93,7 @@ function TransactionsPageContent() {
   const [descriptionSuggestions, setDescriptionSuggestions] = useState<string[]>([]);
 
   const [searchTerm, setSearchTerm] = useState("");
+  const [debouncedSearchTerm, setDebouncedSearchTerm] = useState("");
   const [typeFilter, setTypeFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [competenceFilter, setCompetenceFilter] = useState("");
@@ -102,6 +104,7 @@ function TransactionsPageContent() {
   const [density, setDensity] = useState<"compact" | "comfortable">("compact");
   const [plannedCardLimit, setPlannedCardLimit] = useState(0);
   const [accountClosures, setAccountClosures] = useState<AccountClosure[]>([]);
+  const loadTransactionsRequestIdRef = useRef(0);
 
   const [cardStatements, setCardStatements] = useState<
     { account_id: string; competence_id: string }[]
@@ -363,9 +366,14 @@ function TransactionsPageContent() {
     },
     competenceOptions: Competence[] = competences,
   ) {
+    const requestId = ++loadTransactionsRequestIdRef.current;
     setIsLoading(true);
 
     const ownerId = await getCurrentUserId();
+
+    if (requestId !== loadTransactionsRequestIdRef.current) {
+      return;
+    }
 
     let query = supabase
       .from("transactions")
@@ -393,8 +401,8 @@ function TransactionsPageContent() {
 
     if (filters?.listMode === "latest") {
       query = query
-        .order("created_at", { ascending: false })
-        .order("due_date", { ascending: false })
+        .order("created_at", { ascending: false, nullsFirst: false })
+        .order("id", { ascending: false })
         .limit(20);
     } else {
       query = query.order("due_date", { ascending: false });
@@ -446,6 +454,10 @@ function TransactionsPageContent() {
 
     const { data, error } = await query;
 
+    if (requestId !== loadTransactionsRequestIdRef.current) {
+      return;
+    }
+
     if (error) {
       console.error("Erro ao carregar lançamentos:", error);
       alert("Erro ao carregar lançamentos.");
@@ -456,7 +468,7 @@ function TransactionsPageContent() {
     const rawTransactions = (data ?? []) as unknown as Transaction[];
 
     if (filters?.listMode === "latest") {
-      setTransactions(rawTransactions);
+      setTransactions(sortLatestTransactionsForDisplay(rawTransactions));
     } else {
       const sortedTransactions = [...rawTransactions].sort((a, b) => {
         function getSortOrder(transaction: Transaction) {
@@ -641,10 +653,29 @@ function TransactionsPageContent() {
       type: typeFilter,
       status: statusFilter,
       categoryId: categoryFilter,
-      search: searchTerm,
+      search: debouncedSearchTerm,
       listMode,
     });
-  }, [competenceFilter, accountFilter, typeFilter, statusFilter, categoryFilter, listMode]);
+  }, [competenceFilter, accountFilter, typeFilter, statusFilter, categoryFilter, listMode, debouncedSearchTerm]);
+
+  useEffect(() => {
+    const normalizedSearchTerm = searchTerm.trim();
+
+    if (!normalizedSearchTerm) {
+      setDebouncedSearchTerm("");
+      return;
+    }
+
+    if (normalizedSearchTerm.length < 3) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setDebouncedSearchTerm(normalizedSearchTerm);
+    }, 450);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [searchTerm]);
 
   function resetForm() {
     const storedDefaults = getStoredTransactionDefaults();
@@ -815,7 +846,7 @@ function TransactionsPageContent() {
           }
           throw new Error(fuelRecordError.message);
         }
-        closeDrawer(); await loadTransactions({ competenceId: competenceFilter, accountId: accountFilter, type: typeFilter, status: statusFilter, categoryId: categoryFilter, search: searchTerm, listMode }); return;
+        closeDrawer(); await loadTransactions({ competenceId: competenceFilter, accountId: accountFilter, type: typeFilter, status: statusFilter, categoryId: categoryFilter, search: debouncedSearchTerm, listMode }); return;
       }
 
       if (form.type === "Transferência" && !editingTransactionId) {
@@ -897,7 +928,7 @@ function TransactionsPageContent() {
           type: typeFilter,
           status: statusFilter,
           categoryId: categoryFilter,
-          search: searchTerm,
+          search: debouncedSearchTerm,
           listMode,
         });
 
@@ -1015,7 +1046,7 @@ function TransactionsPageContent() {
         type: typeFilter,
         status: statusFilter,
         categoryId: categoryFilter,
-        search: searchTerm,
+        search: debouncedSearchTerm,
         listMode,
       });
     } catch (error) {
@@ -1055,7 +1086,7 @@ function TransactionsPageContent() {
         type: typeFilter,
         status: statusFilter,
         categoryId: categoryFilter,
-        search: searchTerm,
+        search: debouncedSearchTerm,
         listMode,
       });
     } catch (error) {
@@ -1169,6 +1200,10 @@ function TransactionsPageContent() {
       .replace(".", "");
   }
 
+  function formatCompactMonthLabel(date: Date) {
+    return formatMonthLabel(date).replace(" de ", " ");
+  }
+
   function selectCompetenceByDate(date: Date) {
     const foundCompetence = getCompetenceByDate(date);
 
@@ -1206,6 +1241,7 @@ function TransactionsPageContent() {
     const currentCompetenceId = getCurrentCompetenceId(competences);
 
     if (currentCompetenceId) {
+      setListMode("competence");
       setCompetenceFilter(currentCompetenceId);
     }
   }
@@ -1347,13 +1383,11 @@ function TransactionsPageContent() {
       : 0;
 
   const advancedFilterCount =
-    Number(listMode !== "competence") +
     Number(Boolean(categoryFilter)) +
     Number(Boolean(typeFilter)) +
     Number(Boolean(statusFilter));
 
   function clearAdvancedFilters() {
-    setListMode("competence");
     setCategoryFilter("");
     setTypeFilter("");
     setStatusFilter("");
@@ -1399,8 +1433,8 @@ function TransactionsPageContent() {
                   <ChevronLeft size={18} />
                 </button>
 
-                <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto sm:justify-center">
-                  {getVisibleMonthDates().map((date) => {
+                <div className="flex min-w-0 flex-1 items-center justify-center gap-1 overflow-hidden">
+                  {getVisibleMonthDates().map((date, index) => {
                     const foundCompetence = getCompetenceByDate(date);
                     const isSelected =
                       foundCompetence?.id === selectedCompetence?.id;
@@ -1416,7 +1450,7 @@ function TransactionsPageContent() {
                         type="button"
                         disabled={!foundCompetence}
                         onClick={() => selectCompetenceByDate(date)}
-                        className={`shrink-0 whitespace-nowrap rounded-lg px-3 py-1.5 text-xs font-semibold transition ${isSelected
+                        className={`${index < 2 || index > 4 ? "hidden sm:inline-flex" : "inline-flex"} shrink-0 whitespace-nowrap rounded-lg px-3 py-1.5 text-xs font-semibold transition ${isSelected
                           ? "bg-blue-600 text-white"
                           : isCurrentMonth
                             ? "bg-cyan-500/10 text-cyan-300"
@@ -1425,7 +1459,12 @@ function TransactionsPageContent() {
                               : "cursor-not-allowed bg-white/[0.02] text-slate-700"
                           }`}
                       >
-                        {formatMonthLabel(date)}
+                        <span className="sm:hidden">
+                          {formatCompactMonthLabel(date)}
+                        </span>
+                        <span className="hidden sm:inline">
+                          {formatMonthLabel(date)}
+                        </span>
                       </button>
                     );
                   })}
@@ -1449,26 +1488,14 @@ function TransactionsPageContent() {
               </button>
               </div>
         </div>
-        <div className="grid gap-2 sm:grid-cols-[minmax(220px,1fr)_minmax(210px,280px)_auto_auto]">
+        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-[minmax(220px,1fr)_minmax(180px,260px)_minmax(180px,240px)_auto_auto]">
           <label className="relative">
             <span className="sr-only">Buscar lançamento</span>
             <Search className="theme-muted pointer-events-none absolute left-3 top-1/2 -translate-y-1/2" size={16} />
             <input
               value={searchTerm}
               onChange={(event) => setSearchTerm(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") {
-                  loadTransactions({
-                    competenceId: competenceFilter,
-                    accountId: accountFilter,
-                    type: typeFilter,
-                    status: statusFilter,
-                    categoryId: categoryFilter,
-                    search: searchTerm,
-                    listMode,
-                  });
-                }
-              }}
+              enterKeyHint="search"
               placeholder="Buscar lançamento..."
               className="theme-field h-10 w-full rounded-xl border py-2 pl-9 pr-3 text-sm outline-none"
             />
@@ -1484,6 +1511,18 @@ function TransactionsPageContent() {
             {accounts.map((account) => (
               <option key={account.id} value={account.id}>{account.name}</option>
             ))}
+          </select>
+
+          <select
+            aria-label="Ordenação"
+            value={listMode}
+            onChange={(event) =>
+              setListMode(event.target.value as "competence" | "latest")
+            }
+            className="theme-field h-10 min-w-0 rounded-xl border px-3 text-sm outline-none"
+          >
+            <option value="competence">Por data do lançamento</option>
+            <option value="latest">Últimos 20 cadastrados</option>
           </select>
 
           <button
@@ -1778,18 +1817,6 @@ function TransactionsPageContent() {
             </div>
 
             <div className="space-y-4">
-              <label className="block">
-                <span className="theme-muted-strong mb-1.5 block text-sm font-semibold">Ordenação</span>
-                <select
-                  value={listMode}
-                  onChange={(event) => setListMode(event.target.value as "competence" | "latest")}
-                  className="theme-field w-full rounded-xl border px-4 py-3 text-sm outline-none"
-                >
-                  <option value="competence">Por data do lançamento</option>
-                  <option value="latest">Últimos 20 cadastrados</option>
-                </select>
-              </label>
-
               <label className="block">
                 <span className="theme-muted-strong mb-1.5 block text-sm font-semibold">Categoria</span>
                 <select
