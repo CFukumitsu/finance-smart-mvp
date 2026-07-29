@@ -20,7 +20,6 @@ import {
   calculateAccountFinalBalance,
   filterTransactionsUntilDate,
 } from "@/src/utils/balanceCalculations";
-import { getCompetenceDateRange } from "@/src/utils/competence";
 import { sortLatestTransactionsForDisplay } from "@/src/utils/transactionFilters";
 
 type Account = {
@@ -363,8 +362,7 @@ function TransactionsPageContent() {
       categoryId?: string;
       search?: string;
       listMode?: "competence" | "latest";
-    },
-    competenceOptions: Competence[] = competences,
+    }
   ) {
     const requestId = ++loadTransactionsRequestIdRef.current;
     setIsLoading(true);
@@ -409,27 +407,7 @@ function TransactionsPageContent() {
     }
 
     if (filters?.competenceId && filters?.listMode !== "latest") {
-      const selectedCompetence = competenceOptions.find(
-        (competence) => competence.id === filters.competenceId,
-      );
-
-      if (!selectedCompetence) {
-        console.error(
-          "Erro ao carregar lançamentos: competência selecionada não encontrada.",
-          filters.competenceId,
-        );
-        alert("Erro ao identificar o período da competência selecionada.");
-        setIsLoading(false);
-        return;
-      }
-
-      const range = getCompetenceDateRange(
-        selectedCompetence.year,
-        selectedCompetence.month,
-      );
-      query = query
-        .gte("due_date", range.startDate)
-        .lte("due_date", range.endDate);
+      query = query.eq("competence_id", filters.competenceId);
     }
 
     if (filters?.accountId) {
@@ -576,17 +554,14 @@ function TransactionsPageContent() {
         competence_id: defaultCompetenceId,
       }));
 
-      await loadTransactions(
-        {
-          competenceId: defaultCompetenceId,
-          accountId: "",
-          type: "",
-          status: "",
-          search: "",
-          listMode: "competence",
-        },
-        competencesResponse.data as Competence[],
-      );
+      await loadTransactions({
+        competenceId: defaultCompetenceId,
+        accountId: "",
+        type: "",
+        status: "",
+        search: "",
+        listMode: "competence",
+      });
     }
 
     setIsLoading(false);
