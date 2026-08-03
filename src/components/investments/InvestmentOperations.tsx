@@ -12,6 +12,10 @@ import type {
 } from "@/src/types/investments";
 import { calculateOperationValue } from "@/src/utils/investmentCalculations";
 import {
+  formatInvestmentMoneyInput,
+  parseInvestmentMoney,
+} from "@/src/utils/investmentFormatting";
+import {
   formatInvestmentDate,
   formatInvestmentMoney,
   formatInvestmentQuantity,
@@ -161,10 +165,10 @@ export default function InvestmentOperations({
         ? formatInvestmentQuantity(Math.abs(operation.quantity))
         : "",
       unitPrice: operation?.unit_price
-        ? formatInvestmentQuantity(operation.unit_price)
+        ? formatInvestmentMoneyInput(operation.unit_price)
         : "",
       fees: operation
-        ? formatInvestmentQuantity(operation.fees)
+        ? formatInvestmentMoneyInput(operation.fees)
         : "0",
       notes: operation?.notes ?? "",
     });
@@ -186,8 +190,8 @@ export default function InvestmentOperations({
     if (submissionLock.current) return;
 
     const quantity = parseInvestmentDecimal(form.quantity);
-    const unitPrice = parseInvestmentDecimal(form.unitPrice);
-    const fees = parseInvestmentDecimal(form.fees || "0");
+    const unitPrice = parseInvestmentMoney(form.unitPrice);
+    const fees = parseInvestmentMoney(form.fees || "0");
 
     if (!form.date) return alert("Informe a data da operação.");
     if (!form.assetId) return alert("Informe o ativo.");
@@ -246,7 +250,7 @@ export default function InvestmentOperations({
   const selectedAsset = assetsById.get(form.assetId);
   const formAccounts = eligibleAccounts(form.assetId, editing?.account_id);
   const previewQuantity = parseInvestmentDecimal(form.quantity);
-  const previewPrice = parseInvestmentDecimal(form.unitPrice);
+  const previewPrice = parseInvestmentMoney(form.unitPrice);
   const operationValue =
     Number.isFinite(previewQuantity) && Number.isFinite(previewPrice)
       ? Math.abs(previewQuantity) * previewPrice
@@ -531,6 +535,15 @@ export default function InvestmentOperations({
                     unitPrice: event.target.value.replace(/[^0-9.,]/g, ""),
                   })
                 }
+                onBlur={() => {
+                  const value = parseInvestmentMoney(form.unitPrice);
+                  if (Number.isFinite(value)) {
+                    setForm({
+                      ...form,
+                      unitPrice: formatInvestmentMoneyInput(value),
+                    });
+                  }
+                }}
                 placeholder="0,00"
               />
             </InvestmentInput>
@@ -545,6 +558,15 @@ export default function InvestmentOperations({
                     fees: event.target.value.replace(/[^0-9.,]/g, ""),
                   })
                 }
+                onBlur={() => {
+                  const value = parseInvestmentMoney(form.fees);
+                  if (Number.isFinite(value)) {
+                    setForm({
+                      ...form,
+                      fees: formatInvestmentMoneyInput(value),
+                    });
+                  }
+                }}
                 placeholder="0,00"
               />
             </InvestmentInput>
