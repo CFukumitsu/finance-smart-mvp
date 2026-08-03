@@ -37,12 +37,13 @@ function operation(
   unitPrice: number,
   fees = 0,
   date = "2026-07-01",
+  accountId = account.id,
 ): InvestmentOperation {
   return {
     id,
     owner_id: "owner",
     asset_id: asset.id,
-    account_id: account.id,
+    account_id: accountId,
     operation_type: quantity > 0 ? "Compra" : "Venda",
     operation_date: date,
     quantity,
@@ -191,4 +192,78 @@ test("resume patrimônio sem misturar moedas", () => {
 
 test("valor da operação ignora taxas conforme especificação da tela", () => {
   assert.equal(calculateOperationValue(operation("buy", 3, 12.5, 4)), 37.5);
+});
+
+test("mantém posições independentes para o mesmo ativo em contas diferentes", () => {
+  const secondAccount = { ...account, id: "second-account", name: "Banco B" };
+  const positions = calculateInvestmentPositions({
+    assets: [asset],
+    accounts: [account, secondAccount],
+    operations: [
+      operation("first", 4, 10, 0, "2026-07-01", account.id),
+      operation("second", 6, 20, 0, "2026-07-01", secondAccount.id),
+    ],
+    valuations: [],
+  });
+
+  assert.equal(positions.length, 2);
+  assert.deepEqual(
+    positions.map((position) => [position.accountId, position.quantity]),
+    [
+      [secondAccount.id, 6],
+      [account.id, 4],
+    ],
+  );
+});
+
+test("recalcula posição depois da edição de uma compra", () => {
+  const original = operation("buy", 10, 10, 2);
+  const edited = { ...original, quantity: 8, unit_price: 12, fees: 4 };
+  const [position] = calculateInvestmentPositions({
+    assets: [asset],
+    accounts: [account],
+    operations: [edited],
+    valuations: [],
+  });
+
+  assert.equal(position.quantity, 8);
+  assert.equal(position.investedValue, 100);
+  assert.equal(position.averagePrice, 12.5);
+});
+
+test("recalcula posição depois da exclusão de uma venda", () => {
+  const buy = operation("buy", 10, 10);
+  const sell = operation("sell", -3, 15, 1, "2026-07-02");
+  const beforeDelete = calculateInvestmentPositions({
+    assets: [asset],
+    accounts: [account],
+    operations: [buy, sell],
+    valuations: [],
+  });
+  const afterDelete = calculateInvestmentPositions({
+    assets: [asset],
+    accounts: [account],
+    operations: [buy],
+    valuations: [],
+  });
+
+  assert.equal(beforeDelete[0].quantity, 7);
+  assert.equal(afterDelete[0].quantity, 10);
+  assert.equal(afterDelete[0].currentValue, 100);
+});
+
+test("uma venda não reduz o custo médio da posição remanescente", () => {
+  const [position] = calculateInvestmentPositions({
+    assets: [asset],
+    accounts: [account],
+    operations: [
+      operation("buy", 10, 10, 2, "2026-07-01"),
+      operation("sell", -4, 20, 3, "2026-07-02"),
+    ],
+    valuations: [],
+  });
+
+  assert.equal(position.quantity, 6);
+  assert.equal(position.averagePrice, 10.2);
+  assert.equal(position.investedValue, 61.2);
 });

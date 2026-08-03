@@ -26,6 +26,11 @@ function fail(
 ) {
   if (!error) return;
   void logApplicationError(context, error, metadata);
+  if (error.code === "PGRST204" || error.code === "PGRST205") {
+    throw new Error(
+      "O banco de dados do módulo de Investimentos está desatualizado. Aplique as migrations pendentes e tente novamente.",
+    );
+  }
   throw new Error(error.message);
 }
 
@@ -33,8 +38,7 @@ function normalizeNumericOperation(operation: InvestmentOperation) {
   return {
     ...operation,
     quantity: Number(operation.quantity),
-    unit_price:
-      operation.unit_price === null ? null : Number(operation.unit_price),
+    unit_price: Number(operation.unit_price),
     fees: Number(operation.fees),
   };
 }
@@ -305,9 +309,13 @@ export async function saveInvestmentOperation(
         .update(payload)
         .eq("id", id)
         .eq("owner_id", ownerId)
+        .select("id")
+        .maybeSingle()
     : await supabase
         .from("investment_operations")
-        .insert({ ...payload, owner_id: ownerId });
+        .insert({ ...payload, owner_id: ownerId })
+        .select("id")
+        .single();
 
   fail(response.error, "Investimentos - salvar operação", {
     operationId: id,
@@ -315,6 +323,12 @@ export async function saveInvestmentOperation(
     assetId: input.asset_id,
     accountId: input.account_id,
   });
+
+  if (!response.data) {
+    throw new Error("A operação não foi encontrada ou não pertence ao usuário atual.");
+  }
+
+  return response.data.id;
 }
 
 export async function deleteInvestmentOperation(id: string) {
@@ -324,18 +338,30 @@ export async function deleteInvestmentOperation(id: string) {
 
   if (!original) throw new Error("A operação não foi encontrada.");
 
+  if (original.event_group_id) {
+    throw new Error(
+      "Esta operação pertence a um evento agrupado e não pode ser excluída isoladamente.",
+    );
+  }
+
   assertLedgerRemainsValid(
     operations.filter((operation) => operation.id !== id),
   );
 
-  const { error } = await supabase
+  const { data, error } = await supabase
     .from("investment_operations")
     .delete()
     .eq("id", id)
     .eq("owner_id", ownerId)
-    .is("event_group_id", null);
+    .is("event_group_id", null)
+    .select("id")
+    .maybeSingle();
 
   fail(error, "Investimentos - excluir operação", { operationId: id });
+
+  if (!data) {
+    throw new Error("A operação não foi encontrada ou não pôde ser excluída.");
+  }
 }
 
 function normalizeReferenceMonth(value: string) {

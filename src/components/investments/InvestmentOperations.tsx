@@ -385,7 +385,7 @@ export default function InvestmentOperations({
                   {formatInvestmentQuantity(Math.abs(operation.quantity))}
                 </InvestmentTd>
                 <InvestmentTd>
-                  {formatInvestmentMoney(operation.unit_price ?? 0, currency)}
+                  {formatInvestmentMoney(operation.unit_price, currency)}
                 </InvestmentTd>
                 <InvestmentTd>
                   {formatInvestmentMoney(

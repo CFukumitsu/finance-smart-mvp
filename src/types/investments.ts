@@ -20,7 +20,7 @@ export type InvestmentOperation = {
   operation_type: InvestmentOperationType;
   operation_date: string;
   quantity: number;
-  unit_price: number | null;
+  unit_price: number;
   fees: number;
   event_group_id: string | null;
   notes: string | null;

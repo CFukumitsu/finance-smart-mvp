@@ -34,7 +34,7 @@ export function calculateOperationValue(
   operation: Pick<InvestmentOperation, "quantity" | "unit_price">,
 ) {
   return round(
-    Math.abs(Number(operation.quantity)) * Number(operation.unit_price ?? 0),
+    Math.abs(Number(operation.quantity)) * Number(operation.unit_price),
     2,
   );
 }
@@ -116,7 +116,7 @@ export function calculateInvestmentPositions({
       ledger.quantity = round(ledger.quantity + quantity);
       ledger.costBasis = round(
         ledger.costBasis +
-          quantity * Number(operation.unit_price ?? 0) +
+          quantity * Number(operation.unit_price) +
           Number(operation.fees ?? 0),
         2,
       );
