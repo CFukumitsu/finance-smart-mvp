@@ -7,7 +7,7 @@ import type {
   InvestmentOperation,
 } from "../types/investments";
 // @ts-expect-error Node's native TypeScript test runner requires the extension.
-import { calculateInvestmentPositions, calculateOperationValue, findNegativeInvestmentPosition, summarizeInvestmentPositions } from "./investmentCalculations.ts";
+import { calculateInvestmentAssetSnapshot, calculateInvestmentPositions, calculateOperationValue, calculateValuationResult, findNegativeInvestmentPosition, summarizeInvestmentPositions, validateInvestmentValuation } from "./investmentCalculations.ts";
 
 const asset = {
   id: "asset",
@@ -62,6 +62,9 @@ const valuation = {
   asset_id: asset.id,
   reference_month: "2026-07-01",
   market_value: 15,
+  total_market_value: 150,
+  quantity_snapshot: 10,
+  average_price_snapshot: 10,
   notes: null,
   created_at: "",
   updated_at: "",
@@ -266,4 +269,85 @@ test("uma venda não reduz o custo médio da posição remanescente", () => {
   assert.equal(position.quantity, 6);
   assert.equal(position.averagePrice, 10.2);
   assert.equal(position.investedValue, 61.2);
+});
+
+test("100 unidades a R$ 18,53 resultam em R$ 1.853,00", () => {
+  const result = calculateValuationResult({ quantity: 100, averagePrice: 16.8, currentUnitValue: 18.53, currentValue: 0, source: "unit" });
+  assert.equal(result.currentValue, 1853);
+  assert.equal(result.investedValue, 1680);
+  assert.equal(result.result, 173);
+  assert.equal(result.profitability, 10.3);
+});
+
+test("R$ 2.000,00 para 100 unidades resultam em R$ 20,00 por unidade", () => {
+  const result = calculateValuationResult({ quantity: 100, averagePrice: 16.8, currentUnitValue: 0, currentValue: 2000, source: "total" });
+  assert.equal(result.currentUnitValue, 20);
+});
+
+test("valorização aceita quantidade fracionária sem ruído de ponto flutuante", () => {
+  const result = calculateValuationResult({ quantity: 0.015, averagePrice: 100000, currentUnitValue: 120000.12345678, currentValue: 0, source: "unit" });
+  assert.equal(result.currentValue, 1800);
+  assert.equal(result.investedValue, 1500);
+  assert.equal(result.result, 300);
+});
+
+test("rentabilidade é nula quando o valor investido é zero", () => {
+  const result = calculateValuationResult({ quantity: 1, averagePrice: 0, currentUnitValue: 10, currentValue: 0, source: "unit" });
+  assert.equal(result.profitability, null);
+});
+
+test("snapshot histórico ignora compra e venda posteriores", () => {
+  const operations = [
+    operation("buy", 100, 10, 0, "2026-08-01"),
+    operation("later-buy", 50, 20, 0, "2026-09-01"),
+    operation("later-sell", -25, 30, 0, "2026-10-01"),
+  ];
+  const snapshot = calculateInvestmentAssetSnapshot({ operations, assetId: asset.id, referenceMonth: "2026-08" });
+  assert.deepEqual(snapshot, { quantity: 100, investedValue: 1000, averagePrice: 10 });
+});
+
+test("edição usa os snapshots persistidos mesmo após operações posteriores", () => {
+  const historical = { quantity: valuation.quantity_snapshot!, averagePrice: valuation.average_price_snapshot! };
+  const result = calculateValuationResult({ ...historical, currentUnitValue: valuation.market_value, currentValue: valuation.total_market_value!, source: "unit" });
+  assert.equal(result.currentValue, 150);
+  assert.equal(result.investedValue, 100);
+});
+
+test("quantidade zero impede salvar valorização", () => {
+  assert.match(validateInvestmentValuation({ assetId: "asset", referenceMonth: "2026-08", quantity: 0, currentUnitValue: 10, currentValue: 100 })!, /não possui quantidade/);
+});
+
+test("preço negativo impede salvar valorização", () => {
+  assert.match(validateInvestmentValuation({ assetId: "asset", referenceMonth: "2026-08", quantity: 10, currentUnitValue: -1, currentValue: 100 })!, /negativos/);
+});
+
+test("valor total negativo impede salvar valorização", () => {
+  assert.match(validateInvestmentValuation({ assetId: "asset", referenceMonth: "2026-08", quantity: 10, currentUnitValue: 10, currentValue: -1 })!, /negativos/);
+});
+
+test("dashboard usa o valor total persistido quando o snapshot corresponde à posição", () => {
+  const positions = calculateInvestmentPositions({
+    assets: [asset],
+    accounts: [account],
+    operations: [operation("buy", 10, 10)],
+    valuations: [{ ...valuation, market_value: 15.12345678, total_market_value: 151.22 }],
+    referenceMonth: "2026-07",
+  });
+  assert.equal(positions[0].currentUnitValue, 15.12345678);
+  assert.equal(positions[0].currentValue, 151.22);
+});
+
+test("rateio entre contas preserva exatamente o valor total da valorização", () => {
+  const secondAccount = { ...account, id: "second-account", name: "Banco B" };
+  const positions = calculateInvestmentPositions({
+    assets: [asset],
+    accounts: [account, secondAccount],
+    operations: [
+      operation("first", 3, 10, 0, "2026-07-01", account.id),
+      operation("second", 7, 10, 0, "2026-07-01", secondAccount.id),
+    ],
+    valuations: [{ ...valuation, total_market_value: 100.01 }],
+    referenceMonth: "2026-07",
+  });
+  assert.equal(positions.reduce((sum, position) => sum + position.currentValue, 0), 100.01);
 });

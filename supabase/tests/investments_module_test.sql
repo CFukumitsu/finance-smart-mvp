@@ -121,6 +121,9 @@ insert into public.investment_monthly_valuations (
   asset_id,
   reference_month,
   market_value,
+  total_market_value,
+  quantity_snapshot,
+  average_price_snapshot,
   notes
 )
 values (
@@ -129,8 +132,45 @@ values (
   current_setting('investment_test.asset_id')::uuid,
   date '2026-08-01',
   14.50,
+  145.00,
+  10,
+  10.25,
   'Valor para validar os cards'
 );
+
+do $$
+declare
+  duplicate_rejected boolean := false;
+begin
+  begin
+    insert into public.investment_monthly_valuations (
+      owner_id,
+      asset_id,
+      reference_month,
+      market_value,
+      total_market_value,
+      quantity_snapshot,
+      average_price_snapshot
+    )
+    values (
+      auth.uid(),
+      current_setting('investment_test.asset_id')::uuid,
+      date '2026-08-01',
+      15,
+      150,
+      10,
+      10.25
+    );
+  exception
+    when unique_violation then
+      duplicate_rejected := true;
+  end;
+
+  if not duplicate_rejected then
+    raise exception 'Foi aceita uma valorização duplicada para o mesmo ativo/mês.';
+  end if;
+end;
+$$;
 
 do $$
 declare
@@ -237,6 +277,7 @@ select set_config('request.jwt.claim.sub', gen_random_uuid()::text, true);
 do $$
 declare
   visible_rows integer;
+  visible_valuations integer;
   cross_owner_insert_rejected boolean := false;
 begin
   select count(*)
@@ -246,6 +287,15 @@ begin
 
   if visible_rows <> 0 then
     raise exception 'RLS permitiu leitura de operações de outro usuário.';
+  end if;
+
+  select count(*)
+    into visible_valuations
+    from public.investment_monthly_valuations
+   where owner_id = current_setting('investment_test.owner_id')::uuid;
+
+  if visible_valuations <> 0 then
+    raise exception 'RLS permitiu leitura de valorizações de outro usuário.';
   end if;
 
   begin
@@ -311,6 +361,9 @@ begin
       from public.investment_monthly_valuations
      where id = current_setting('investment_test.valuation_id')::uuid
        and market_value = 14.50
+       and total_market_value = 145.00
+       and quantity_snapshot = 10
+       and average_price_snapshot = 10.25
   ) then
     raise exception 'A valorização necessária aos cards não foi carregada.';
   end if;

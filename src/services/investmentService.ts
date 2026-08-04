@@ -9,7 +9,7 @@ import type {
   InvestmentOperationInput,
   InvestmentValuationInput,
 } from "@/src/types/investments";
-import { findNegativeInvestmentPosition } from "@/src/utils/investmentCalculations";
+import { findNegativeInvestmentPosition, validateInvestmentValuation } from "@/src/utils/investmentCalculations";
 import { logApplicationError } from "@/src/utils/applicationErrorLogger";
 
 type ServiceError = {
@@ -47,6 +47,18 @@ function normalizeValuation(valuation: InvestmentMonthlyValuation) {
   return {
     ...valuation,
     market_value: Number(valuation.market_value),
+    total_market_value:
+      valuation.total_market_value === null
+        ? null
+        : Number(valuation.total_market_value),
+    quantity_snapshot:
+      valuation.quantity_snapshot === null
+        ? null
+        : Number(valuation.quantity_snapshot),
+    average_price_snapshot:
+      valuation.average_price_snapshot === null
+        ? null
+        : Number(valuation.average_price_snapshot),
   };
 }
 
@@ -373,10 +385,20 @@ export async function saveInvestmentValuation(
   id?: string,
 ) {
   const ownerId = await getCurrentUserId();
+  const validationError = validateInvestmentValuation({ assetId: input.asset_id, referenceMonth: input.reference_month, quantity: input.quantity_snapshot, currentUnitValue: input.market_value, currentValue: input.total_market_value });
+  if (validationError) throw new Error(validationError);
+  if (
+    !Number.isFinite(input.market_value) || input.market_value < 0 ||
+    !Number.isFinite(input.total_market_value) || input.total_market_value < 0 ||
+    !Number.isFinite(input.average_price_snapshot) || input.average_price_snapshot < 0
+  ) throw new Error("A valorização contém valores inválidos.");
   const payload = {
     asset_id: input.asset_id,
     reference_month: normalizeReferenceMonth(input.reference_month),
     market_value: input.market_value,
+    total_market_value: input.total_market_value,
+    quantity_snapshot: input.quantity_snapshot,
+    average_price_snapshot: input.average_price_snapshot,
     notes: input.notes,
   };
   const response = id
@@ -385,9 +407,13 @@ export async function saveInvestmentValuation(
         .update(payload)
         .eq("id", id)
         .eq("owner_id", ownerId)
+        .select("id")
+        .maybeSingle()
     : await supabase
         .from("investment_monthly_valuations")
-        .insert({ ...payload, owner_id: ownerId });
+        .insert({ ...payload, owner_id: ownerId })
+        .select("id")
+        .single();
 
   if (response.error?.code === "23505") {
     throw new Error("Já existe uma valorização desse ativo para o mês.");
@@ -398,6 +424,7 @@ export async function saveInvestmentValuation(
     assetId: input.asset_id,
     referenceMonth: payload.reference_month,
   });
+  if (!response.data) throw new Error("A valorização não foi encontrada ou não pertence ao usuário atual.");
 }
 
 export async function deleteInvestmentValuation(id: string) {

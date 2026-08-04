@@ -34,6 +34,9 @@ export type InvestmentMonthlyValuation = {
   asset_id: string;
   reference_month: string;
   market_value: number;
+  total_market_value: number | null;
+  quantity_snapshot: number | null;
+  average_price_snapshot: number | null;
   notes: string | null;
   created_at: string;
   updated_at: string;
@@ -76,6 +79,9 @@ export type InvestmentValuationInput = {
   asset_id: string;
   reference_month: string;
   market_value: number;
+  total_market_value: number;
+  quantity_snapshot: number;
+  average_price_snapshot: number;
   notes: string | null;
 };
 

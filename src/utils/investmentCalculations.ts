@@ -30,6 +30,131 @@ function operationOrder(
   );
 }
 
+function referenceMonthEnd(referenceMonth: string) {
+  return `${referenceMonth.slice(0, 7)}-31`;
+}
+
+export function calculateInvestmentAssetSnapshot({
+  operations,
+  assetId,
+  referenceMonth,
+}: {
+  operations: InvestmentOperation[];
+  assetId: string;
+  referenceMonth: string;
+}) {
+  const ledgers = new Map<string, { quantity: number; costBasis: number }>();
+
+  [...operations]
+    .filter(
+      (operation) =>
+        operation.asset_id === assetId &&
+        operation.operation_date <= referenceMonthEnd(referenceMonth),
+    )
+    .sort(operationOrder)
+    .forEach((operation) => {
+      const ledger = ledgers.get(operation.account_id) ?? {
+        quantity: 0,
+        costBasis: 0,
+      };
+      const quantity = Number(operation.quantity);
+
+      if (quantity > 0) {
+        ledger.quantity = round(ledger.quantity + quantity);
+        ledger.costBasis = round(
+          ledger.costBasis +
+            quantity * Number(operation.unit_price) +
+            Number(operation.fees ?? 0),
+          2,
+        );
+      } else if (quantity < 0 && ledger.quantity > QUANTITY_EPSILON) {
+        const soldQuantity = Math.abs(quantity);
+        const averagePrice = ledger.costBasis / ledger.quantity;
+        ledger.quantity = round(ledger.quantity - soldQuantity);
+        ledger.costBasis = round(
+          ledger.costBasis - soldQuantity * averagePrice,
+          2,
+        );
+
+        if (Math.abs(ledger.quantity) < QUANTITY_EPSILON) {
+          ledger.quantity = 0;
+          ledger.costBasis = 0;
+        }
+      }
+
+      ledgers.set(operation.account_id, ledger);
+    });
+
+  const quantity = round(
+    [...ledgers.values()].reduce((sum, ledger) => sum + ledger.quantity, 0),
+  );
+  const investedValue = round(
+    [...ledgers.values()].reduce((sum, ledger) => sum + ledger.costBasis, 0),
+    2,
+  );
+
+  return {
+    quantity,
+    investedValue,
+    averagePrice: quantity > QUANTITY_EPSILON ? round(investedValue / quantity) : 0,
+  };
+}
+
+export function calculateValuationResult({
+  quantity,
+  averagePrice,
+  currentUnitValue,
+  currentValue,
+  source,
+}: {
+  quantity: number;
+  averagePrice: number;
+  currentUnitValue: number;
+  currentValue: number;
+  source: "unit" | "total";
+}) {
+  const resolvedUnitValue =
+    source === "total" && quantity > QUANTITY_EPSILON
+      ? round(currentValue / quantity)
+      : round(currentUnitValue);
+  const resolvedCurrentValue =
+    source === "unit" ? round(quantity * resolvedUnitValue, 2) : round(currentValue, 2);
+  const investedValue = round(quantity * averagePrice, 2);
+  const result = round(resolvedCurrentValue - investedValue, 2);
+
+  return {
+    currentUnitValue: resolvedUnitValue,
+    currentValue: resolvedCurrentValue,
+    investedValue,
+    result,
+    profitability: investedValue > 0 ? round((result / investedValue) * 100, 2) : null,
+  };
+}
+
+export function validateInvestmentValuation({
+  assetId,
+  referenceMonth,
+  quantity,
+  currentUnitValue,
+  currentValue,
+}: {
+  assetId: string;
+  referenceMonth: string;
+  quantity: number;
+  currentUnitValue: number;
+  currentValue: number;
+}) {
+  if (!assetId) return "Informe o ativo.";
+  if (!/^\d{4}-\d{2}(?:-\d{2})?$/.test(referenceMonth)) return "Informe o mês de referência.";
+  if (!Number.isFinite(quantity) || quantity <= 0)
+    return "Este ativo não possui quantidade disponível no período selecionado. Registre primeiro uma operação de compra.";
+  if (!Number.isFinite(currentUnitValue) && !Number.isFinite(currentValue))
+    return "Informe o preço atual por unidade ou o valor atual da posição.";
+  if ((Number.isFinite(currentUnitValue) && currentUnitValue < 0) || (Number.isFinite(currentValue) && currentValue < 0))
+    return "Preço e valor atual não podem ser negativos.";
+  return null;
+}
+
 export function calculateOperationValue(
   operation: Pick<InvestmentOperation, "quantity" | "unit_price">,
 ) {
@@ -102,7 +227,10 @@ export function calculateInvestmentPositions({
     }
   >();
 
-  [...operations].sort(operationOrder).forEach((operation) => {
+  [...operations]
+    .filter((operation) => operation.operation_date <= referenceMonthEnd(referenceMonth))
+    .sort(operationOrder)
+    .forEach((operation) => {
     const key = `${operation.asset_id}:${operation.account_id}`;
     const ledger = ledgers.get(key) ?? {
       assetId: operation.asset_id,
@@ -136,10 +264,28 @@ export function calculateInvestmentPositions({
     }
 
     ledgers.set(key, ledger);
+    });
+
+  const openLedgers = [...ledgers.values()].filter(
+    (ledger) => ledger.quantity > QUANTITY_EPSILON,
+  );
+  const quantityByAsset = new Map<string, number>();
+  const ledgerCountByAsset = new Map<string, number>();
+  const seenByAsset = new Map<string, number>();
+  const allocatedValueByAsset = new Map<string, number>();
+
+  openLedgers.forEach((ledger) => {
+    quantityByAsset.set(
+      ledger.assetId,
+      round((quantityByAsset.get(ledger.assetId) ?? 0) + ledger.quantity),
+    );
+    ledgerCountByAsset.set(
+      ledger.assetId,
+      (ledgerCountByAsset.get(ledger.assetId) ?? 0) + 1,
+    );
   });
 
-  return [...ledgers.values()]
-    .filter((ledger) => ledger.quantity > QUANTITY_EPSILON)
+  return openLedgers
     .flatMap((ledger) => {
       const asset = assetsById.get(ledger.assetId);
       const account = accountsById.get(ledger.accountId);
@@ -151,7 +297,33 @@ export function calculateInvestmentPositions({
       const currentUnitValue = valuation
         ? Number(valuation.market_value)
         : averagePrice;
-      const currentValue = round(ledger.quantity * currentUnitValue, 2);
+      const assetQuantity = quantityByAsset.get(asset.id) ?? ledger.quantity;
+      const canUseValuationTotal = Boolean(
+        valuation?.total_market_value !== null &&
+          valuation?.total_market_value !== undefined &&
+          valuation.quantity_snapshot !== null &&
+          Math.abs(Number(valuation.quantity_snapshot) - assetQuantity) <
+            QUANTITY_EPSILON,
+      );
+      const seen = (seenByAsset.get(asset.id) ?? 0) + 1;
+      seenByAsset.set(asset.id, seen);
+      let currentValue = round(ledger.quantity * currentUnitValue, 2);
+
+      if (
+        canUseValuationTotal &&
+        valuation &&
+        valuation.total_market_value !== null
+      ) {
+        const totalMarketValue = Number(valuation.total_market_value);
+        const isLastLedger = seen === ledgerCountByAsset.get(asset.id);
+        currentValue = isLastLedger
+          ? round(totalMarketValue - (allocatedValueByAsset.get(asset.id) ?? 0), 2)
+          : round((totalMarketValue * ledger.quantity) / assetQuantity, 2);
+        allocatedValueByAsset.set(
+          asset.id,
+          round((allocatedValueByAsset.get(asset.id) ?? 0) + currentValue, 2),
+        );
+      }
       const investedValue = round(ledger.costBasis, 2);
       const unrealizedResult = round(currentValue - investedValue, 2);
 
