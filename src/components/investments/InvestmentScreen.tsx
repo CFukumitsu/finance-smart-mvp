@@ -4,7 +4,8 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { ChartNoAxesCombined } from "lucide-react";
 import { loadInvestmentData } from "@/src/services/investmentService";
-import type { InvestmentData } from "@/src/types/investments";
+import { loadInvestmentExchangeContext } from "@/src/services/exchangeRateService";
+import type { InvestmentData, InvestmentExchangeContext } from "@/src/types/investments";
 import { investmentCard } from "./InvestmentUi";
 import InvestmentDashboard from "./InvestmentDashboard";
 import InvestmentAssets from "./InvestmentAssets";
@@ -19,6 +20,12 @@ const emptyData: InvestmentData = {
   accounts: [],
 };
 
+const emptyExchangeContext: InvestmentExchangeContext = {
+  consolidationCurrency: "BRL",
+  rates: [],
+  warning: null,
+};
+
 const viewTitles: Record<InvestmentView, string> = {
   dashboard: "Visão geral",
   assets: "Ativos",
@@ -27,6 +34,7 @@ const viewTitles: Record<InvestmentView, string> = {
 
 export default function InvestmentScreen({ view }: { view: InvestmentView }) {
   const [data, setData] = useState<InvestmentData>(emptyData);
+  const [exchangeContext, setExchangeContext] = useState<InvestmentExchangeContext>(emptyExchangeContext);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -34,7 +42,12 @@ export default function InvestmentScreen({ view }: { view: InvestmentView }) {
     try {
       setLoading(true);
       setError("");
-      setData(await loadInvestmentData());
+      const investmentData = await loadInvestmentData();
+      const exchange = await loadInvestmentExchangeContext(
+        [...new Set(investmentData.assets.map((asset) => asset.currency))],
+      );
+      setData(investmentData);
+      setExchangeContext(exchange);
     } catch (value) {
       setError(
         value instanceof Error
@@ -50,8 +63,17 @@ export default function InvestmentScreen({ view }: { view: InvestmentView }) {
     let active = true;
 
     void loadInvestmentData()
+      .then(async (value) => ({
+        data: value,
+        exchange: await loadInvestmentExchangeContext(
+          [...new Set(value.assets.map((asset) => asset.currency))],
+        ),
+      }))
       .then((value) => {
-        if (active) setData(value);
+        if (active) {
+          setData(value.data);
+          setExchangeContext(value.exchange);
+        }
       })
       .catch((value: unknown) => {
         if (active) {
@@ -121,7 +143,7 @@ export default function InvestmentScreen({ view }: { view: InvestmentView }) {
           Carregando investimentos...
         </div>
       ) : view === "dashboard" ? (
-        <InvestmentDashboard data={data} reload={reload} />
+        <InvestmentDashboard data={data} exchangeContext={exchangeContext} reload={reload} />
       ) : view === "assets" ? (
         <InvestmentAssets data={data} reload={reload} />
       ) : (

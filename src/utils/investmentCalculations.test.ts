@@ -65,6 +65,9 @@ const valuation = {
   total_market_value: 150,
   quantity_snapshot: 10,
   average_price_snapshot: 10,
+  currency: "BRL",
+  consolidation_currency: "BRL",
+  exchange_rate: 1,
   notes: null,
   created_at: "",
   updated_at: "",
@@ -190,6 +193,35 @@ test("resume patrimônio sem misturar moedas", () => {
     unrealizedResult: 50,
     assetCount: 1,
     accountCount: 1,
+    missingRateAssetCount: 1,
+  });
+});
+
+test("consolida ativos BRL e USD com a taxa disponível", () => {
+  const usdAsset = { ...asset, id: "usd", name: "ETF", currency: "USD" };
+  const usdAccount = { ...account, id: "usd-account", currency: "USD" };
+  const positions = calculateInvestmentPositions({
+    assets: [asset, usdAsset],
+    accounts: [account, usdAccount],
+    operations: [
+      operation("brl", 10, 10),
+      { ...operation("usd", 2, 50, 0, "2026-07-01", usdAccount.id), asset_id: usdAsset.id },
+    ],
+    valuations: [valuation],
+    referenceMonth: "2026-07",
+  });
+  const rate = {
+    id: "rate", owner_id: "owner", base_currency: "USD", quote_currency: "BRL",
+    rate: 5.43, source: "PTAX" as const, quoted_at: "2026-08-04T12:00:00Z",
+    updated_by: "owner", created_at: "2026-08-04T12:00:00Z", updated_at: "2026-08-04T12:00:00Z",
+  };
+  assert.deepEqual(summarizeInvestmentPositions(positions, "BRL", [rate]), {
+    totalInvested: 643,
+    currentValue: 693,
+    unrealizedResult: 50,
+    assetCount: 2,
+    accountCount: 2,
+    missingRateAssetCount: 0,
   });
 });
 

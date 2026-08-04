@@ -1,10 +1,13 @@
 import type {
   InvestmentAccount,
   InvestmentAsset,
+  InvestmentExchangeRate,
   InvestmentMonthlyValuation,
   InvestmentOperation,
   InvestmentPosition,
 } from "@/src/types/investments";
+// @ts-expect-error Node's native TypeScript test runner requires the extension.
+import { convertInvestmentValue, resolveExchangeRate } from "./exchangeRateCalculations.ts";
 
 const QUANTITY_EPSILON = 0.00000001;
 
@@ -361,22 +364,37 @@ export function calculateInvestmentPositions({
 export function summarizeInvestmentPositions(
   positions: InvestmentPosition[],
   currency: string,
+  rates: InvestmentExchangeRate[] = [],
 ) {
-  const scoped = positions.filter((position) => position.currency === currency);
+  const converted = positions.flatMap((position) => {
+    const rate = resolveExchangeRate(position.currency, currency, rates);
+    const investedValue = convertInvestmentValue(position.investedValue, rate);
+    const currentValue = convertInvestmentValue(position.currentValue, rate);
+    return investedValue === null || currentValue === null
+      ? []
+      : [{ position, investedValue, currentValue }];
+  });
   const totalInvested = round(
-    scoped.reduce((sum, position) => sum + position.investedValue, 0),
+    converted.reduce((sum, item) => sum + item.investedValue, 0),
     2,
   );
   const currentValue = round(
-    scoped.reduce((sum, position) => sum + position.currentValue, 0),
+    converted.reduce((sum, item) => sum + item.currentValue, 0),
     2,
   );
+  const included = converted.map((item) => item.position);
+  const includedKeys = new Set(included.map((position) => position.key));
 
   return {
     totalInvested,
     currentValue,
     unrealizedResult: round(currentValue - totalInvested, 2),
-    assetCount: new Set(scoped.map((position) => position.assetId)).size,
-    accountCount: new Set(scoped.map((position) => position.accountId)).size,
+    assetCount: new Set(included.map((position) => position.assetId)).size,
+    accountCount: new Set(included.map((position) => position.accountId)).size,
+    missingRateAssetCount: new Set(
+      positions
+        .filter((position) => !includedKeys.has(position.key))
+        .map((position) => position.assetId),
+    ).size,
   };
 }

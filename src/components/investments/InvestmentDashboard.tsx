@@ -2,11 +2,12 @@
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
-import type { InvestmentData } from "@/src/types/investments";
+import type { InvestmentData, InvestmentExchangeContext, InvestmentPosition } from "@/src/types/investments";
 import {
   calculateInvestmentPositions,
   summarizeInvestmentPositions,
 } from "@/src/utils/investmentCalculations";
+import { convertInvestmentValue, resolveExchangeRate } from "@/src/utils/exchangeRateCalculations";
 import {
   formatInvestmentMoney,
   formatInvestmentMonth,
@@ -19,12 +20,15 @@ import {
   investmentField,
 } from "./InvestmentUi";
 import InvestmentValuations from "./InvestmentValuations";
+import InvestmentExchangeSettings from "./InvestmentExchangeSettings";
 
 export default function InvestmentDashboard({
   data,
+  exchangeContext,
   reload,
 }: {
   data: InvestmentData;
+  exchangeContext: InvestmentExchangeContext;
   reload: () => Promise<void>;
 }) {
   const positions = useMemo(
@@ -37,24 +41,21 @@ export default function InvestmentDashboard({
       }),
     [data],
   );
-  const currencies = useMemo(
-    () =>
-      [
-        ...new Set([
-          ...positions.map((position) => position.currency),
-          ...data.assets.map((asset) => asset.currency),
-        ]),
-      ].sort(),
-    [data.assets, positions],
-  );
-  const [currency, setCurrency] = useState(currencies[0] ?? "BRL");
   const [search, setSearch] = useState("");
   const [accountFilter, setAccountFilter] = useState("");
   const [sort, setSort] = useState("asset");
-  const selectedCurrency = currencies.includes(currency)
-    ? currency
-    : (currencies[0] ?? "BRL");
-  const summary = summarizeInvestmentPositions(positions, selectedCurrency);
+  const selectedCurrency = exchangeContext.consolidationCurrency;
+  const summary = summarizeInvestmentPositions(positions, selectedCurrency, exchangeContext.rates);
+  const convertedCurrentValue = (position: InvestmentPosition) =>
+    convertInvestmentValue(
+      position.currentValue,
+      resolveExchangeRate(position.currency, selectedCurrency, exchangeContext.rates),
+    );
+  const convertedResultValue = (position: InvestmentPosition) =>
+    convertInvestmentValue(
+      position.unrealizedResult,
+      resolveExchangeRate(position.currency, selectedCurrency, exchangeContext.rates),
+    );
   const accountsById = useMemo(
     () => new Map(data.accounts.map((account) => [account.id, account])),
     [data.accounts],
@@ -64,17 +65,12 @@ export default function InvestmentDashboard({
     [data.assets],
   );
   const scopedAccounts = data.accounts.filter((account) =>
-    positions.some(
-      (position) =>
-        position.currency === selectedCurrency &&
-        position.accountId === account.id,
-    ),
+    positions.some((position) => position.accountId === account.id),
   );
   const rows = positions
     .filter((position) => {
       const term = search.trim().toLocaleLowerCase("pt-BR");
       return (
-        position.currency === selectedCurrency &&
         (!accountFilter || position.accountId === accountFilter) &&
         (!term ||
           [
@@ -96,12 +92,13 @@ export default function InvestmentDashboard({
         );
       if (sort === "value-desc")
         return (
-          right.currentValue - left.currentValue ||
+          (convertedCurrentValue(right) ?? -1) - (convertedCurrentValue(left) ?? -1) ||
           left.assetName.localeCompare(right.assetName, "pt-BR")
         );
       if (sort === "result-desc")
         return (
-          right.unrealizedResult - left.unrealizedResult ||
+          (convertedResultValue(right) ?? Number.NEGATIVE_INFINITY) -
+            (convertedResultValue(left) ?? Number.NEGATIVE_INFINITY) ||
           left.assetName.localeCompare(right.assetName, "pt-BR")
         );
       return (
@@ -140,32 +137,13 @@ export default function InvestmentDashboard({
         </Link>
       </div>
 
-      <div className="flex flex-wrap items-center gap-3">
-        <label
-          htmlFor="investment-dashboard-currency"
-          className="text-sm font-semibold text-slate-300"
-        >
-          Moeda
-        </label>
-        <select
-          id="investment-dashboard-currency"
-          className={`${investmentField} w-40`}
-          value={selectedCurrency}
-          onChange={(event) => {
-            setCurrency(event.target.value);
-            setAccountFilter("");
-          }}
-        >
-          {currencies.map((item) => (
-            <option value={item} key={item}>
-              {item}
-            </option>
-          ))}
-        </select>
-        <span className="text-xs text-slate-500">
-          Valores de moedas diferentes não são somados sem uma taxa de câmbio.
-        </span>
-      </div>
+      <InvestmentExchangeSettings data={data} exchangeContext={exchangeContext} reload={reload} />
+
+      {summary.missingRateAssetCount > 0 && (
+        <p role="status" className="rounded-xl border border-amber-400/20 bg-amber-500/10 p-3 text-sm text-amber-200">
+          {summary.missingRateAssetCount} {summary.missingRateAssetCount === 1 ? "ativo não foi considerado" : "ativos não foram considerados"} por falta de cotação.
+        </p>
+      )}
 
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
         {[
@@ -333,6 +311,11 @@ export default function InvestmentDashboard({
                           position.currency,
                         )}
                       </span>
+                      {position.currency !== selectedCurrency && convertedCurrentValue(position) !== null && (
+                        <p className="mt-0.5 text-xs font-semibold text-cyan-300">
+                          ≈ {formatInvestmentMoney(convertedCurrentValue(position) ?? 0, selectedCurrency)}
+                        </p>
+                      )}
                       <p
                         className={`mt-0.5 text-xs ${
                           position.unrealizedResult >= 0
@@ -356,7 +339,7 @@ export default function InvestmentDashboard({
             title="Nenhuma posição encontrada"
             text={
               data.operations.length
-                ? "Ajuste os filtros ou selecione outra moeda."
+                ? "Ajuste os filtros da posição."
                 : "Registre uma compra para formar a primeira posição."
             }
             href={
@@ -367,7 +350,7 @@ export default function InvestmentDashboard({
         )}
       </section>
 
-      <InvestmentValuations data={data} reload={reload} />
+      <InvestmentValuations data={data} exchangeContext={exchangeContext} reload={reload} />
     </div>
   );
 }

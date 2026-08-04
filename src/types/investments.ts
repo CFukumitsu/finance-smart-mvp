@@ -37,9 +37,33 @@ export type InvestmentMonthlyValuation = {
   total_market_value: number | null;
   quantity_snapshot: number | null;
   average_price_snapshot: number | null;
+  currency: string;
+  consolidation_currency: string;
+  exchange_rate: number;
   notes: string | null;
   created_at: string;
   updated_at: string;
+};
+
+export type InvestmentExchangeRateSource = "PTAX" | "MANUAL";
+
+export type InvestmentExchangeRate = {
+  id: string;
+  owner_id: string;
+  base_currency: string;
+  quote_currency: string;
+  rate: number;
+  source: InvestmentExchangeRateSource;
+  quoted_at: string;
+  updated_by: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type InvestmentExchangeContext = {
+  consolidationCurrency: string;
+  rates: InvestmentExchangeRate[];
+  warning: string | null;
 };
 
 export type InvestmentAccount = {
@@ -82,6 +106,9 @@ export type InvestmentValuationInput = {
   total_market_value: number;
   quantity_snapshot: number;
   average_price_snapshot: number;
+  currency: string;
+  consolidation_currency: string;
+  exchange_rate: number;
   notes: string | null;
 };
 

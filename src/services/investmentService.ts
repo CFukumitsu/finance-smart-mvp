@@ -59,6 +59,7 @@ function normalizeValuation(valuation: InvestmentMonthlyValuation) {
       valuation.average_price_snapshot === null
         ? null
         : Number(valuation.average_price_snapshot),
+    exchange_rate: Number(valuation.exchange_rate),
   };
 }
 
@@ -390,7 +391,8 @@ export async function saveInvestmentValuation(
   if (
     !Number.isFinite(input.market_value) || input.market_value < 0 ||
     !Number.isFinite(input.total_market_value) || input.total_market_value < 0 ||
-    !Number.isFinite(input.average_price_snapshot) || input.average_price_snapshot < 0
+    !Number.isFinite(input.average_price_snapshot) || input.average_price_snapshot < 0 ||
+    !Number.isFinite(input.exchange_rate) || input.exchange_rate <= 0
   ) throw new Error("A valorização contém valores inválidos.");
   const payload = {
     asset_id: input.asset_id,
@@ -399,6 +401,9 @@ export async function saveInvestmentValuation(
     total_market_value: input.total_market_value,
     quantity_snapshot: input.quantity_snapshot,
     average_price_snapshot: input.average_price_snapshot,
+    currency: input.currency.trim().toUpperCase(),
+    consolidation_currency: input.consolidation_currency.trim().toUpperCase(),
+    exchange_rate: input.exchange_rate,
     notes: input.notes,
   };
   const response = id

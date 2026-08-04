@@ -2,7 +2,8 @@
 
 import { useCallback, useMemo, useRef, useState } from "react";
 import { deleteInvestmentValuation, saveInvestmentValuation } from "@/src/services/investmentService";
-import type { InvestmentData, InvestmentMonthlyValuation } from "@/src/types/investments";
+import type { InvestmentData, InvestmentExchangeContext, InvestmentMonthlyValuation } from "@/src/types/investments";
+import { resolveExchangeRate } from "@/src/utils/exchangeRateCalculations";
 import { calculateInvestmentAssetSnapshot, calculateValuationResult, validateInvestmentValuation } from "@/src/utils/investmentCalculations";
 import { formatInvestmentMoneyInput } from "@/src/utils/investmentFormatting";
 import {
@@ -32,7 +33,7 @@ type ValuationForm = {
   notes: string;
 };
 
-export default function InvestmentValuations({ data, reload }: { data: InvestmentData; reload: () => Promise<void> }) {
+export default function InvestmentValuations({ data, exchangeContext, reload }: { data: InvestmentData; exchangeContext: InvestmentExchangeContext; reload: () => Promise<void> }) {
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState("month-desc");
   const [open, setOpen] = useState(false);
@@ -119,6 +120,10 @@ export default function InvestmentValuations({ data, reload }: { data: Investmen
     if (validationError) return alert(validationError);
     if (!Number.isFinite(result.currentUnitValue) || !Number.isFinite(result.currentValue)) return alert("Não foi possível calcular uma valorização válida.");
     if (!editing && data.valuations.some((valuation) => valuation.asset_id === form.assetId && valuation.reference_month.slice(0, 7) === form.month)) return alert("Já existe uma valorização desse ativo para o mês.");
+    const valuationCurrency = editing?.currency ?? selectedAsset?.currency;
+    const consolidationCurrency = editing?.consolidation_currency ?? exchangeContext.consolidationCurrency;
+    const exchangeRate = editing?.exchange_rate ?? (valuationCurrency ? resolveExchangeRate(valuationCurrency, consolidationCurrency, exchangeContext.rates) : null);
+    if (!valuationCurrency || exchangeRate === null) return alert("Não existe cotação disponível para preservar este snapshot na moeda de consolidação.");
 
     try {
       submissionLock.current = true;
@@ -130,6 +135,9 @@ export default function InvestmentValuations({ data, reload }: { data: Investmen
         total_market_value: result.currentValue,
         quantity_snapshot: snapshot.quantity,
         average_price_snapshot: snapshot.averagePrice,
+        currency: valuationCurrency,
+        consolidation_currency: consolidationCurrency,
+        exchange_rate: exchangeRate,
         notes: form.notes.trim() || null,
       }, editing?.id);
       setOpen(false);
@@ -161,14 +169,15 @@ export default function InvestmentValuations({ data, reload }: { data: Investmen
       <InvestmentAddButton onClick={() => show()}>Nova valorização</InvestmentAddButton>
     </InvestmentToolbar>
 
-    {rows.length ? <InvestmentTable headers={["Mês", "Ativo", "Preço por unidade", "Valor da posição", "Observações", "Ações"]} minWidth="900px">
+    {rows.length ? <InvestmentTable headers={["Mês", "Ativo", "Preço por unidade", "Valor da posição", "Valor consolidado", "Observações", "Ações"]} minWidth="1040px">
       {rows.map((valuation) => {
         const asset = assetsById.get(valuation.asset_id);
         return <tr key={valuation.id} className="border-t border-white/10">
           <InvestmentTd>{formatInvestmentMonth(valuation.reference_month)}</InvestmentTd>
           <InvestmentTd strong>{asset?.symbol || asset?.name || "Ativo indisponível"}</InvestmentTd>
-          <InvestmentTd>{formatInvestmentMoney(valuation.market_value, asset?.currency ?? "BRL")}</InvestmentTd>
-          <InvestmentTd>{valuation.total_market_value === null ? "—" : formatInvestmentMoney(valuation.total_market_value, asset?.currency ?? "BRL")}</InvestmentTd>
+          <InvestmentTd>{formatInvestmentMoney(valuation.market_value, valuation.currency)}</InvestmentTd>
+          <InvestmentTd>{valuation.total_market_value === null ? "—" : formatInvestmentMoney(valuation.total_market_value, valuation.currency)}</InvestmentTd>
+          <InvestmentTd>{valuation.total_market_value === null ? "—" : formatInvestmentMoney(valuation.total_market_value * valuation.exchange_rate, valuation.consolidation_currency)}</InvestmentTd>
           <InvestmentTd>{valuation.notes || "—"}</InvestmentTd>
           <InvestmentTd><InvestmentActions onEdit={() => show(valuation)} onDelete={() => void remove(valuation)} /></InvestmentTd>
         </tr>;

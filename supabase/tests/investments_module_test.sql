@@ -26,6 +26,7 @@ select set_config('investment_test.usd_asset_id', gen_random_uuid()::text, true)
 select set_config('investment_test.buy_id', gen_random_uuid()::text, true);
 select set_config('investment_test.sale_id', gen_random_uuid()::text, true);
 select set_config('investment_test.valuation_id', gen_random_uuid()::text, true);
+select set_config('investment_test.rate_id', gen_random_uuid()::text, true);
 
 insert into public.accounts (
   id,
@@ -124,6 +125,9 @@ insert into public.investment_monthly_valuations (
   total_market_value,
   quantity_snapshot,
   average_price_snapshot,
+  currency,
+  consolidation_currency,
+  exchange_rate,
   notes
 )
 values (
@@ -135,12 +139,27 @@ values (
   145.00,
   10,
   10.25,
+  'BRL',
+  'BRL',
+  1,
   'Valor para validar os cards'
+);
+
+insert into public.investment_settings (owner_id, consolidation_currency)
+values (auth.uid(), 'BRL');
+
+insert into public.investment_exchange_rates (
+  id, owner_id, base_currency, quote_currency, rate, source, quoted_at, updated_by
+)
+values (
+  current_setting('investment_test.rate_id')::uuid,
+  auth.uid(), 'USD', 'BRL', 5.43, 'MANUAL', now(), auth.uid()
 );
 
 do $$
 declare
   duplicate_rejected boolean := false;
+  snapshot_currency_rejected boolean := false;
 begin
   begin
     insert into public.investment_monthly_valuations (
@@ -151,6 +170,9 @@ begin
       total_market_value,
       quantity_snapshot,
       average_price_snapshot
+      , currency
+      , consolidation_currency
+      , exchange_rate
     )
     values (
       auth.uid(),
@@ -160,6 +182,9 @@ begin
       150,
       10,
       10.25
+      , 'BRL'
+      , 'BRL'
+      , 1
     );
   exception
     when unique_violation then
@@ -168,6 +193,23 @@ begin
 
   if not duplicate_rejected then
     raise exception 'Foi aceita uma valorização duplicada para o mesmo ativo/mês.';
+  end if;
+
+  begin
+    insert into public.investment_monthly_valuations (
+      owner_id, asset_id, reference_month, market_value, total_market_value,
+      quantity_snapshot, average_price_snapshot, currency,
+      consolidation_currency, exchange_rate
+    ) values (
+      auth.uid(), current_setting('investment_test.asset_id')::uuid,
+      date '2026-09-01', 15, 150, 10, 10.25, 'USD', 'BRL', 5.43
+    );
+  exception
+    when check_violation then snapshot_currency_rejected := true;
+  end;
+
+  if not snapshot_currency_rejected then
+    raise exception 'Foi aceito snapshot com moeda diferente da moeda do ativo.';
   end if;
 end;
 $$;
@@ -278,6 +320,7 @@ do $$
 declare
   visible_rows integer;
   visible_valuations integer;
+  visible_rates integer;
   cross_owner_insert_rejected boolean := false;
 begin
   select count(*)
@@ -296,6 +339,13 @@ begin
 
   if visible_valuations <> 0 then
     raise exception 'RLS permitiu leitura de valorizações de outro usuário.';
+  end if;
+
+  select count(*) into visible_rates
+    from public.investment_exchange_rates
+   where owner_id = current_setting('investment_test.owner_id')::uuid;
+  if visible_rates <> 0 then
+    raise exception 'RLS permitiu leitura de cotações de outro usuário.';
   end if;
 
   begin
@@ -364,8 +414,26 @@ begin
        and total_market_value = 145.00
        and quantity_snapshot = 10
        and average_price_snapshot = 10.25
+       and currency = 'BRL'
+       and consolidation_currency = 'BRL'
+       and exchange_rate = 1
   ) then
     raise exception 'A valorização necessária aos cards não foi carregada.';
+  end if;
+end;
+$$;
+
+do $$
+begin
+  if not exists (
+    select 1 from public.investment_exchange_rates
+     where id = current_setting('investment_test.rate_id')::uuid
+       and owner_id = auth.uid()
+       and rate = 5.43
+       and source = 'MANUAL'
+       and updated_by = auth.uid()
+  ) then
+    raise exception 'A cotação manual e sua autoria não foram preservadas.';
   end if;
 end;
 $$;
