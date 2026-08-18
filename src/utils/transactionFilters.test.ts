@@ -3,7 +3,7 @@ import test from "node:test";
 // @ts-expect-error Node's native TypeScript test runner requires the extension.
 import { sortLatestTransactionsForDisplay } from "./transactionFilters.ts";
 
-test("ordena os últimos cadastrados pela data financeira exibida", () => {
+test("ordena os últimos cadastrados por created_at, sem usar a data financeira", () => {
   const transactions = [
     {
       id: "older-financial-date",
@@ -19,11 +19,11 @@ test("ordena os últimos cadastrados pela data financeira exibida", () => {
 
   assert.deepEqual(
     sortLatestTransactionsForDisplay(transactions).map(({ id }) => id),
-    ["newer-financial-date", "older-financial-date"],
+    ["older-financial-date", "newer-financial-date"],
   );
 });
 
-test("desempata por created_at e depois por id", () => {
+test("desempata por id quando created_at é igual", () => {
   const transactions = [
     {
       id: "a",

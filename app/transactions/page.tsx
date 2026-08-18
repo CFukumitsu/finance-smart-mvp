@@ -397,16 +397,7 @@ function TransactionsPageContent() {
         `)
       .eq("owner_id", ownerId)
 
-    if (filters?.listMode === "latest") {
-      query = query
-        .order("created_at", { ascending: false, nullsFirst: false })
-        .order("id", { ascending: false })
-        .limit(20);
-    } else {
-      query = query.order("due_date", { ascending: false });
-    }
-
-    if (filters?.competenceId && filters?.listMode !== "latest") {
+    if (filters?.competenceId) {
       query = query.eq("competence_id", filters.competenceId);
     }
 
@@ -428,6 +419,15 @@ function TransactionsPageContent() {
 
     if (filters?.search) {
       query = query.ilike("description", `%${filters.search}%`);
+    }
+
+    if (filters?.listMode === "latest") {
+      query = query
+        .order("created_at", { ascending: false, nullsFirst: false })
+        .order("id", { ascending: false })
+        .limit(20);
+    } else {
+      query = query.order("due_date", { ascending: false });
     }
 
     const { data, error } = await query;

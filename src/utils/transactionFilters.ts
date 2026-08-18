@@ -8,12 +8,6 @@ export function sortLatestTransactionsForDisplay<
   T extends LatestTransactionSortable,
 >(transactions: readonly T[]): T[] {
   return [...transactions].sort((a, b) => {
-    const dueDateDifference = b.due_date.localeCompare(a.due_date);
-
-    if (dueDateDifference !== 0) {
-      return dueDateDifference;
-    }
-
     const createdAtDifference = (b.created_at ?? "").localeCompare(
       a.created_at ?? "",
     );

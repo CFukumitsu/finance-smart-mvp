@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import Link from "next/link";
+import { ChevronLeft, ChevronRight, Plus } from "lucide-react";
 import AppShell from "../../components/layout/AppShell";
 import { getCurrentUserId, supabase } from "@/src/lib/supabase";
 import { updateOverduePaymentStatusesOncePerDay } from "@/src/services/paymentStatusService";
@@ -510,12 +511,22 @@ export default function DashboardPage() {
     <AppShell>
       <div className="space-y-8">
         <div className="space-y-4">
-          <div>
-            <h1 className="text-3xl font-bold text-white">Dashboard</h1>
-            <p className="mt-1 text-sm text-slate-400">
-              Projeção do fluxo do mês seguinte com cartões da competência selecionada.
-              {currentCompetence ? ` Referência: ${currentCompetence.name}` : "."}
-            </p>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h1 className="text-3xl font-bold text-white">Dashboard</h1>
+              <p className="mt-1 text-sm text-slate-400">
+                Projeção do fluxo do mês seguinte com cartões da competência selecionada.
+                {currentCompetence ? ` Referência: ${currentCompetence.name}` : "."}
+              </p>
+            </div>
+
+            <Link
+              href="/transactions?new=true"
+              className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-sm font-semibold text-white transition hover:bg-white/10 sm:w-auto"
+            >
+              <Plus size={16} />
+              Novo lançamento
+            </Link>
           </div>
 
           <div className="w-full rounded-xl border border-white/10 bg-slate-900 p-2">
