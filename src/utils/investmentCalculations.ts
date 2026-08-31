@@ -452,12 +452,14 @@ export function calculateInvestmentAccountSummaries({
         2,
       );
       const capitalBase = round(openingBalance + applications, 2);
+      const investedValue = round(balance - result, 2);
 
       return {
         accountId: account.id,
         accountName: account.name,
         currency: account.currency ?? "BRL",
         balance,
+        investedValue,
         openingBalance,
         applications,
         redemptions,
@@ -486,11 +488,11 @@ export function summarizeInvestmentWealth({
   const convertedAccounts = balanceAccounts.flatMap((account) => {
     const rate = resolveExchangeRate(account.currency, currency, rates);
     const balance = convertInvestmentValue(account.balance, rate);
-    const applications = convertInvestmentValue(account.applications, rate);
+    const investedValue = convertInvestmentValue(account.investedValue, rate);
     const result = convertInvestmentValue(account.result, rate);
-    return balance === null || applications === null || result === null
+    return balance === null || investedValue === null || result === null
       ? []
-      : [{ balance, applications, result }];
+      : [{ balance, investedValue, result }];
   });
 
   return {
@@ -501,7 +503,7 @@ export function summarizeInvestmentWealth({
     ),
     totalInvested: round(
       positionSummary.totalInvested +
-        convertedAccounts.reduce((sum, account) => sum + account.applications, 0),
+        convertedAccounts.reduce((sum, account) => sum + account.investedValue, 0),
       2,
     ),
     result: round(

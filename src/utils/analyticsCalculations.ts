@@ -29,10 +29,14 @@ function getCashMovement(
   if (transaction.type === "Transferência") {
     if (!accountId) return { cashIn: 0, cashOut: 0 };
 
-    if (
+    const isBankrollIntegration =
       transaction.bankroll_integration_group_id ||
-      transaction.bankroll_operation_type
-    ) {
+      transaction.bankroll_operation_type;
+    const isInvestmentIntegration =
+      transaction.investment_integration_group_id ||
+      transaction.investment_event_type;
+
+    if (isBankrollIntegration || isInvestmentIntegration) {
       const isPendingIncluded = includePending && transaction.status === "Pendente";
       const isSettled =
         transaction.status === "Pago" ||
@@ -46,6 +50,12 @@ function getCashMovement(
         return { cashIn: 0, cashOut: value };
       }
       if (transaction.bankroll_operation_type === "withdrawal") {
+        return { cashIn: value, cashOut: 0 };
+      }
+      if (transaction.investment_event_type === "application") {
+        return { cashIn: 0, cashOut: value };
+      }
+      if (transaction.investment_event_type === "redemption") {
         return { cashIn: value, cashOut: 0 };
       }
       return { cashIn: 0, cashOut: 0 };

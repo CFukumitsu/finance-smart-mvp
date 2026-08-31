@@ -115,6 +115,7 @@ export type InvestmentAccountEventInput = {
   event_date: string;
   amount: number;
   notes: string | null;
+  idempotency_key?: string;
 };
 
 export type InvestmentBalanceAccountSummary = {
@@ -122,6 +123,7 @@ export type InvestmentBalanceAccountSummary = {
   accountName: string;
   currency: string;
   balance: number;
+  investedValue: number;
   openingBalance: number;
   applications: number;
   redemptions: number;

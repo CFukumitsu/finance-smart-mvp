@@ -28,6 +28,8 @@ export type AnalyticsTransaction = {
   destination_account_id: string | null;
   bankroll_integration_group_id?: string | null;
   bankroll_operation_type?: "deposit" | "withdrawal" | null;
+  investment_integration_group_id?: string | null;
+  investment_event_type?: "application" | "redemption" | null;
   description: string;
   due_date: string;
   type: "Receita" | "Despesa" | "Transferência" | "Pagamento de Fatura";

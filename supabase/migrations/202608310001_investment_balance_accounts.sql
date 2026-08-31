@@ -114,6 +114,9 @@ create unique index investment_account_events_group_key
 create unique index investment_account_events_finance_transaction_key
   on public.investment_account_events (finance_transaction_id)
   where finance_transaction_id is not null;
+create unique index investment_account_events_single_opening_balance_key
+  on public.investment_account_events (owner_id, investment_account_id)
+  where event_type = 'opening_balance';
 create index investment_account_events_owner_account_date_idx
   on public.investment_account_events (owner_id, investment_account_id, event_date, created_at, id);
 
@@ -201,8 +204,6 @@ as $$
       when movement.investment_integration_group_id = p_excluded_integration_group_id then 0
       when movement.account_id = p_account_id and movement.type = 'Receita'
         then abs(movement.value)
-      when movement.destination_account_id = p_account_id and movement.type = 'Transferência'
-        then abs(movement.value)
       when movement.account_id = p_account_id and movement.type = 'Transferência'
         and movement.status = 'Recebido' then abs(movement.value)
       when movement.account_id = p_account_id
@@ -215,10 +216,7 @@ as $$
     from public.accounts account_row
     left join public.transactions movement
       on movement.owner_id = p_owner_id
-     and (
-       movement.account_id = account_row.id
-       or movement.destination_account_id = account_row.id
-     )
+     and movement.account_id = account_row.id
    where account_row.owner_id = p_owner_id
      and account_row.id = p_account_id
    group by account_row.current_balance;
@@ -360,6 +358,11 @@ begin
   if p_date is null or p_amount is null or p_amount <= 0 or p_idempotency_key is null then
     raise exception 'Data, valor positivo e chave de idempotência são obrigatórios.' using errcode = '22023';
   end if;
+
+  -- Serializa tentativas concorrentes com a mesma chave antes da consulta.
+  perform pg_advisory_xact_lock(
+    hashtextextended(authenticated_owner_id::text || ':' || p_idempotency_key::text, 0)
+  );
 
   select * into existing_event
     from public.investment_account_events event
@@ -623,7 +626,8 @@ begin
   if authenticated_owner_id is null then raise exception 'Usuário não autenticado.' using errcode = '28000'; end if;
   select * into event_row from public.investment_account_events
    where id = p_event_id and owner_id = authenticated_owner_id for update;
-  if event_row.id is null then raise exception 'Movimentação não encontrada.' using errcode = '42501'; end if;
+  -- Uma repetição do mesmo pedido de exclusão deve ser segura e não produzir erro.
+  if event_row.id is null then return; end if;
   select * into competence_row from public.competences
    where owner_id = authenticated_owner_id
      and year = extract(year from event_row.event_date)::integer

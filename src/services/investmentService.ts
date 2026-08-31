@@ -1,4 +1,5 @@
 import { getCurrentUserId, supabase } from "@/src/lib/supabase";
+import { ensureCompetenceExists } from "@/src/services/competenceService";
 import type {
   InvestmentAccount,
   InvestmentAccountEvent,
@@ -128,6 +129,7 @@ export async function saveInvestmentAccountEvent(
   id?: string,
 ) {
   await getCurrentUserId();
+  await ensureCompetenceExists(input.event_date);
   const response = id
     ? await supabase.rpc("update_investment_account_event", {
         p_event_id: id,
@@ -145,7 +147,7 @@ export async function saveInvestmentAccountEvent(
         p_date: input.event_date,
         p_amount: input.amount,
         p_notes: input.notes,
-        p_idempotency_key: crypto.randomUUID(),
+        p_idempotency_key: input.idempotency_key ?? crypto.randomUUID(),
       });
 
   fail(response.error, "Investimentos - salvar movimentação por saldo", {

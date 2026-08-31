@@ -11,7 +11,7 @@ export async function deleteTransaction(id: string): Promise<ServiceResult> {
 
   const { data: existingTransaction, error: findError } = await supabase
     .from("transactions")
-    .select("competence_id, bankroll_integration_group_id")
+    .select("competence_id, bankroll_integration_group_id, investment_integration_group_id")
     .eq("id", id)
     .eq("owner_id", ownerId)
     .single();
@@ -27,6 +27,13 @@ export async function deleteTransaction(id: string): Promise<ServiceResult> {
     return {
       success: false,
       message: "Esta operação está vinculada ao Financeiro e deve ser excluída pelo módulo Bankroll.",
+    };
+  }
+
+  if (existingTransaction.investment_integration_group_id) {
+    return {
+      success: false,
+      message: "Esta transferência deve ser excluída pelo módulo de Investimentos.",
     };
   }
 
