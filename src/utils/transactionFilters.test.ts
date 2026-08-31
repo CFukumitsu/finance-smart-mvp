@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 // @ts-expect-error Node's native TypeScript test runner requires the extension.
-import { sortLatestTransactionsForDisplay } from "./transactionFilters.ts";
+import { sortLatestTransactionsForDisplay, sortTransactionsByCashDirection } from "./transactionFilters.ts";
 
 test("ordena os últimos cadastrados por created_at, sem usar a data financeira", () => {
   const transactions = [
@@ -67,5 +67,68 @@ test("não altera a coleção original", () => {
   assert.deepEqual(
     transactions.map(({ id }) => id),
     ["first", "second"],
+  );
+});
+
+test("ordena resgate de investimento junto com receitas", () => {
+  const transactions = [
+    {
+      id: "application",
+      due_date: "2026-08-01",
+      type: "Transferência",
+      account_id: "checking",
+      investment_event_type: "application" as const,
+    },
+    {
+      id: "expense",
+      due_date: "2026-08-02",
+      type: "Despesa",
+      account_id: "checking",
+    },
+    {
+      id: "redemption",
+      due_date: "2026-08-03",
+      type: "Transferência",
+      account_id: "checking",
+      investment_event_type: "redemption" as const,
+    },
+    {
+      id: "income",
+      due_date: "2026-08-04",
+      type: "Receita",
+      account_id: "checking",
+    },
+  ];
+
+  assert.deepEqual(
+    sortTransactionsByCashDirection(transactions, "checking").map(
+      ({ id }) => id,
+    ),
+    ["redemption", "income", "application", "expense"],
+  );
+});
+
+test("resgate integrado só é crédito da conta financeira vinculada", () => {
+  const transactions = [
+    {
+      id: "redemption",
+      due_date: "2026-08-03",
+      type: "Transferência",
+      account_id: "checking",
+      investment_event_type: "redemption" as const,
+    },
+    {
+      id: "other-income",
+      due_date: "2026-08-04",
+      type: "Receita",
+      account_id: "other",
+    },
+  ];
+
+  assert.deepEqual(
+    sortTransactionsByCashDirection(transactions, "other").map(
+      ({ id }) => id,
+    ),
+    ["other-income", "redemption"],
   );
 });

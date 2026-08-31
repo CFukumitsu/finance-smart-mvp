@@ -20,7 +20,10 @@ import {
   calculateAccountFinalBalance,
   filterTransactionsUntilDate,
 } from "@/src/utils/balanceCalculations";
-import { sortLatestTransactionsForDisplay } from "@/src/utils/transactionFilters";
+import {
+  sortLatestTransactionsForDisplay,
+  sortTransactionsByCashDirection,
+} from "@/src/utils/transactionFilters";
 
 type Account = {
   id: string;
@@ -452,33 +455,12 @@ function TransactionsPageContent() {
     if (filters?.listMode === "latest") {
       setTransactions(sortLatestTransactionsForDisplay(rawTransactions));
     } else {
-      const sortedTransactions = [...rawTransactions].sort((a, b) => {
-        function getSortOrder(transaction: Transaction) {
-          if (transaction.type === "Receita") {
-            return 1;
-          }
-
-          if (
-            transaction.type === "Transferência" &&
-            filters?.accountId &&
-            transaction.destination_account_id === filters.accountId
-          ) {
-            return 1;
-          }
-
-          return 2;
-        }
-
-        const typeDiff = getSortOrder(a) - getSortOrder(b);
-
-        if (typeDiff !== 0) {
-          return typeDiff;
-        }
-
-        return new Date(a.due_date).getTime() - new Date(b.due_date).getTime();
-      });
-
-      setTransactions(sortedTransactions);
+      setTransactions(
+        sortTransactionsByCashDirection(
+          rawTransactions,
+          filters?.accountId ?? "",
+        ),
+      );
     }
 
     setIsLoading(false);
