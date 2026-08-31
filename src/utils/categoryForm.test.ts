@@ -1,10 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 // @ts-expect-error Node's native TypeScript test runner requires the extension.
-import {
-  getCategoryMonthlyFormValues,
-  getCategoryMonthlyPayload,
-} from "./categoryForm.ts";
+import { getCategoryMonthlyFormValues, getCategoryMonthlyPayload } from "./categoryForm.ts";
 
 test("despesa limpa a meta e persiste somente o limite", () => {
   assert.deepEqual(getCategoryMonthlyFormValues("Despesa", "500", "900"), {

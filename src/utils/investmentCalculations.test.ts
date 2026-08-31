@@ -2,12 +2,13 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type {
   InvestmentAccount,
+  InvestmentAccountEvent,
   InvestmentAsset,
   InvestmentMonthlyValuation,
   InvestmentOperation,
 } from "../types/investments";
 // @ts-expect-error Node's native TypeScript test runner requires the extension.
-import { calculateInvestmentAssetSnapshot, calculateInvestmentPositions, calculateOperationValue, calculateValuationResult, findNegativeInvestmentPosition, summarizeInvestmentPositions, validateInvestmentValuation } from "./investmentCalculations.ts";
+import { calculateInvestmentAccountSummaries, calculateInvestmentAssetSnapshot, calculateInvestmentPositions, calculateOperationValue, calculateValuationResult, findNegativeInvestmentPosition, summarizeInvestmentPositions, summarizeInvestmentWealth, validateInvestmentValuation } from "./investmentCalculations.ts";
 
 const asset = {
   id: "asset",
@@ -30,6 +31,37 @@ const account = {
   active: true,
   show_on_investments_dashboard: true,
 } satisfies InvestmentAccount;
+
+const balanceAccount = {
+  ...account,
+  id: "savings",
+  name: "Poupança",
+  investment_account_kind: "BALANCE" as const,
+} satisfies InvestmentAccount;
+
+function accountEvent(
+  id: string,
+  eventType: InvestmentAccountEvent["event_type"],
+  amount: number,
+  date: string,
+): InvestmentAccountEvent {
+  const integrated = eventType === "application" || eventType === "redemption";
+  return {
+    id,
+    owner_id: "owner",
+    investment_account_id: balanceAccount.id,
+    financial_account_id: integrated ? "checking" : null,
+    finance_transaction_id: integrated ? `finance-${id}` : null,
+    event_type: eventType,
+    event_date: date,
+    amount,
+    integration_group_id: integrated ? `group-${id}` : null,
+    idempotency_key: `key-${id}`,
+    notes: null,
+    created_at: `${date}T12:00:00Z`,
+    updated_at: "",
+  };
+}
 
 function operation(
   id: string,
@@ -382,4 +414,72 @@ test("rateio entre contas preserva exatamente o valor total da valorização", (
     referenceMonth: "2026-07",
   });
   assert.equal(positions.reduce((sum, position) => sum + position.currentValue, 0), 100.01);
+});
+
+test("conta por saldo deriva aplicação, rendimento e resgate exclusivamente dos eventos", () => {
+  const summaries = calculateInvestmentAccountSummaries({
+    accounts: [balanceAccount],
+    events: [
+      accountEvent("application", "application", 1000, "2026-08-01"),
+      accountEvent("yield", "yield", 10, "2026-08-02"),
+      accountEvent("redemption", "redemption", 300, "2026-08-03"),
+    ],
+    referenceDate: "2026-08-31",
+  });
+
+  assert.deepEqual(summaries[0], {
+    accountId: "savings",
+    accountName: "Poupança",
+    currency: "BRL",
+    balance: 710,
+    investedValue: 700,
+    openingBalance: 0,
+    applications: 1000,
+    redemptions: 300,
+    yields: 10,
+    positiveAdjustments: 0,
+    result: 10,
+    profitabilityPercent: 1,
+  });
+});
+
+test("saldo inicial e ajuste alteram saldo e capital sem criar rentabilidade", () => {
+  const [summary] = calculateInvestmentAccountSummaries({
+    accounts: [balanceAccount],
+    events: [
+      accountEvent("opening", "opening_balance", 500, "2026-08-01"),
+      accountEvent("adjustment", "positive_adjustment", 20, "2026-08-02"),
+    ],
+    referenceDate: "2026-08-31",
+  });
+
+  assert.equal(summary.balance, 520);
+  assert.equal(summary.investedValue, 520);
+  assert.equal(summary.result, 0);
+  assert.equal(summary.profitabilityPercent, 0);
+});
+
+test("patrimônio soma posição unitizada e conta por saldo exatamente uma vez", () => {
+  const positions = calculateInvestmentPositions({
+    assets: [asset],
+    accounts: [account, balanceAccount],
+    operations: [operation("buy", 5, 100)],
+    valuations: [],
+  });
+  const balanceAccounts = calculateInvestmentAccountSummaries({
+    accounts: [account, balanceAccount],
+    events: [accountEvent("opening", "opening_balance", 710, "2026-08-01")],
+    referenceDate: "2026-08-31",
+  });
+  const wealth = summarizeInvestmentWealth({
+    positions,
+    balanceAccounts,
+    currency: "BRL",
+  });
+
+  assert.equal(positions[0].currentValue, 500);
+  assert.equal(balanceAccounts[0].balance, 710);
+  assert.equal(wealth.currentValue, 1210);
+  assert.equal(wealth.totalInvested, 1210);
+  assert.equal(wealth.result, 0);
 });

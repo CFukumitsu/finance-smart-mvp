@@ -205,6 +205,27 @@ test("integração Financeiro-Bankroll não infla o fluxo consolidado", () => {
   assert.equal(result.cashBalance, 0);
 });
 
+test("aplicação reduz apenas o caixa da conta financeira sem virar despesa", () => {
+  const result = cashFor([transaction({ id: "investment-application", competence_id: "june", type: "Transferência", value: 1000, account_id: "checking", investment_integration_group_id: "group-application", investment_event_type: "application", status: "Pago" })], "checking");
+  assert.equal(result.income, 0);
+  assert.equal(result.expenses, 0);
+  assert.equal(result.cashIn, 0);
+  assert.equal(result.cashOut, 1000);
+});
+
+test("resgate aumenta apenas o caixa da conta financeira sem virar receita", () => {
+  const result = cashFor([transaction({ id: "investment-redemption", competence_id: "june", type: "Transferência", value: 300, account_id: "checking", investment_integration_group_id: "group-redemption", investment_event_type: "redemption", status: "Recebido" })], "checking");
+  assert.equal(result.income, 0);
+  assert.equal(result.expenses, 0);
+  assert.equal(result.cashIn, 300);
+  assert.equal(result.cashOut, 0);
+});
+
+test("integração Financeiro-Investimentos não infla o fluxo consolidado", () => {
+  const result = cashFor([transaction({ id: "investment-application", competence_id: "june", type: "Transferência", value: 1000, account_id: "checking", investment_integration_group_id: "group-application", investment_event_type: "application", status: "Pago" })], "");
+  assert.equal(result.cashBalance, 0);
+});
+
 test("fluxo padrão considera somente recebimentos e pagamentos realizados", () => {
   const result = cashFor(
     [

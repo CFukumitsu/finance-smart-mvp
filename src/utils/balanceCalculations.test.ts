@@ -86,3 +86,43 @@ test("depósito e saque Bankroll usam a semântica existente sem mudar o cálcul
     transactions,
   }), 700);
 });
+
+test("aplicação e resgate integrados afetam somente a conta financeira", () => {
+  const investmentAccountId = "savings";
+  const transactions = [
+    {
+      ...base,
+      type: "Transferência",
+      value: 1000,
+      status: "Pago",
+      origin_account_id: accountId,
+      destination_account_id: null,
+      investment_integration_group_id: "application",
+      investment_event_type: "application",
+    },
+    {
+      ...base,
+      type: "Transferência",
+      value: 300,
+      status: "Recebido",
+      origin_account_id: null,
+      destination_account_id: null,
+      investment_integration_group_id: "redemption",
+      investment_event_type: "redemption",
+    },
+  ];
+
+  assert.equal(calculateAccountFinalBalance({
+    accountId,
+    openingBalance: 2000,
+    transactions,
+  }), 1300);
+  assert.equal(calculateAccountFinalBalance({
+    accountId: investmentAccountId,
+    openingBalance: 0,
+    transactions,
+  }), 0);
+  assert.equal(transactions.filter((transaction) => transaction.account_id === accountId).length, 2);
+  assert.equal(transactions.some((transaction) => transaction.account_id === investmentAccountId), false);
+  assert.equal(transactions.some((transaction) => transaction.destination_account_id === investmentAccountId), false);
+});
