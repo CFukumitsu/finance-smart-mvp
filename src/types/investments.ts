@@ -1,5 +1,12 @@
 export type InvestmentOperationType = "Compra" | "Venda";
 
+export type InvestmentAccountEventType =
+  | "opening_balance"
+  | "application"
+  | "redemption"
+  | "yield"
+  | "positive_adjustment";
+
 export type InvestmentAsset = {
   id: string;
   owner_id: string;
@@ -74,6 +81,23 @@ export type InvestmentAccount = {
   currency: string | null;
   active: boolean;
   show_on_investments_dashboard: boolean;
+  investment_account_kind: "BALANCE" | null;
+};
+
+export type InvestmentAccountEvent = {
+  id: string;
+  owner_id: string;
+  investment_account_id: string;
+  financial_account_id: string | null;
+  finance_transaction_id: string | null;
+  event_type: InvestmentAccountEventType;
+  event_date: string;
+  amount: number;
+  integration_group_id: string | null;
+  idempotency_key: string;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
 };
 
 export type InvestmentData = {
@@ -81,6 +105,30 @@ export type InvestmentData = {
   operations: InvestmentOperation[];
   valuations: InvestmentMonthlyValuation[];
   accounts: InvestmentAccount[];
+  accountEvents: InvestmentAccountEvent[];
+};
+
+export type InvestmentAccountEventInput = {
+  investment_account_id: string;
+  financial_account_id: string | null;
+  event_type: Exclude<InvestmentAccountEventType, "opening_balance">;
+  event_date: string;
+  amount: number;
+  notes: string | null;
+};
+
+export type InvestmentBalanceAccountSummary = {
+  accountId: string;
+  accountName: string;
+  currency: string;
+  balance: number;
+  openingBalance: number;
+  applications: number;
+  redemptions: number;
+  yields: number;
+  positiveAdjustments: number;
+  result: number;
+  profitabilityPercent: number | null;
 };
 
 export type InvestmentAssetInput = Pick<

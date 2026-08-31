@@ -18,6 +18,7 @@ const emptyData: InvestmentData = {
   operations: [],
   valuations: [],
   accounts: [],
+  accountEvents: [],
 };
 
 const emptyExchangeContext: InvestmentExchangeContext = {

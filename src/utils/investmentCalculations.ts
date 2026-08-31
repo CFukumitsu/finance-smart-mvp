@@ -1,10 +1,12 @@
 import type {
   InvestmentAccount,
+  InvestmentAccountEvent,
   InvestmentAsset,
   InvestmentExchangeRate,
   InvestmentMonthlyValuation,
   InvestmentOperation,
   InvestmentPosition,
+  InvestmentBalanceAccountSummary,
 } from "@/src/types/investments";
 // @ts-expect-error Node's native TypeScript test runner requires the extension.
 import { convertInvestmentValue, resolveExchangeRate } from "./exchangeRateCalculations.ts";
@@ -396,5 +398,121 @@ export function summarizeInvestmentPositions(
         .filter((position) => !includedKeys.has(position.key))
         .map((position) => position.assetId),
     ).size,
+  };
+}
+
+export function getInvestmentAccountEventEffect(
+  event: Pick<InvestmentAccountEvent, "event_type" | "amount">,
+) {
+  const amount = Math.abs(Number(event.amount));
+  return event.event_type === "redemption" ? -amount : amount;
+}
+
+export function calculateInvestmentAccountSummaries({
+  accounts,
+  events,
+  referenceDate = new Date().toISOString().slice(0, 10),
+}: {
+  accounts: InvestmentAccount[];
+  events: InvestmentAccountEvent[];
+  referenceDate?: string;
+}): InvestmentBalanceAccountSummary[] {
+  return accounts
+    .filter(
+      (account) =>
+        account.investment_account_kind === "BALANCE" && Boolean(account.currency),
+    )
+    .map((account) => {
+      const accountEvents = events.filter(
+        (event) =>
+          event.investment_account_id === account.id &&
+          event.event_date <= referenceDate,
+      );
+      const total = (type: InvestmentAccountEvent["event_type"]) =>
+        round(
+          accountEvents
+            .filter((event) => event.event_type === type)
+            .reduce((sum, event) => sum + Math.abs(Number(event.amount)), 0),
+          2,
+        );
+      const openingBalance = total("opening_balance");
+      const applications = total("application");
+      const redemptions = total("redemption");
+      const yields = total("yield");
+      const positiveAdjustments = total("positive_adjustment");
+      const balance = round(
+        accountEvents.reduce(
+          (sum, event) => sum + getInvestmentAccountEventEffect(event),
+          0,
+        ),
+        2,
+      );
+      const result = round(
+        balance + redemptions - applications - openingBalance - positiveAdjustments,
+        2,
+      );
+      const capitalBase = round(openingBalance + applications, 2);
+
+      return {
+        accountId: account.id,
+        accountName: account.name,
+        currency: account.currency ?? "BRL",
+        balance,
+        openingBalance,
+        applications,
+        redemptions,
+        yields,
+        positiveAdjustments,
+        result,
+        profitabilityPercent:
+          capitalBase > 0 ? round((result / capitalBase) * 100, 2) : null,
+      };
+    })
+    .sort((left, right) => left.accountName.localeCompare(right.accountName, "pt-BR"));
+}
+
+export function summarizeInvestmentWealth({
+  positions,
+  balanceAccounts,
+  currency,
+  rates = [],
+}: {
+  positions: InvestmentPosition[];
+  balanceAccounts: InvestmentBalanceAccountSummary[];
+  currency: string;
+  rates?: InvestmentExchangeRate[];
+}) {
+  const positionSummary = summarizeInvestmentPositions(positions, currency, rates);
+  const convertedAccounts = balanceAccounts.flatMap((account) => {
+    const rate = resolveExchangeRate(account.currency, currency, rates);
+    const balance = convertInvestmentValue(account.balance, rate);
+    const applications = convertInvestmentValue(account.applications, rate);
+    const result = convertInvestmentValue(account.result, rate);
+    return balance === null || applications === null || result === null
+      ? []
+      : [{ balance, applications, result }];
+  });
+
+  return {
+    currentValue: round(
+      positionSummary.currentValue +
+        convertedAccounts.reduce((sum, account) => sum + account.balance, 0),
+      2,
+    ),
+    totalInvested: round(
+      positionSummary.totalInvested +
+        convertedAccounts.reduce((sum, account) => sum + account.applications, 0),
+      2,
+    ),
+    result: round(
+      positionSummary.unrealizedResult +
+        convertedAccounts.reduce((sum, account) => sum + account.result, 0),
+      2,
+    ),
+    assetCount: positionSummary.assetCount,
+    accountCount:
+      positionSummary.accountCount + balanceAccounts.filter((account) => account.balance !== 0).length,
+    missingRateAssetCount: positionSummary.missingRateAssetCount,
+    missingRateAccountCount: balanceAccounts.length - convertedAccounts.length,
   };
 }

@@ -1,6 +1,8 @@
 import { getCurrentUserId, supabase } from "@/src/lib/supabase";
 import type {
   InvestmentAccount,
+  InvestmentAccountEvent,
+  InvestmentAccountEventInput,
   InvestmentAsset,
   InvestmentAssetInput,
   InvestmentData,
@@ -65,7 +67,7 @@ function normalizeValuation(valuation: InvestmentMonthlyValuation) {
 
 export async function loadInvestmentData(): Promise<InvestmentData> {
   const ownerId = await getCurrentUserId();
-  const [assets, operations, valuations, accounts] = await Promise.all([
+  const [assets, operations, valuations, accounts, accountEvents] = await Promise.all([
     supabase
       .from("investment_assets")
       .select("*")
@@ -86,18 +88,25 @@ export async function loadInvestmentData(): Promise<InvestmentData> {
     supabase
       .from("accounts")
       .select(
-        "id, owner_id, name, type, currency, active, show_on_investments_dashboard",
+        "id, owner_id, name, type, currency, active, show_on_investments_dashboard, investment_account_kind",
       )
       .eq("owner_id", ownerId)
       .eq("type", "Conta")
       .order("active", { ascending: false })
       .order("name", { ascending: true }),
+    supabase
+      .from("investment_account_events")
+      .select("*")
+      .eq("owner_id", ownerId)
+      .order("event_date", { ascending: false })
+      .order("created_at", { ascending: false }),
   ]);
 
   fail(assets.error, "Investimentos - carregar ativos");
   fail(operations.error, "Investimentos - carregar operações");
   fail(valuations.error, "Investimentos - carregar valorizações");
   fail(accounts.error, "Investimentos - carregar contas");
+  fail(accountEvents.error, "Investimentos - carregar movimentações por saldo");
 
   return {
     assets: (assets.data ?? []) as InvestmentAsset[],
@@ -108,7 +117,52 @@ export async function loadInvestmentData(): Promise<InvestmentData> {
       (valuations.data ?? []) as InvestmentMonthlyValuation[]
     ).map(normalizeValuation),
     accounts: (accounts.data ?? []) as InvestmentAccount[],
+    accountEvents: ((accountEvents.data ?? []) as InvestmentAccountEvent[]).map(
+      (event) => ({ ...event, amount: Number(event.amount) }),
+    ),
   };
+}
+
+export async function saveInvestmentAccountEvent(
+  input: InvestmentAccountEventInput,
+  id?: string,
+) {
+  await getCurrentUserId();
+  const response = id
+    ? await supabase.rpc("update_investment_account_event", {
+        p_event_id: id,
+        p_event_type: input.event_type,
+        p_investment_account_id: input.investment_account_id,
+        p_financial_account_id: input.financial_account_id,
+        p_date: input.event_date,
+        p_amount: input.amount,
+        p_notes: input.notes,
+      })
+    : await supabase.rpc("create_investment_account_event", {
+        p_event_type: input.event_type,
+        p_investment_account_id: input.investment_account_id,
+        p_financial_account_id: input.financial_account_id,
+        p_date: input.event_date,
+        p_amount: input.amount,
+        p_notes: input.notes,
+        p_idempotency_key: crypto.randomUUID(),
+      });
+
+  fail(response.error, "Investimentos - salvar movimentação por saldo", {
+    eventId: id,
+    eventType: input.event_type,
+    investmentAccountId: input.investment_account_id,
+    financialAccountId: input.financial_account_id,
+  });
+  if (!response.data) throw new Error("A movimentação não foi salva.");
+}
+
+export async function deleteInvestmentAccountEvent(id: string) {
+  await getCurrentUserId();
+  const { error } = await supabase.rpc("delete_investment_account_event", {
+    p_event_id: id,
+  });
+  fail(error, "Investimentos - excluir movimentação por saldo", { eventId: id });
 }
 
 export async function saveInvestmentAsset(
@@ -191,7 +245,7 @@ async function loadOperationReferences(
     supabase
       .from("accounts")
       .select(
-        "id, owner_id, type, currency, active, show_on_investments_dashboard",
+        "id, owner_id, type, currency, active, show_on_investments_dashboard, investment_account_kind",
       )
       .eq("id", input.account_id)
       .eq("owner_id", ownerId)
@@ -206,6 +260,8 @@ async function loadOperationReferences(
     throw new Error("A conta selecionada não está disponível.");
   if (account.data.type !== "Conta")
     throw new Error("Cartões não podem receber operações de investimentos.");
+  if (account.data.investment_account_kind === "BALANCE")
+    throw new Error("Contas por saldo não podem custodiar ativos unitizados.");
   if (
     asset.data.currency &&
     account.data.currency &&
