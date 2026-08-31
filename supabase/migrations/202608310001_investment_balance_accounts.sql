@@ -16,6 +16,11 @@ alter table public.accounts
     )
   );
 
+-- Necessária para que as FKs abaixo também garantam o mesmo proprietário.
+-- A chave primária em id já torna a criação deste índice segura para dados existentes.
+create unique index accounts_owner_id_id_investment_key
+  on public.accounts (owner_id, id);
+
 create index accounts_owner_investment_balance_idx
   on public.accounts (owner_id, active, name)
   where investment_account_kind = 'BALANCE';

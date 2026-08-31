@@ -26,6 +26,7 @@ test("saldo da conta de investimento é derivado exclusivamente dos eventos", ()
   assert.ok(migration.includes("from public.investment_account_events event"));
   assert.ok(migration.includes("event.investment_account_id = p_account_id"));
   assert.ok(migration.includes("coalesce(current_balance, 0) = 0"));
+  assert.ok(migration.includes("create unique index accounts_owner_id_id_investment_key"));
 });
 
 test("RPC de criação serializa a idempotência e restringe duplicidades", () => {
