@@ -24,6 +24,10 @@ import {
   sortLatestTransactionsForDisplay,
   sortTransactionsByCashDirection,
 } from "@/src/utils/transactionFilters";
+import {
+  isFinancialAccount,
+  isFinancialLedgerAccount,
+} from "@/src/utils/closingAccounts";
 
 type Account = {
   id: string;
@@ -33,6 +37,8 @@ type Account = {
   due_day: number | null;
   limit_amount: number | null;
   current_balance: number | null;
+  show_on_investments_dashboard: boolean;
+  investment_account_kind: "BALANCE" | null;
 };
 
 type Category = {
@@ -203,6 +209,10 @@ function TransactionsPageContent() {
     category_id: "",
     competence_id: "",
   });
+  const financialAccounts = accounts.filter(isFinancialAccount);
+  const financialLedgerAccounts = accounts.filter(isFinancialLedgerAccount);
+  const formAccountOptions =
+    form.type === "Transferência" ? financialAccounts : financialLedgerAccounts;
 
   function getCurrentCompetenceId(list: Competence[]) {
     const today = new Date();
@@ -490,7 +500,7 @@ function TransactionsPageContent() {
       await Promise.all([
         supabase
           .from("accounts")
-          .select("id, name, type, closing_day, due_day, limit_amount, current_balance")
+          .select("id, name, type, closing_day, due_day, limit_amount, current_balance, show_on_investments_dashboard, investment_account_kind")
           .eq("owner_id", ownerId)
           .eq("active", true)
           .order("name", { ascending: true }),
@@ -509,7 +519,8 @@ function TransactionsPageContent() {
           .order("month", { ascending: false })
       ]);
 
-    if (accountsResponse.data) setAccounts(accountsResponse.data);
+    const loadedAccounts = (accountsResponse.data ?? []) as Account[];
+    setAccounts(loadedAccounts);
     if (categoriesResponse.data) setCategories(categoriesResponse.data);
 
     await loadClosedCompetences(ownerId);
@@ -527,6 +538,13 @@ function TransactionsPageContent() {
         storedDefaults?.due_date ?? new Date().toISOString().split("T")[0];
 
       const defaultType = storedDefaults?.type ?? "Despesa";
+      const storedAccountId = loadedAccounts
+        .filter(isFinancialLedgerAccount)
+        .some(
+        (account) => account.id === storedDefaults?.account_id,
+      )
+        ? (storedDefaults?.account_id ?? "")
+        : "";
 
       setForm((previousForm) => ({
         ...previousForm,
@@ -535,7 +553,7 @@ function TransactionsPageContent() {
         status:
           storedDefaults?.status ??
           getAutomaticStatus(defaultType, defaultDueDate),
-        account_id: storedDefaults?.account_id ?? "",
+        account_id: storedAccountId,
         category_id: storedDefaults?.category_id ?? "",
         competence_id: defaultCompetenceId,
       }));
@@ -722,6 +740,26 @@ function TransactionsPageContent() {
     const numericValue = parseCurrencyInput(form.value);
     const installmentCount = Number(form.installments);
     const isFuel = categories.find((category) => category.id === form.category_id)?.special_type === "fuel";
+    const selectedAccount = accounts.find(
+      (account) => account.id === form.account_id,
+    );
+    const selectedDestination = accounts.find(
+      (account) => account.id === form.destination_account_id,
+    );
+
+    if (
+      !selectedAccount ||
+      !isFinancialLedgerAccount(selectedAccount) ||
+      (form.type === "Transferência" &&
+        (!isFinancialAccount(selectedAccount) ||
+          !selectedDestination ||
+          !isFinancialAccount(selectedDestination)))
+    ) {
+      alert(
+        "Contas de investimento devem ser movimentadas exclusivamente pelo módulo Investimentos.",
+      );
+      return;
+    }
 
     if (
       !form.description ||
@@ -1475,7 +1513,7 @@ function TransactionsPageContent() {
             className="theme-field h-10 min-w-0 rounded-xl border px-3 text-sm outline-none"
           >
             <option value="">Todas as contas</option>
-            {accounts.map((account) => (
+            {financialLedgerAccounts.map((account) => (
               <option key={account.id} value={account.id}>{account.name}</option>
             ))}
           </select>
@@ -1971,7 +2009,7 @@ function TransactionsPageContent() {
                 className="w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none"
               >
                 <option value="">Conta / Cartão</option>
-                {accounts.map((account) => (
+                {formAccountOptions.map((account) => (
                   <option key={account.id} value={account.id}>
                     {account.name}
                   </option>
@@ -1991,9 +2029,7 @@ function TransactionsPageContent() {
                 >
                   <option value="">Conta utilizada no pagamento</option>
 
-                  {accounts
-                    .filter((account) => account.type === "Conta")
-                    .map((account) => (
+                  {financialAccounts.map((account) => (
                       <option key={account.id} value={account.id}>
                         {account.name}
                       </option>
@@ -2040,12 +2076,8 @@ function TransactionsPageContent() {
                   >
                     <option value="">Conta destino</option>
 
-                    {accounts
-                      .filter(
-                        (account) =>
-                          account.type === "Conta" &&
-                          account.id !== form.account_id
-                      )
+                    {financialAccounts
+                      .filter((account) => account.id !== form.account_id)
                       .map((account) => (
                         <option key={account.id} value={account.id}>
                           {account.name}

@@ -77,7 +77,7 @@ export type InvestmentAccount = {
   id: string;
   owner_id: string;
   name: string;
-  type: string;
+  type: "Conta" | "Cartão";
   currency: string | null;
   active: boolean;
   show_on_investments_dashboard: boolean;

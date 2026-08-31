@@ -5,6 +5,7 @@ import {
   deleteInvestmentAccountEvent,
   saveInvestmentAccountEvent,
 } from "@/src/services/investmentService";
+import { isFinancialAccount } from "@/src/utils/closingAccounts";
 import type {
   InvestmentAccountEvent,
   InvestmentAccountEventType,
@@ -84,8 +85,7 @@ export default function InvestmentAccountEvents({
     const investmentAccount = accountsById.get(investmentAccountId);
     return data.accounts.filter(
       (account) =>
-        account.investment_account_kind !== "BALANCE" &&
-        account.type === "Conta" &&
+        isFinancialAccount(account) &&
         account.active &&
         Boolean(account.currency) &&
         account.currency === investmentAccount?.currency,

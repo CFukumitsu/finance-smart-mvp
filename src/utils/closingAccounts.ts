@@ -21,6 +21,14 @@ export function requiresTraditionalAccountClosure(
   return account.type === "Conta" && !isInvestmentAccount(account);
 }
 
+export const isFinancialAccount = requiresTraditionalAccountClosure;
+
+export function isFinancialLedgerAccount(
+  account: ClosingAccountClassification,
+) {
+  return account.type === "Cartão" || isFinancialAccount(account);
+}
+
 export function areRequiredClosuresComplete(params: {
   accounts: readonly ClosingAccountClassification[];
   closedAccountIds: ReadonlySet<string>;

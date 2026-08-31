@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 // @ts-expect-error Node's native TypeScript test runner requires the extension.
-import { areRequiredClosuresComplete, isInvestmentAccount, requiresTraditionalAccountClosure } from "./closingAccounts.ts";
+// @ts-expect-error Node's native TypeScript test runner requires the extension.
+import { areRequiredClosuresComplete, isFinancialAccount, isFinancialLedgerAccount, isInvestmentAccount, requiresTraditionalAccountClosure } from "./closingAccounts.ts";
 
 const checking = {
   id: "checking",
@@ -34,6 +35,16 @@ test("somente conta transacional exige fechamento bancário", () => {
   assert.equal(requiresTraditionalAccountClosure(savings), false);
   assert.equal(isInvestmentAccount(broker), true);
   assert.equal(isInvestmentAccount(savings), true);
+});
+
+test("somente contas financeiras e cartões pertencem ao razão de lançamentos", () => {
+  assert.equal(isFinancialAccount(checking), true);
+  assert.equal(isFinancialAccount(broker), false);
+  assert.equal(isFinancialAccount(savings), false);
+  assert.equal(isFinancialLedgerAccount(checking), true);
+  assert.equal(isFinancialLedgerAccount(card), true);
+  assert.equal(isFinancialLedgerAccount(broker), false);
+  assert.equal(isFinancialLedgerAccount(savings), false);
 });
 
 test("competência pode fechar sem fechamento das contas de investimento", () => {
