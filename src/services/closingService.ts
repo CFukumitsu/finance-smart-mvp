@@ -1,5 +1,9 @@
 import { getCurrentUserId, supabase } from "@/src/lib/supabase";
 import type { CompetenceClosure, ClosingSnapshot } from "@/src/types/closing";
+import {
+  areRequiredClosuresComplete,
+  type ClosingAccountClassification,
+} from "@/src/utils/closingAccounts";
 
 export async function getClosureByCompetenceId(
   competenceId: string
@@ -78,8 +82,57 @@ export async function calculateClosingSnapshot(
   return snapshot;
 }
 
+export async function validateCompetenceClosureRequirements(
+  competenceId: string,
+) {
+  const ownerId = await getCurrentUserId();
+  const [accountsResult, accountClosuresResult, statementsResult] =
+    await Promise.all([
+      supabase
+        .from("accounts")
+        .select(
+          "id, type, show_on_investments_dashboard, investment_account_kind",
+        )
+        .eq("owner_id", ownerId)
+        .eq("active", true),
+      supabase
+        .from("account_closures")
+        .select("account_id")
+        .eq("owner_id", ownerId)
+        .eq("competence_id", competenceId),
+      supabase
+        .from("credit_card_statements")
+        .select("account_id")
+        .eq("owner_id", ownerId)
+        .eq("competence_id", competenceId),
+    ]);
+
+  const error =
+    accountsResult.error ??
+    accountClosuresResult.error ??
+    statementsResult.error;
+  if (error) throw new Error(error.message);
+
+  return areRequiredClosuresComplete({
+    accounts: (accountsResult.data ?? []) as ClosingAccountClassification[],
+    closedAccountIds: new Set(
+      (accountClosuresResult.data ?? []).map((item) => item.account_id),
+    ),
+    closedCardIds: new Set(
+      (statementsResult.data ?? []).map((item) => item.account_id),
+    ),
+  });
+}
+
 export async function closeCompetence(competenceId: string) {
   const ownerId = await getCurrentUserId();
+  const requirementsComplete =
+    await validateCompetenceClosureRequirements(competenceId);
+  if (!requirementsComplete) {
+    throw new Error(
+      "Feche todas as contas transacionais e faturas desta competência antes de fechá-la.",
+    );
+  }
   const snapshot = await calculateClosingSnapshot(competenceId);
 
   const { error } = await supabase.from("competence_closures").upsert(

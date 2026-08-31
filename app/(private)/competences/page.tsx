@@ -106,25 +106,6 @@ export default function CompetencesPage() {
     onEnter: () => void saveModal(),
   });
 
-  async function validateAllAccountsAreClosed(competenceId: string) {
-    const ownerId = await getCurrentUserId();
-    const [accountsResult, accountClosuresResult, statementsResult] = await Promise.all([
-      supabase.from("accounts").select("id, type").eq("owner_id", ownerId).eq("active", true),
-      supabase.from("account_closures").select("account_id").eq("owner_id", ownerId).eq("competence_id", competenceId),
-      supabase.from("credit_card_statements").select("account_id").eq("owner_id", ownerId).eq("competence_id", competenceId),
-    ]);
-
-    const error = accountsResult.error ?? accountClosuresResult.error ?? statementsResult.error;
-    if (error) throw new Error(error.message);
-
-    const closedAccountIds = new Set((accountClosuresResult.data ?? []).map((item) => item.account_id));
-    const closedCardIds = new Set((statementsResult.data ?? []).map((item) => item.account_id));
-
-    return (accountsResult.data ?? []).every((account) =>
-      account.type === "Cartão" ? closedCardIds.has(account.id) : closedAccountIds.has(account.id)
-    );
-  }
-
   async function toggleClosed(competence: Competence) {
     const isClosed = closedIds.has(competence.id);
     if (!window.confirm(`Deseja ${isClosed ? "reabrir" : "fechar"} a competência ${competence.name}?`)) return;
@@ -135,10 +116,6 @@ export default function CompetencesPage() {
       if (isClosed) {
         await reopenCompetence(competence.id);
       } else {
-        const canClose = await validateAllAccountsAreClosed(competence.id);
-        if (!canClose) {
-          throw new Error("Feche todas as contas e faturas desta competência antes de fechá-la.");
-        }
         await closeCompetence(competence.id);
       }
 

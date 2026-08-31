@@ -18,11 +18,14 @@ import {
   calculateAccountDebits,
   calculateAccountFinalBalance,
 } from "@/src/utils/balanceCalculations";
+import { requiresTraditionalAccountClosure } from "@/src/utils/closingAccounts";
 
 type Account = {
   id: string;
   name: string;
   type: "Conta" | "Cartão";
+  show_on_investments_dashboard: boolean;
+  investment_account_kind: "BALANCE" | null;
 };
 
 type Transaction = {
@@ -30,6 +33,7 @@ type Transaction = {
   destination_account_id?: string | null;
   type: string;
   value: number;
+  status?: string | null;
   description?: string | null;
 };
 
@@ -92,7 +96,6 @@ export default function ClosingsPageContent() {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [competenceClosure, setCompetenceClosure] =
     useState<CompetenceClosure | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
   const [isProcessingId, setIsProcessingId] = useState<string | null>(null);
   const [accountBalanceInputs, setAccountBalanceInputs] = useState<
     Record<string, { openingBalance: string; closingBalance: string }>
@@ -112,12 +115,10 @@ export default function ClosingsPageContent() {
     [competences, selectedCompetenceId]
   );
 
-  const cashAccounts = accounts.filter((account) => account.type === "Conta");
+  const cashAccounts = accounts.filter(requiresTraditionalAccountClosure);
   const cardAccounts = accounts.filter((account) => account.type === "Cartão");
 
   async function loadData(competenceId?: string) {
-    setIsLoading(true);
-
     await ensureCompetenceExists(new Date());
     const ownerId = await getCurrentUserId();
 
@@ -129,7 +130,6 @@ export default function ClosingsPageContent() {
 
     if (competenceError) {
       alert("Erro ao carregar competências.");
-      setIsLoading(false);
       return;
     }
 
@@ -144,7 +144,6 @@ export default function ClosingsPageContent() {
     const resolvedCompetenceId = competenceId || selectedCompetenceId || defaultCompetence?.id;
 
     if (!resolvedCompetenceId) {
-      setIsLoading(false);
       return;
     }
 
@@ -152,13 +151,12 @@ export default function ClosingsPageContent() {
 
     const { data: accountsData, error: accountsError } = await supabase
       .from("accounts")
-      .select("id, name, type")
+      .select("id, name, type, show_on_investments_dashboard, investment_account_kind")
       .eq("owner_id", ownerId)
       .eq("active", true)
 
     if (accountsError) {
       alert("Erro ao carregar contas/cartões.");
-      setIsLoading(false);
       return;
     }
 
@@ -176,7 +174,7 @@ export default function ClosingsPageContent() {
 
     const { data: transactionsData, error: transactionsError } = await supabase
       .from("transactions")
-      .select("account_id, destination_account_id, type, value, description")
+      .select("account_id, destination_account_id, type, value, status, description")
       .eq("owner_id", ownerId)
       .eq("competence_id", resolvedCompetenceId);
 
@@ -217,33 +215,11 @@ export default function ClosingsPageContent() {
     }
 
     for (const account of accountsData ?? []) {
-      if (account.type !== "Conta") continue;
+      if (!requiresTraditionalAccountClosure(account as Account)) continue;
 
       const existingClosure = (accountClosuresData ?? []).find(
         (closure) => closure.account_id === account.id
       );
-
-      const movement = ((transactionsData ?? []) as Transaction[])
-        .filter((transaction) => transaction.account_id === account.id)
-        .filter((transaction) => !isLegacyOpeningBalance(transaction))
-        .reduce((sum, transaction) => {
-          if (transaction.type === "Receita") {
-            return sum + Number(transaction.value);
-          }
-
-          if (
-            transaction.type === "Despesa" ||
-            transaction.type === "Pagamento de Fatura"
-          ) {
-            return sum - Number(transaction.value);
-          }
-
-          if (transaction.type === "Transferência") {
-            return sum + Number(transaction.value);
-          }
-
-          return sum;
-        }, 0);
 
       const previousClosure = previousAccountClosuresData.find(
         (closure) => closure.account_id === account.id
@@ -256,9 +232,6 @@ export default function ClosingsPageContent() {
       );
 
       const transactionsList = ((transactionsData ?? []) as Transaction[]);
-
-      const credits = calculateAccountCredits(account.id, transactionsList);
-      const debits = calculateAccountDebits(account.id, transactionsList);
 
       const closingBalance = Number(
         existingClosure?.closing_balance ??
@@ -299,11 +272,13 @@ export default function ClosingsPageContent() {
 
     setCardPaymentInputs(nextCardPaymentInputs);
     setCompetenceClosure(closure);
-    setIsLoading(false);
   }
 
   useEffect(() => {
-    loadData();
+    const timeoutId = window.setTimeout(() => void loadData(), 0);
+    return () => window.clearTimeout(timeoutId);
+    // A carga inicial é intencional; mudanças posteriores usam loadData explicitamente.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   function getAccountClosure(accountId: string) {
@@ -603,16 +578,6 @@ export default function ClosingsPageContent() {
     if (nextCompetence) {
       loadData(nextCompetence.id);
     }
-  }
-
-  function isLegacyOpeningBalance(transaction: Transaction) {
-    const description = String(transaction.description ?? "")
-      .trim()
-      .toLowerCase()
-      .normalize("NFD")
-      .replace(/[\u0300-\u036f]/g, "");
-
-    return description === "saldo anterior";
   }
 
   function getAccountCredits(accountId: string) {

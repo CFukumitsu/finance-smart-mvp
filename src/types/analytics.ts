@@ -3,6 +3,8 @@ export type AnalyticsAccount = {
   name: string;
   type: "Conta" | "Cartão";
   active: boolean;
+  show_on_investments_dashboard: boolean;
+  investment_account_kind: "BALANCE" | null;
 };
 
 export type AnalyticsCategory = {

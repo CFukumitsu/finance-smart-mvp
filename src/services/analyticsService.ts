@@ -9,6 +9,7 @@ import type {
   AnalyticsReferenceData,
   AnalyticsTransaction,
 } from "@/src/types/analytics";
+import { requiresTraditionalAccountClosure } from "@/src/utils/closingAccounts";
 
 export async function loadAnalyticsReferenceData(
   ownerId: string
@@ -17,7 +18,7 @@ export async function loadAnalyticsReferenceData(
     await Promise.all([
       supabase
         .from("accounts")
-        .select("id, name, type, active")
+        .select("id, name, type, active, show_on_investments_dashboard, investment_account_kind")
         .eq("owner_id", ownerId)
         .order("active", { ascending: false })
         .order("name", { ascending: true }),
@@ -117,18 +118,35 @@ export async function loadAnalyticsDataset(
     if (page.length < pageSize) break;
   }
 
-  let openingBalanceQuery = supabase
-    .from("account_closures")
-    .select("opening_balance")
-    .eq("owner_id", ownerId)
-    .eq("competence_id", selectedCompetenceIds[0] ?? competenceIds[0])
-    .eq("account_type", "Conta");
+  const closingAccountsResponse = await supabase
+    .from("accounts")
+    .select(
+      "id, type, show_on_investments_dashboard, investment_account_kind",
+    )
+    .eq("owner_id", ownerId);
+  const closingAccountIds = (
+    (closingAccountsResponse.data ?? []) as AnalyticsAccount[]
+  )
+    .filter(requiresTraditionalAccountClosure)
+    .map((account) => account.id);
+  const selectedClosingAccountIds = filters.accountId
+    ? closingAccountIds.filter((accountId) => accountId === filters.accountId)
+    : closingAccountIds;
 
-  if (filters.accountId) {
-    openingBalanceQuery = openingBalanceQuery.eq("account_id", filters.accountId);
+  let openingBalanceResponse: {
+    data: Array<{ opening_balance: number | null }> | null;
+    error: { message: string } | null;
+  } = { data: [], error: null };
+
+  if (selectedClosingAccountIds.length > 0) {
+    openingBalanceResponse = await supabase
+      .from("account_closures")
+      .select("opening_balance")
+      .eq("owner_id", ownerId)
+      .eq("competence_id", selectedCompetenceIds[0] ?? competenceIds[0])
+      .eq("account_type", "Conta")
+      .in("account_id", selectedClosingAccountIds);
   }
-
-  const openingBalanceResponse = await openingBalanceQuery;
 
   let targetsResponse: { data: unknown[] | null; error: { message: string } | null } = { data: [], error: null };
   if (selectedCompetenceIds.length === 1) {
@@ -142,7 +160,11 @@ export async function loadAnalyticsDataset(
     targetsResponse = await targetsQuery;
   }
 
-  const error = transactionsError ?? openingBalanceResponse.error ?? targetsResponse.error;
+  const error =
+    transactionsError ??
+    closingAccountsResponse.error ??
+    openingBalanceResponse.error ??
+    targetsResponse.error;
   if (error) throw new Error(error.message);
 
   return {
