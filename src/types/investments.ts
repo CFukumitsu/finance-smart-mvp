@@ -81,7 +81,7 @@ export type InvestmentAccount = {
   currency: string | null;
   active: boolean;
   show_on_investments_dashboard: boolean;
-  investment_account_kind: "BALANCE" | null;
+  investment_account_kind?: "BALANCE" | null;
 };
 
 export type InvestmentAccountEvent = {
@@ -111,7 +111,7 @@ export type InvestmentData = {
 export type InvestmentAccountEventInput = {
   investment_account_id: string;
   financial_account_id: string | null;
-  event_type: Exclude<InvestmentAccountEventType, "opening_balance">;
+  event_type: InvestmentAccountEventType;
   event_date: string;
   amount: number;
   notes: string | null;

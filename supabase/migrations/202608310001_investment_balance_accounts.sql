@@ -354,7 +354,7 @@ begin
   if authenticated_owner_id is null then
     raise exception 'Usuário não autenticado.' using errcode = '28000';
   end if;
-  if p_event_type not in ('application', 'redemption', 'yield', 'positive_adjustment') then
+  if p_event_type not in ('opening_balance', 'application', 'redemption', 'yield', 'positive_adjustment') then
     raise exception 'Tipo de movimentação inválido.' using errcode = '22023';
   end if;
   if p_date is null or p_amount is null or p_amount <= 0 or p_idempotency_key is null then
@@ -419,7 +419,7 @@ begin
       raise exception 'Saldo insuficiente na conta financeira.' using errcode = '22003';
     end if;
   elsif p_financial_account_id is not null then
-    raise exception 'Rendimentos e ajustes não movimentam conta financeira.' using errcode = '22023';
+    raise exception 'Saldo inicial, rendimentos e ajustes não movimentam conta financeira.' using errcode = '22023';
   end if;
 
   perform set_config('app.investment_account_mutation', 'on', true);
@@ -497,7 +497,7 @@ declare
   normalized_notes text := nullif(trim(p_notes), '');
 begin
   if authenticated_owner_id is null then raise exception 'Usuário não autenticado.' using errcode = '28000'; end if;
-  if p_event_type not in ('application', 'redemption', 'yield', 'positive_adjustment')
+  if p_event_type not in ('opening_balance', 'application', 'redemption', 'yield', 'positive_adjustment')
      or p_date is null or p_amount is null or p_amount <= 0 then
     raise exception 'Movimentação inválida.' using errcode = '22023';
   end if;
@@ -542,7 +542,7 @@ begin
       raise exception 'Saldo insuficiente na conta financeira.' using errcode = '22003';
     end if;
   elsif p_financial_account_id is not null then
-    raise exception 'Rendimentos e ajustes não movimentam conta financeira.' using errcode = '22023';
+    raise exception 'Saldo inicial, rendimentos e ajustes não movimentam conta financeira.' using errcode = '22023';
   end if;
 
   perform set_config('app.investment_account_mutation', 'on', true);

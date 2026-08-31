@@ -25,6 +25,7 @@ type Account = {
   current_balance: number | null;
   currency: string | null;
   show_on_investments_dashboard: boolean;
+  investment_account_kind: "BALANCE" | null;
   has_financial_history: boolean;
   active: boolean;
 };
@@ -38,6 +39,7 @@ const initialForm = {
   current_balance: "",
   currency: "BRL",
   show_on_investments_dashboard: false,
+  investment_account_kind: null as "BALANCE" | null,
   active: true,
 };
 
@@ -72,7 +74,7 @@ export default function AccountsPage() {
         supabase
           .from("accounts")
           .select(
-            "id, name, type, closing_day, due_day, limit_amount, current_balance, currency, show_on_investments_dashboard, active",
+            "id, name, type, closing_day, due_day, limit_amount, current_balance, currency, show_on_investments_dashboard, investment_account_kind, active",
           )
           .eq("owner_id", ownerId)
           .order("active", { ascending: false })
@@ -157,6 +159,7 @@ export default function AccountsPage() {
       currency: account.currency ?? "",
       show_on_investments_dashboard:
         account.show_on_investments_dashboard ?? false,
+      investment_account_kind: account.investment_account_kind ?? null,
       active: account.active,
     });
     setIsDrawerOpen(true);
@@ -247,6 +250,8 @@ export default function AccountsPage() {
       type,
       closing_day: type === "Conta" ? "" : current.closing_day,
       due_day: type === "Conta" ? "" : current.due_day,
+      investment_account_kind:
+        type === "Cartão" ? null : current.investment_account_kind,
     }));
   }
 
@@ -272,9 +277,18 @@ export default function AccountsPage() {
       type: form.type,
       ...cardFields,
       limit_amount: form.limit_amount ? Number(form.limit_amount) : 0,
-      current_balance: form.current_balance ? Number(form.current_balance) : 0,
+      current_balance:
+        form.investment_account_kind === "BALANCE"
+          ? 0
+          : form.current_balance
+            ? Number(form.current_balance)
+            : 0,
       currency: form.currency.trim().toUpperCase(),
-      show_on_investments_dashboard: form.show_on_investments_dashboard,
+      show_on_investments_dashboard:
+        form.investment_account_kind === "BALANCE"
+          ? true
+          : form.show_on_investments_dashboard,
+      investment_account_kind: form.investment_account_kind,
       active: form.active,
       updated_at: new Date().toISOString(),
     };
@@ -396,6 +410,9 @@ export default function AccountsPage() {
   );
   const currencyLocked = Boolean(
     editingAccount?.currency && editingAccount.has_financial_history,
+  );
+  const investmentKindLocked = Boolean(
+    editingAccount?.has_financial_history || editingAccount?.investment_account_kind,
   );
 
   return (
@@ -563,7 +580,14 @@ export default function AccountsPage() {
                     <td className="px-5 py-4 font-medium text-white">
                       {account.name}
                     </td>
-                    <td className="px-5 py-4 text-slate-300">{account.type}</td>
+                    <td className="px-5 py-4 text-slate-300">
+                      <div>{account.type}</div>
+                      {account.investment_account_kind === "BALANCE" && (
+                        <span className="mt-1 inline-flex rounded-full bg-cyan-500/10 px-2 py-0.5 text-[10px] font-bold text-cyan-300">
+                          Investimento por saldo
+                        </span>
+                      )}
+                    </td>
                     <td
                       className={`px-5 py-4 ${account.currency ? "text-slate-300" : "font-semibold text-amber-200"}`}
                     >
@@ -760,6 +784,46 @@ export default function AccountsPage() {
                   </span>
                 )}
               </label>
+
+              {form.type === "Conta" && (
+                <label className="flex items-start gap-3 rounded-2xl border border-cyan-400/20 bg-cyan-500/5 p-4 text-sm text-slate-300">
+                  <input
+                    type="checkbox"
+                    checked={form.investment_account_kind === "BALANCE"}
+                    disabled={investmentKindLocked}
+                    onChange={(event) =>
+                      setForm({
+                        ...form,
+                        investment_account_kind: event.target.checked
+                          ? "BALANCE"
+                          : null,
+                        show_on_investments_dashboard: event.target.checked
+                          ? true
+                          : form.show_on_investments_dashboard,
+                        current_balance: event.target.checked
+                          ? ""
+                          : form.current_balance,
+                      })
+                    }
+                    className="mt-0.5"
+                  />
+                  <span>
+                    <span className="block font-semibold text-white">
+                      Conta de investimento por saldo
+                    </span>
+                    <span className="mt-1 block text-xs text-slate-400">
+                      O saldo será calculado exclusivamente por Saldo inicial,
+                      Aplicações, Resgates, Rendimentos e Ajustes. O saldo inicial
+                      comum da conta permanecerá zero.
+                    </span>
+                    {investmentKindLocked && (
+                      <span className="mt-1 block text-xs text-amber-200">
+                        A finalidade não pode ser alterada depois que a conta possui histórico.
+                      </span>
+                    )}
+                  </span>
+                </label>
+              )}
 
               <div className="space-y-3 rounded-2xl border border-white/10 bg-white/[0.02] p-4">
                 <div>
