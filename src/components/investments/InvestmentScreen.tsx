@@ -10,6 +10,7 @@ import { investmentCard } from "./InvestmentUi";
 import InvestmentDashboard from "./InvestmentDashboard";
 import InvestmentAssets from "./InvestmentAssets";
 import InvestmentOperations from "./InvestmentOperations";
+import InvestmentAccountEvents from "./InvestmentAccountEvents";
 
 export type InvestmentView = "dashboard" | "assets" | "operations";
 
@@ -45,7 +46,14 @@ export default function InvestmentScreen({ view }: { view: InvestmentView }) {
       setError("");
       const investmentData = await loadInvestmentData();
       const exchange = await loadInvestmentExchangeContext(
-        [...new Set(investmentData.assets.map((asset) => asset.currency))],
+        [
+          ...new Set([
+            ...investmentData.assets.map((asset) => asset.currency),
+            ...investmentData.accounts
+              .filter((account) => account.investment_account_kind === "BALANCE")
+              .flatMap((account) => (account.currency ? [account.currency] : [])),
+          ]),
+        ],
       );
       setData(investmentData);
       setExchangeContext(exchange);
@@ -67,7 +75,14 @@ export default function InvestmentScreen({ view }: { view: InvestmentView }) {
       .then(async (value) => ({
         data: value,
         exchange: await loadInvestmentExchangeContext(
-          [...new Set(value.assets.map((asset) => asset.currency))],
+          [
+            ...new Set([
+              ...value.assets.map((asset) => asset.currency),
+              ...value.accounts
+                .filter((account) => account.investment_account_kind === "BALANCE")
+                .flatMap((account) => (account.currency ? [account.currency] : [])),
+            ]),
+          ],
         ),
       }))
       .then((value) => {
@@ -148,7 +163,10 @@ export default function InvestmentScreen({ view }: { view: InvestmentView }) {
       ) : view === "assets" ? (
         <InvestmentAssets data={data} reload={reload} />
       ) : (
-        <InvestmentOperations data={data} reload={reload} />
+        <div className="space-y-10">
+          <InvestmentAccountEvents data={data} reload={reload} />
+          <InvestmentOperations data={data} reload={reload} />
+        </div>
       )}
     </div>
   );

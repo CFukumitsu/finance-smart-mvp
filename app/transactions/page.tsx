@@ -67,6 +67,8 @@ type Transaction = {
   card_payment_account_id?: string | null;
   bankroll_integration_group_id?: string | null;
   bankroll_operation_type?: "deposit" | "withdrawal" | null;
+  investment_integration_group_id?: string | null;
+  investment_event_type?: "application" | "redemption" | null;
 };
 
 type AccountClosure = {
@@ -391,6 +393,8 @@ function TransactionsPageContent() {
           destination_account_id,
           bankroll_integration_group_id,
           bankroll_operation_type,
+          investment_integration_group_id,
+          investment_event_type,
           account:accounts!transactions_account_id_fkey(name, type),
           category:categories!transactions_category_id_fkey(name),
           competence:competences!transactions_competence_id_fkey(name)
@@ -693,6 +697,12 @@ function TransactionsPageContent() {
     if (transaction.bankroll_integration_group_id) {
       alert("Esta operação está vinculada ao Financeiro e deve ser editada pelo módulo Bankroll.");
       router.push(`/bankroll/transactions?action=${transaction.bankroll_operation_type ?? "deposit"}`);
+      return;
+    }
+
+    if (transaction.investment_integration_group_id) {
+      alert("Esta transferência pertence a uma conta por saldo e deve ser editada pelo módulo de Investimentos.");
+      router.push("/investments/operations");
       return;
     }
 
@@ -1721,6 +1731,11 @@ function TransactionsPageContent() {
                           {transaction.bankroll_integration_group_id && (
                             <span className="whitespace-nowrap rounded-full bg-cyan-500/10 px-2.5 py-0.5 text-xs font-semibold text-cyan-300">
                               Origem: Bankroll Poker
+                            </span>
+                          )}
+                          {transaction.investment_integration_group_id && (
+                            <span className="whitespace-nowrap rounded-full bg-cyan-500/10 px-2.5 py-0.5 text-xs font-semibold text-cyan-300">
+                              Origem: Investimentos
                             </span>
                           )}
                         </div>

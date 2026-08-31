@@ -142,6 +142,7 @@ export default function InvestmentOperations({
       (account) =>
         account.id === currentAccountId ||
         (account.active &&
+          account.investment_account_kind !== "BALANCE" &&
           account.show_on_investments_dashboard &&
           Boolean(account.currency) &&
           account.currency === currency),

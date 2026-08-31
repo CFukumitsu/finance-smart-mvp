@@ -4,8 +4,9 @@ import Link from "next/link";
 import { useMemo, useState } from "react";
 import type { InvestmentData, InvestmentExchangeContext, InvestmentPosition } from "@/src/types/investments";
 import {
+  calculateInvestmentAccountSummaries,
   calculateInvestmentPositions,
-  summarizeInvestmentPositions,
+  summarizeInvestmentWealth,
 } from "@/src/utils/investmentCalculations";
 import { convertInvestmentValue, resolveExchangeRate } from "@/src/utils/exchangeRateCalculations";
 import {
@@ -45,7 +46,16 @@ export default function InvestmentDashboard({
   const [accountFilter, setAccountFilter] = useState("");
   const [sort, setSort] = useState("asset");
   const selectedCurrency = exchangeContext.consolidationCurrency;
-  const summary = summarizeInvestmentPositions(positions, selectedCurrency, exchangeContext.rates);
+  const balanceAccountSummaries = calculateInvestmentAccountSummaries({
+    accounts: data.accounts,
+    events: data.accountEvents,
+  });
+  const summary = summarizeInvestmentWealth({
+    positions,
+    balanceAccounts: balanceAccountSummaries,
+    currency: selectedCurrency,
+    rates: exchangeContext.rates,
+  });
   const convertedCurrentValue = (position: InvestmentPosition) =>
     convertInvestmentValue(
       position.currentValue,
@@ -109,13 +119,13 @@ export default function InvestmentDashboard({
       );
     });
 
-  if (!data.assets.length) {
+  if (!data.assets.length && !balanceAccountSummaries.length) {
     return (
       <InvestmentEmpty
         title="Comece cadastrando um ativo"
-        text="Depois você poderá registrar compras, vendas e valorizações mensais."
-        href="/investments/assets"
-        actionLabel="Cadastrar ativo"
+        text="Cadastre um ativo unitizado ou classifique uma conta como investimento por saldo."
+        href="/accounts"
+        actionLabel="Gerenciar contas"
       />
     );
   }
@@ -144,6 +154,11 @@ export default function InvestmentDashboard({
           {summary.missingRateAssetCount} {summary.missingRateAssetCount === 1 ? "ativo não foi considerado" : "ativos não foram considerados"} por falta de cotação.
         </p>
       )}
+      {summary.missingRateAccountCount > 0 && (
+        <p role="status" className="rounded-xl border border-amber-400/20 bg-amber-500/10 p-3 text-sm text-amber-200">
+          {summary.missingRateAccountCount} {summary.missingRateAccountCount === 1 ? "conta por saldo não foi considerada" : "contas por saldo não foram consideradas"} por falta de cotação.
+        </p>
+      )}
 
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
         {[
@@ -156,9 +171,9 @@ export default function InvestmentDashboard({
             formatInvestmentMoney(summary.totalInvested, selectedCurrency),
           ],
           [
-            "Resultado não realizado",
+            "Resultado",
             formatInvestmentMoney(
-              summary.unrealizedResult,
+              summary.result,
               selectedCurrency,
             ),
           ],
@@ -171,8 +186,8 @@ export default function InvestmentDashboard({
             </p>
             <p
               className={`mt-2 text-2xl font-black ${
-                label === "Resultado não realizado"
-                  ? summary.unrealizedResult >= 0
+                label === "Resultado"
+                  ? summary.result >= 0
                     ? "text-emerald-300"
                     : "text-red-300"
                   : "text-white"
@@ -183,6 +198,39 @@ export default function InvestmentDashboard({
           </div>
         ))}
       </div>
+
+      {balanceAccountSummaries.length > 0 && (
+        <section className="space-y-4">
+          <div>
+            <h2 className="text-xl font-black text-white">Contas por saldo</h2>
+            <p className="mt-1 text-sm text-slate-400">
+              Saldos derivados exclusivamente dos eventos do módulo de investimentos.
+            </p>
+          </div>
+          <InvestmentTable
+            headers={["Conta", "Saldo", "Capital líquido", "Rendimento", "Rentabilidade"]}
+            minWidth="760px"
+          >
+            {balanceAccountSummaries.map((account) => (
+              <tr key={account.accountId} className="border-t border-white/10">
+                <InvestmentTd strong>{account.accountName}</InvestmentTd>
+                <InvestmentTd>{formatInvestmentMoney(account.balance, account.currency)}</InvestmentTd>
+                <InvestmentTd>{formatInvestmentMoney(account.investedValue, account.currency)}</InvestmentTd>
+                <InvestmentTd>
+                  <span className={account.result >= 0 ? "text-emerald-300" : "text-red-300"}>
+                    {formatInvestmentMoney(account.result, account.currency)}
+                  </span>
+                </InvestmentTd>
+                <InvestmentTd>
+                  {account.profitabilityPercent === null
+                    ? "—"
+                    : `${account.profitabilityPercent.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`}
+                </InvestmentTd>
+              </tr>
+            ))}
+          </InvestmentTable>
+        </section>
+      )}
 
       <section className="space-y-4">
         <div>
@@ -350,7 +398,9 @@ export default function InvestmentDashboard({
         )}
       </section>
 
-      <InvestmentValuations data={data} exchangeContext={exchangeContext} reload={reload} />
+      {data.assets.length > 0 && (
+        <InvestmentValuations data={data} exchangeContext={exchangeContext} reload={reload} />
+      )}
     </div>
   );
 }
