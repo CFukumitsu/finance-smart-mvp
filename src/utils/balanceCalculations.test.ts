@@ -28,7 +28,7 @@ test("preserva receitas, despesas e pagamentos de fatura do Finance", () => {
   );
 });
 
-test("preserva a semântica histórica de transferência entre contas", () => {
+test("contabiliza uma única vez cada lado do par de transferência no conjunto global", () => {
   const origin = {
     ...base,
     account_id: "origin",
@@ -43,17 +43,85 @@ test("preserva a semântica histórica de transferência entre contas", () => {
     account_id: "destination",
     status: "Recebido",
   };
+  const globalTransactions = [origin, destination];
 
   assert.equal(calculateAccountFinalBalance({
     accountId: "origin",
     openingBalance: 1000,
-    transactions: [origin],
+    transactions: globalTransactions,
   }), 900);
   assert.equal(calculateAccountFinalBalance({
     accountId: "destination",
     openingBalance: 1000,
-    transactions: [destination],
+    transactions: globalTransactions,
   }), 1100);
+});
+
+test("contabiliza múltiplas transferências entre contas sem duplicar o destino", () => {
+  const transferPair = (value: number) => {
+    const origin = {
+      ...base,
+      account_id: "origin",
+      type: "Transferência",
+      value,
+      status: "Pago",
+      origin_account_id: "origin",
+      destination_account_id: "destination",
+    };
+
+    return [
+      origin,
+      {
+        ...origin,
+        account_id: "destination",
+        status: "Recebido",
+      },
+    ];
+  };
+  const globalTransactions = [
+    ...transferPair(100),
+    ...transferPair(250),
+  ];
+
+  assert.equal(calculateAccountFinalBalance({
+    accountId: "origin",
+    openingBalance: 1000,
+    transactions: globalTransactions,
+  }), 650);
+  assert.equal(calculateAccountFinalBalance({
+    accountId: "destination",
+    openingBalance: 1000,
+    transactions: globalTransactions,
+  }), 1350);
+});
+
+test("preserva transferências financeiras representadas por linha única", () => {
+  const transactions = [
+    {
+      ...base,
+      account_id: "checking",
+      type: "Transferência",
+      value: 500,
+      status: "Pago",
+      origin_account_id: "checking",
+      destination_account_id: null,
+    },
+    {
+      ...base,
+      account_id: "checking",
+      type: "Transferência",
+      value: 200,
+      status: "Recebido",
+      origin_account_id: null,
+      destination_account_id: null,
+    },
+  ];
+
+  assert.equal(calculateAccountFinalBalance({
+    accountId: "checking",
+    openingBalance: 1000,
+    transactions,
+  }), 700);
 });
 
 test("depósito e saque Bankroll usam a semântica existente sem mudar o cálculo geral", () => {

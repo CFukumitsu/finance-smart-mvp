@@ -47,13 +47,6 @@ export function calculateAccountCredits(
       }
 
       if (
-        transaction.destination_account_id === accountId &&
-        transaction.type === "Transferência"
-      ) {
-        return sum + value;
-      }
-      
-      if (
         transaction.account_id === accountId &&
         transaction.type === "Transferência" &&
         transaction.status === "Recebido"
