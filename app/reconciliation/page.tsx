@@ -705,6 +705,7 @@ export default function ReconciliationPage() {
     { id: string; name: string; month: number; year: number; start_date?: string; end_date?: string }[]
   >([]);
   const [selectedCompetenceId, setSelectedCompetenceId] = useState("");
+  const [reconciledValues, setReconciledValues] = useState<Record<string, string>>({});
   const [candidateSearch, setCandidateSearch] = useState("");
   const [fileName, setFileName] = useState("");
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -2053,7 +2054,7 @@ export default function ReconciliationPage() {
       return;
     }
 
-    const selectedTransaction = transactions.find(
+    let selectedTransaction = transactions.find(
       (transaction) => transaction.id === transactionId
     );
 
@@ -2062,8 +2063,38 @@ export default function ReconciliationPage() {
       return;
     }
 
+    const inputValue = reconciledValues[transactionId];
+    const reconciledValue = inputValue === undefined
+      ? Number(selectedTransaction.value)
+      : Number(inputValue.replace(/\D/g, "")) / 100;
+    const valueChanged = Math.round(reconciledValue * 100) !== Math.round(Number(selectedTransaction.value) * 100);
+    if (valueChanged && (!Number.isFinite(reconciledValue) || reconciledValue <= 0 || reconciledValue > 9999999999.99)) {
+      alert("Informe um valor conciliado válido, maior que zero.");
+      return;
+    }
+
     try {
-      await saveReconciliation(item, transactionId);
+      if (!valueChanged) {
+        await saveReconciliation(item, transactionId);
+      } else {
+        const { data, error } = await supabase.rpc("reconcile_transaction_with_value", {
+          p_statement_item_id: item.id,
+          p_transaction_id: transactionId,
+          p_value: reconciledValue,
+          p_expected_value: Number(selectedTransaction.value),
+        }).single();
+        if (error) throw error;
+        selectedTransaction = data as Transaction;
+        const updatedTransaction = selectedTransaction;
+        setTransactions((previous) => previous.map((transaction) =>
+          transaction.id === transactionId ? updatedTransaction : transaction
+        ));
+        setItems((previous) => previous.map((current) =>
+          current.matchedTransactionId === transactionId
+            ? { ...current, matchedTransaction: updatedTransaction }
+            : current
+        ));
+      }
     } catch (error) {
       const message = getErrorMessage(error);
       console.error("Erro ao gravar conciliação:", message, error);
@@ -3003,7 +3034,7 @@ export default function ReconciliationPage() {
                       {!item.matched ? (
                         <>
                           <button
-                            onClick={() => setItemToReconcile(item)}
+                            onClick={() => { setReconciledValues({}); setItemToReconcile(item); }}
                             className="rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white hover:bg-blue-500"
                           >
                             Conciliar
@@ -3165,7 +3196,7 @@ export default function ReconciliationPage() {
                     <tr>
                       <th className="px-4 py-3">Data</th>
                       <th className="px-4 py-3">Descrição no Finance Smart</th>
-                      <th className="px-4 py-3 text-right">Valor original</th>
+                      <th className="px-4 py-3 text-right">Valor lançado / conciliado</th>
                       <th className="px-4 py-3 text-right">Já conciliado</th>
                       <th className="px-4 py-3 text-right">Saldo disponível</th>
                       <th className="px-4 py-3 text-right">Diferença</th>
@@ -3189,7 +3220,31 @@ export default function ReconciliationPage() {
                           </td>
 
                           <td className="px-4 py-3 text-right text-slate-300">
-                            {formatCurrency(transaction.originalValue)}
+                            <div>Valor lançado: {formatCurrency(transaction.originalValue)}</div>
+                            <label className="mt-2 block text-xs">
+                              Valor conciliado
+                              <input
+                                aria-label={"Valor conciliado de " + transaction.description}
+                                inputMode="numeric"
+                                value={reconciledValues[transaction.id] ?? formatCurrency(Number(transaction.value))}
+                                onChange={(event) => {
+                                  const digits = event.target.value.replace(/\D/g, "");
+                                  setReconciledValues((previous) => ({
+                                    ...previous,
+                                    [transaction.id]: digits ? formatCurrency(Number(digits) / 100) : "",
+                                  }));
+                                }}
+                                className="mt-1 w-36 rounded-lg border border-white/10 bg-slate-900 px-3 py-2 text-right text-white"
+                              />
+                            </label>
+                            {reconciledValues[transaction.id] && (() => {
+                              const differenceCents = Number(reconciledValues[transaction.id].replace(/\D/g, "")) - Math.round(Number(transaction.value) * 100);
+                              return differenceCents !== 0 && (
+                                <div className="mt-1 text-xs text-amber-300" aria-live="polite">
+                                  Diferença: {differenceCents > 0 ? "+" : "-"}{formatCurrency(Math.abs(differenceCents) / 100)}
+                                </div>
+                              );
+                            })()}
                           </td>
 
                           <td className="px-4 py-3 text-right text-slate-400">
@@ -3212,7 +3267,7 @@ export default function ReconciliationPage() {
                                 }
                                 className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-500"
                               >
-                                Usar este
+                                Conciliar
                               </button>
 
                               {transaction.alreadyReconciled >= 0.01 && (

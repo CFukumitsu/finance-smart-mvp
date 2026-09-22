@@ -344,29 +344,28 @@ function TransactionsPageContent() {
     setPlannedCardLimit(Number(data?.planned_value ?? 0));
   }
 
-  async function loadDescriptionSuggestions(ownerId: string) {
-    const { data, error } = await supabase
-      .from("transactions")
-      .select("description, created_at")
-      .eq("owner_id", ownerId)
-      .eq("type", "Despesa")
-
-    if (error) {
-      console.error("Erro ao carregar sugestões de despesas:", error);
-      setDescriptionSuggestions([]);
-      return;
-    }
-
-    const uniqueSuggestions = Array.from(
-      new Set(
-        (data ?? [])
-          .map((item) => item.description?.trim())
-          .filter(Boolean)
-      )
-    ).slice(0, 80) as string[];
-
-    setDescriptionSuggestions(uniqueSuggestions);
-  }
+  useEffect(() => {
+    if (!isDrawerOpen) return;
+    let cancelled = false;
+    setDescriptionSuggestions([]);
+    const timer = window.setTimeout(async () => {
+      try {
+        const { data, error } = await supabase.rpc("search_transaction_descriptions", {
+          search_text: form.description.trim(),
+        });
+        if (error) throw error;
+        if (!cancelled) {
+          setDescriptionSuggestions((data ?? []).map((item: { description: string }) => item.description));
+        }
+      } catch (error) {
+        if (!cancelled) console.error("Erro ao carregar sugestões de descrições:", error);
+      }
+    }, 200);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [form.description, isDrawerOpen]);
 
   async function loadTransactions(
     filters?: {
@@ -524,7 +523,6 @@ function TransactionsPageContent() {
     if (categoriesResponse.data) setCategories(categoriesResponse.data);
 
     await loadClosedCompetences(ownerId);
-    await loadDescriptionSuggestions(ownerId);
 
     if (competencesResponse.data) {
       setCompetences(competencesResponse.data);
@@ -925,8 +923,6 @@ function TransactionsPageContent() {
 
         closeDrawer();
 
-        await loadDescriptionSuggestions(ownerId);
-
         await loadTransactions({
           competenceId: competenceFilter,
           accountId: accountFilter,
@@ -1043,7 +1039,6 @@ function TransactionsPageContent() {
       }
 
       closeDrawer();
-      await loadDescriptionSuggestions(ownerId);
 
       await loadTransactions({
         competenceId: competenceFilter,
