@@ -2,7 +2,7 @@
 
 import { useEffect, useRef } from "react";
 
-export default function IdleSessionWarning({ onContinue }: { onContinue: () => void }) {
+export default function IdleSessionWarning({ onContinue }: { onContinue: (event: React.SyntheticEvent) => void }) {
   const dialog = useRef<HTMLDialogElement>(null);
 
   useEffect(() => {
@@ -20,7 +20,7 @@ export default function IdleSessionWarning({ onContinue }: { onContinue: () => v
       ref={dialog}
       aria-labelledby="idle-session-title"
       aria-describedby="idle-session-description"
-      onCancel={(event) => { event.preventDefault(); onContinue(); }}
+      onCancel={(event) => { event.preventDefault(); onContinue(event); }}
       className="fixed inset-0 m-auto w-[calc(100%-2rem)] max-w-md rounded-2xl border border-white/15 bg-slate-950 p-6 text-white shadow-2xl backdrop:bg-black/60"
     >
       <h2 id="idle-session-title" className="text-xl font-semibold">Sessão prestes a expirar</h2>
