@@ -7,8 +7,8 @@ export async function signInWithEmailAndPassword(email: string, password: string
   });
 }
 
-export async function signOut() {
-  return supabase.auth.signOut();
+export async function signOut(scope: "global" | "local" = "global") {
+  return supabase.auth.signOut({ scope });
 }
 
 export async function sendPasswordResetEmail(email: string) {
