@@ -1,13 +1,27 @@
 "use client";
 /* eslint-disable react-hooks/set-state-in-effect -- Legacy page synchronizes filters and Supabase data through effects. */
 
+import { useMutation } from "@/src/hooks/useMutation";
+import { ProcessingButton, MutationScope } from "@/src/components/ui/Mutation";
 import { Suspense, useEffect, useRef, useState } from "react";
-import { ChevronLeft, ChevronRight, Rows3, Search, SlidersHorizontal, X } from "lucide-react";
+import {
+  ChevronLeft,
+  ChevronRight,
+  Pencil,
+  Rows3,
+  Search,
+  SlidersHorizontal,
+  Trash2,
+  X,
+} from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import AppShell from "../components/layout/AppShell";
 import { getCurrentUserId, supabase } from "@/src/lib/supabase";
 import { deleteTransaction as deleteTransactionService } from "@/src/services/transactionService";
-import FuelTransactionFields, { emptyFuelForm, type FuelForm } from "@/src/components/fuel/FuelTransactionFields";
+import FuelTransactionFields, {
+  emptyFuelForm,
+  type FuelForm,
+} from "@/src/components/fuel/FuelTransactionFields";
 import { parsePtBrNumber } from "@/src/utils/fuelCalculations";
 import { removeFuelRecordForTransaction } from "@/src/services/fuelService";
 import { ensureAccountIsOpen } from "@/src/utils/accountLock";
@@ -87,12 +101,16 @@ type AccountClosure = {
 };
 
 function TransactionsPageContent() {
+  const mutation = useMutation();
+  const isMutationLocked = mutation.isLocked;
   const router = useRouter();
   const searchParams = useSearchParams();
 
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  const [editingTransactionId, setEditingTransactionId] = useState<string | null>(null);
+  const [editingTransactionId, setEditingTransactionId] = useState<
+    string | null
+  >(null);
 
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
@@ -100,7 +118,9 @@ function TransactionsPageContent() {
   const [fuelForm, setFuelForm] = useState<FuelForm>(emptyFuelForm);
   const [competences, setCompetences] = useState<Competence[]>([]);
   const [closedCompetenceIds, setClosedCompetenceIds] = useState<string[]>([]);
-  const [descriptionSuggestions, setDescriptionSuggestions] = useState<string[]>([]);
+  const [descriptionSuggestions, setDescriptionSuggestions] = useState<
+    string[]
+  >([]);
 
   const [searchTerm, setSearchTerm] = useState("");
   const [debouncedSearchTerm, setDebouncedSearchTerm] = useState("");
@@ -109,7 +129,9 @@ function TransactionsPageContent() {
   const [competenceFilter, setCompetenceFilter] = useState("");
   const [accountFilter, setAccountFilter] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("");
-  const [listMode, setListMode] = useState<"competence" | "latest">("competence");
+  const [listMode, setListMode] = useState<"competence" | "latest">(
+    "competence",
+  );
   const [showFilters, setShowFilters] = useState(false);
   const [density, setDensity] = useState<"compact" | "comfortable">("compact");
   const [plannedCardLimit, setPlannedCardLimit] = useState(0);
@@ -174,7 +196,7 @@ function TransactionsPageContent() {
       JSON.stringify({
         ...currentDefaults,
         ...nextDefaults,
-      })
+      }),
     );
   }
 
@@ -190,7 +212,7 @@ function TransactionsPageContent() {
         type: nextForm.type,
         competence_id: nextForm.competence_id,
         status: nextForm.status,
-      })
+      }),
     );
   }
 
@@ -221,7 +243,7 @@ function TransactionsPageContent() {
 
     const currentCompetence = list.find(
       (competence) =>
-        competence.month === currentMonth && competence.year === currentYear
+        competence.month === currentMonth && competence.year === currentYear,
     );
 
     return currentCompetence?.id ?? list[0]?.id ?? "";
@@ -250,7 +272,7 @@ function TransactionsPageContent() {
       return accountClosures.some(
         (closure) =>
           closure.account_id === transaction.account_id &&
-          closure.competence_id === transaction.competence_id
+          closure.competence_id === transaction.competence_id,
       );
     }
 
@@ -258,7 +280,7 @@ function TransactionsPageContent() {
       return cardStatements.some(
         (statement) =>
           statement.account_id === transaction.account_id &&
-          statement.competence_id === transaction.competence_id
+          statement.competence_id === transaction.competence_id,
       );
     }
 
@@ -314,7 +336,7 @@ function TransactionsPageContent() {
 
     return (
       competences.find(
-        (competence) => competence.month === month && competence.year === year
+        (competence) => competence.month === month && competence.year === year,
       )?.id ?? form.competence_id
     );
   }
@@ -350,15 +372,23 @@ function TransactionsPageContent() {
     setDescriptionSuggestions([]);
     const timer = window.setTimeout(async () => {
       try {
-        const { data, error } = await supabase.rpc("search_transaction_descriptions", {
-          search_text: form.description.trim(),
-        });
+        const { data, error } = await supabase.rpc(
+          "search_transaction_descriptions",
+          {
+            search_text: form.description.trim(),
+          },
+        );
         if (error) throw error;
         if (!cancelled) {
-          setDescriptionSuggestions((data ?? []).map((item: { description: string }) => item.description));
+          setDescriptionSuggestions(
+            (data ?? []).map(
+              (item: { description: string }) => item.description,
+            ),
+          );
         }
       } catch (error) {
-        if (!cancelled) console.error("Erro ao carregar sugestões de descrições:", error);
+        if (!cancelled)
+          console.error("Erro ao carregar sugestões de descrições:", error);
       }
     }, 200);
     return () => {
@@ -367,17 +397,76 @@ function TransactionsPageContent() {
     };
   }, [form.description, isDrawerOpen]);
 
-  async function loadTransactions(
-    filters?: {
-      competenceId?: string;
-      accountId?: string;
-      type?: string;
-      status?: string;
-      categoryId?: string;
-      search?: string;
-      listMode?: "competence" | "latest";
+  async function applyDescriptionSuggestion(description: string) {
+    setForm((current) => ({
+      ...current,
+      description,
+    }));
+
+    try {
+      const ownerId = await getCurrentUserId();
+
+      const { data, error } = await supabase
+        .from("transactions")
+        .select("category_id, type")
+        .eq("owner_id", ownerId)
+        .eq("description", description)
+        .not("category_id", "is", null)
+        .order("due_date", { ascending: false })
+        .order("created_at", { ascending: false, nullsFirst: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (error) {
+        throw error;
+      }
+
+      if (!data?.category_id) {
+        return;
+      }
+
+      const category = categories.find((item) => item.id === data.category_id);
+
+      if (!category) {
+        return;
+      }
+
+      const isFuel = category.special_type === "fuel";
+
+      setForm((current) => ({
+        ...current,
+        description,
+        category_id: category.id,
+        type: isFuel ? "Despesa" : current.type,
+        mode: isFuel ? "unico" : current.mode,
+        status: isFuel
+          ? getAutomaticStatus("Despesa", current.due_date)
+          : current.status,
+      }));
+
+      updateTransactionDefaults({
+        category_id: category.id,
+        ...(isFuel
+          ? {
+              type: "Despesa",
+              status: getAutomaticStatus("Despesa", form.due_date),
+            }
+          : {}),
+      });
+    } catch (error) {
+      console.error("Erro ao aplicar categoria da descrição sugerida:", error);
     }
-  ) {
+  }
+
+  async function loadTransactions(filters?: {
+    competenceId?: string;
+    accountId?: string;
+    type?: string;
+    status?: string;
+    categoryId?: string;
+    search?: string;
+    listMode?: "competence" | "latest";
+  }) {
     const requestId = ++loadTransactionsRequestIdRef.current;
     setIsLoading(true);
 
@@ -389,7 +478,8 @@ function TransactionsPageContent() {
 
     let query = supabase
       .from("transactions")
-      .select(`
+      .select(
+        `
           id,
           description,
           due_date,
@@ -410,8 +500,9 @@ function TransactionsPageContent() {
           account:accounts!transactions_account_id_fkey(name, type),
           category:categories!transactions_category_id_fkey(name),
           competence:competences!transactions_competence_id_fkey(name)
-        `)
-      .eq("owner_id", ownerId)
+        `,
+      )
+      .eq("owner_id", ownerId);
 
     if (filters?.competenceId) {
       query = query.eq("competence_id", filters.competenceId);
@@ -481,16 +572,15 @@ function TransactionsPageContent() {
     const ownerId = await getCurrentUserId();
     await ensureCompetenceExists(new Date());
 
-    const [accountClosuresResponse, cardStatementsResponse] = await Promise.all([
-      supabase
-        .from("account_closures")
-        .select("*")
-        .eq("owner_id", ownerId),
-      supabase
-        .from("credit_card_statements")
-        .select("account_id, competence_id")
-        .eq("owner_id", ownerId),
-    ]);
+    const [accountClosuresResponse, cardStatementsResponse] = await Promise.all(
+      [
+        supabase.from("account_closures").select("*").eq("owner_id", ownerId),
+        supabase
+          .from("credit_card_statements")
+          .select("account_id, competence_id")
+          .eq("owner_id", ownerId),
+      ],
+    );
 
     setAccountClosures(accountClosuresResponse.data ?? []);
     setCardStatements(cardStatementsResponse.data ?? []);
@@ -499,7 +589,9 @@ function TransactionsPageContent() {
       await Promise.all([
         supabase
           .from("accounts")
-          .select("id, name, type, closing_day, due_day, limit_amount, current_balance, show_on_investments_dashboard, investment_account_kind")
+          .select(
+            "id, name, type, closing_day, due_day, limit_amount, current_balance, show_on_investments_dashboard, investment_account_kind",
+          )
           .eq("owner_id", ownerId)
           .eq("active", true)
           .order("name", { ascending: true }),
@@ -515,7 +607,7 @@ function TransactionsPageContent() {
           .select("id, month, year, name, status")
           .eq("owner_id", ownerId)
           .order("year", { ascending: false })
-          .order("month", { ascending: false })
+          .order("month", { ascending: false }),
       ]);
 
     const loadedAccounts = (accountsResponse.data ?? []) as Account[];
@@ -527,7 +619,9 @@ function TransactionsPageContent() {
     if (competencesResponse.data) {
       setCompetences(competencesResponse.data);
 
-      const defaultCompetenceId = getCurrentCompetenceId(competencesResponse.data);
+      const defaultCompetenceId = getCurrentCompetenceId(
+        competencesResponse.data,
+      );
 
       setCompetenceFilter(defaultCompetenceId);
 
@@ -538,9 +632,7 @@ function TransactionsPageContent() {
       const defaultType = storedDefaults?.type ?? "Despesa";
       const storedAccountId = loadedAccounts
         .filter(isFinancialLedgerAccount)
-        .some(
-        (account) => account.id === storedDefaults?.account_id,
-      )
+        .some((account) => account.id === storedDefaults?.account_id)
         ? (storedDefaults?.account_id ?? "")
         : "";
 
@@ -574,7 +666,9 @@ function TransactionsPageContent() {
   }, []);
 
   useEffect(() => {
-    const storedDensity = localStorage.getItem("finance-smart-transactions-density");
+    const storedDensity = localStorage.getItem(
+      "finance-smart-transactions-density",
+    );
     if (storedDensity === "compact" || storedDensity === "comfortable") {
       setDensity(storedDensity);
     }
@@ -582,6 +676,7 @@ function TransactionsPageContent() {
 
   useEffect(() => {
     function closeOnEscape(event: KeyboardEvent) {
+      if (isMutationLocked()) return;
       if (event.key !== "Escape") return;
       if (showFilters) {
         setShowFilters(false);
@@ -591,14 +686,25 @@ function TransactionsPageContent() {
     }
     document.addEventListener("keydown", closeOnEscape);
     return () => document.removeEventListener("keydown", closeOnEscape);
-  }, [showFilters, isDrawerOpen]);
+  }, [showFilters, isDrawerOpen, isMutationLocked]);
 
   useEffect(() => {
-    if (searchParams.get("new") === "true" || searchParams.get("new") === "fuel") {
+    if (
+      searchParams.get("new") === "true" ||
+      searchParams.get("new") === "fuel"
+    ) {
       resetForm();
       if (searchParams.get("new") === "fuel") {
-        const fuelCategory = categories.find((category) => category.special_type === "fuel");
-        if (fuelCategory) setForm((current) => ({ ...current, category_id: fuelCategory.id, type: "Despesa", mode: "unico" }));
+        const fuelCategory = categories.find(
+          (category) => category.special_type === "fuel",
+        );
+        if (fuelCategory)
+          setForm((current) => ({
+            ...current,
+            category_id: fuelCategory.id,
+            type: "Despesa",
+            mode: "unico",
+          }));
       }
       setIsDrawerOpen(true);
     }
@@ -633,7 +739,15 @@ function TransactionsPageContent() {
       search: debouncedSearchTerm,
       listMode,
     });
-  }, [competenceFilter, accountFilter, typeFilter, statusFilter, categoryFilter, listMode, debouncedSearchTerm]);
+  }, [
+    competenceFilter,
+    accountFilter,
+    typeFilter,
+    statusFilter,
+    categoryFilter,
+    listMode,
+    debouncedSearchTerm,
+  ]);
 
   useEffect(() => {
     const normalizedSearchTerm = searchTerm.trim();
@@ -691,15 +805,20 @@ function TransactionsPageContent() {
   }
 
   async function openEditDrawer(transaction: Transaction) {
-
     if (transaction.bankroll_integration_group_id) {
-      alert("Esta operação está vinculada ao Financeiro e deve ser editada pelo módulo Bankroll.");
-      router.push(`/bankroll/transactions?action=${transaction.bankroll_operation_type ?? "deposit"}`);
+      alert(
+        "Esta operação está vinculada ao Financeiro e deve ser editada pelo módulo Bankroll.",
+      );
+      router.push(
+        `/bankroll/transactions?action=${transaction.bankroll_operation_type ?? "deposit"}`,
+      );
       return;
     }
 
     if (transaction.investment_integration_group_id) {
-      alert("Esta transferência pertence a uma conta por saldo e deve ser editada pelo módulo de Investimentos.");
+      alert(
+        "Esta transferência pertence a uma conta por saldo e deve ser editada pelo módulo de Investimentos.",
+      );
       router.push("/investments/operations");
       return;
     }
@@ -728,171 +847,370 @@ function TransactionsPageContent() {
     });
 
     const ownerId = await getCurrentUserId();
-    const { data: fuel } = await supabase.from("fuel_records").select("vehicle_id,fuel_station_id,fuel_type,odometer,liters,price_per_liter,full_tank,latitude,longitude").eq("transaction_id", transaction.id).eq("owner_id", ownerId).maybeSingle();
-    if (fuel) setFuelForm({ vehicle_id:fuel.vehicle_id, fuel_station_id:fuel.fuel_station_id ?? "", fuel_type:fuel.fuel_type, odometer:String(fuel.odometer).replace(".",","), liters:String(fuel.liters).replace(".",","), price_per_liter:String(fuel.price_per_liter).replace(".",","), full_tank:fuel.full_tank, latitude:String(fuel.latitude??""), longitude:String(fuel.longitude??"") });
+    const { data: fuel } = await supabase
+      .from("fuel_records")
+      .select(
+        "vehicle_id,fuel_station_id,fuel_type,odometer,liters,price_per_liter,full_tank,latitude,longitude",
+      )
+      .eq("transaction_id", transaction.id)
+      .eq("owner_id", ownerId)
+      .maybeSingle();
+    if (fuel)
+      setFuelForm({
+        vehicle_id: fuel.vehicle_id,
+        fuel_station_id: fuel.fuel_station_id ?? "",
+        fuel_type: fuel.fuel_type,
+        odometer: String(fuel.odometer).replace(".", ","),
+        liters: String(fuel.liters).replace(".", ","),
+        price_per_liter: String(fuel.price_per_liter).replace(".", ","),
+        full_tank: fuel.full_tank,
+        latitude: String(fuel.latitude ?? ""),
+        longitude: String(fuel.longitude ?? ""),
+      });
 
     setIsDrawerOpen(true);
   }
 
   async function saveTransaction() {
-    const numericValue = parseCurrencyInput(form.value);
-    const installmentCount = Number(form.installments);
-    const isFuel = categories.find((category) => category.id === form.category_id)?.special_type === "fuel";
-    const selectedAccount = accounts.find(
-      (account) => account.id === form.account_id,
-    );
-    const selectedDestination = accounts.find(
-      (account) => account.id === form.destination_account_id,
-    );
-
-    if (
-      !selectedAccount ||
-      !isFinancialLedgerAccount(selectedAccount) ||
-      (form.type === "Transferência" &&
-        (!isFinancialAccount(selectedAccount) ||
-          !selectedDestination ||
-          !isFinancialAccount(selectedDestination)))
-    ) {
-      alert(
-        "Contas de investimento devem ser movimentadas exclusivamente pelo módulo Investimentos.",
+    return mutation.run("saveTransaction", async () => {
+      const numericValue = parseCurrencyInput(form.value);
+      const installmentCount = Number(form.installments);
+      const isFuel =
+        categories.find((category) => category.id === form.category_id)
+          ?.special_type === "fuel";
+      const selectedAccount = accounts.find(
+        (account) => account.id === form.account_id,
       );
-      return;
-    }
-
-    if (
-      !form.description ||
-      numericValue <= 0 ||
-      !form.due_date ||
-      !form.competence_id ||
-      (
-        form.type === "Transferência" &&
-        !editingTransactionId &&
-        (!form.account_id ||
-          !form.destination_account_id ||
-          form.account_id === form.destination_account_id)
-      ) ||
-      (
-        form.type !== "Transferência" &&
-        !form.account_id
-      ) ||
-      (
-        form.type !== "Transferência" &&
-        form.type !== "Pagamento de Fatura" &&
-        !form.category_id
-      )
-    ) {
-      alert("Preencha todos os campos obrigatórios.");
-      return;
-    }
-
-    if (form.mode === "parcelado" && (!installmentCount || installmentCount < 2)) {
-      alert("Informe uma quantidade de parcelas maior que 1.");
-      return;
-    }
-
-    try {
-      const ownerId = await getCurrentUserId();
-      const dueDateCompetence = competences.find(
-        (competence) => competence.name === toCompetenceKey(form.due_date)
+      const selectedDestination = accounts.find(
+        (account) => account.id === form.destination_account_id,
       );
-      const effectiveCompetenceId =
-        form.mode !== "parcelado" && !dueDateCompetence
-          ? (await ensureCompetenceExists(form.due_date)).id
-          : form.competence_id;
 
-      if (isFuel) {
-        const liters = parsePtBrNumber(fuelForm.liters), price = parsePtBrNumber(fuelForm.price_per_liter), odometer = parsePtBrNumber(fuelForm.odometer);
-        if (!fuelForm.vehicle_id || !fuelForm.fuel_type || odometer < 0 || liters <= 0 || price <= 0 || numericValue <= 0) { alert("Preencha todos os dados obrigatórios do abastecimento."); return; }
-        const { data: last } = await supabase.from("fuel_records").select("odometer").eq("owner_id", ownerId).eq("vehicle_id", fuelForm.vehicle_id).order("odometer", { ascending: false }).limit(1).maybeSingle();
-        if (last && odometer < Number(last.odometer) && !window.confirm(`O hodômetro é inferior ao último registro (${last.odometer} km). Deseja continuar?`)) return;
-        const lock = await ensureAccountIsOpen({ accountId: form.account_id, competenceId: effectiveCompetenceId });
-        if (!lock.allowed) { alert(lock.message); return; }
-        const transactionPayload = {
-          description: form.description,
-          value: numericValue,
-          due_date: form.due_date,
-          type: "Despesa",
-          mode: "unico",
-          status: form.status,
-          account_id: form.account_id,
-          category_id: form.category_id,
-          competence_id: effectiveCompetenceId,
-          owner_id: ownerId,
-        };
-        const transactionResult = editingTransactionId
-          ? await supabase.from("transactions").update(transactionPayload).eq("id", editingTransactionId).eq("owner_id", ownerId).select("id").single()
-          : await supabase.from("transactions").insert(transactionPayload).select("id").single();
-        if (transactionResult.error) throw new Error(transactionResult.error.message);
-
-        const transactionId = transactionResult.data.id;
-        const fuelRecordPayload = {
-          owner_id: ownerId,
-          transaction_id: transactionId,
-          vehicle_id: fuelForm.vehicle_id,
-          fuel_station_id: fuelForm.fuel_station_id || null,
-          fuel_type: fuelForm.fuel_type,
-          odometer,
-          liters,
-          price_per_liter: price,
-          total_value: numericValue,
-          full_tank: fuelForm.full_tank,
-          latitude: fuelForm.latitude || null,
-          longitude: fuelForm.longitude || null,
-          recorded_at: form.due_date,
-        };
-        const { error: fuelRecordError } = await supabase
-          .from("fuel_records")
-          .upsert(fuelRecordPayload, { onConflict: "transaction_id" });
-        if (fuelRecordError) {
-          if (!editingTransactionId) {
-            await supabase.from("transactions").delete().eq("id", transactionId).eq("owner_id", ownerId);
-          }
-          throw new Error(fuelRecordError.message);
-        }
-        closeDrawer(); await loadTransactions({ competenceId: competenceFilter, accountId: accountFilter, type: typeFilter, status: statusFilter, categoryId: categoryFilter, search: debouncedSearchTerm, listMode }); return;
+      if (
+        !selectedAccount ||
+        !isFinancialLedgerAccount(selectedAccount) ||
+        (form.type === "Transferência" &&
+          (!isFinancialAccount(selectedAccount) ||
+            !selectedDestination ||
+            !isFinancialAccount(selectedDestination)))
+      ) {
+        alert(
+          "Contas de investimento devem ser movimentadas exclusivamente pelo módulo Investimentos.",
+        );
+        return;
       }
 
-      if (form.type === "Transferência" && !editingTransactionId) {
-        const originAccount = accounts.find(
-          (account) => account.id === form.account_id
-        );
+      if (
+        !form.description ||
+        numericValue <= 0 ||
+        !form.due_date ||
+        !form.competence_id ||
+        (form.type === "Transferência" &&
+          !editingTransactionId &&
+          (!form.account_id ||
+            !form.destination_account_id ||
+            form.account_id === form.destination_account_id)) ||
+        (form.type !== "Transferência" && !form.account_id) ||
+        (form.type !== "Transferência" &&
+          form.type !== "Pagamento de Fatura" &&
+          !form.category_id)
+      ) {
+        alert("Preencha todos os campos obrigatórios.");
+        return;
+      }
 
-        const destinationAccount = accounts.find(
-          (account) => account.id === form.destination_account_id
-        );
+      if (
+        form.mode === "parcelado" &&
+        (!installmentCount || installmentCount < 2)
+      ) {
+        alert("Informe uma quantidade de parcelas maior que 1.");
+        return;
+      }
 
-        const transferTransactions = [
-          {
-            description: form.description || `Transferência para ${destinationAccount?.name ?? "conta destino"}`,
+      try {
+        const ownerId = await getCurrentUserId();
+        const dueDateCompetence = competences.find(
+          (competence) => competence.name === toCompetenceKey(form.due_date),
+        );
+        const effectiveCompetenceId =
+          form.mode !== "parcelado" && !dueDateCompetence
+            ? (await ensureCompetenceExists(form.due_date)).id
+            : form.competence_id;
+
+        if (isFuel) {
+          const liters = parsePtBrNumber(fuelForm.liters),
+            price = parsePtBrNumber(fuelForm.price_per_liter),
+            odometer = parsePtBrNumber(fuelForm.odometer);
+          if (
+            !fuelForm.vehicle_id ||
+            !fuelForm.fuel_type ||
+            odometer < 0 ||
+            liters <= 0 ||
+            price <= 0 ||
+            numericValue <= 0
+          ) {
+            alert("Preencha todos os dados obrigatórios do abastecimento.");
+            return;
+          }
+          const { data: last } = await supabase
+            .from("fuel_records")
+            .select("odometer")
+            .eq("owner_id", ownerId)
+            .eq("vehicle_id", fuelForm.vehicle_id)
+            .order("odometer", { ascending: false })
+            .limit(1)
+            .maybeSingle();
+          if (
+            last &&
+            odometer < Number(last.odometer) &&
+            !window.confirm(
+              `O hodômetro é inferior ao último registro (${last.odometer} km). Deseja continuar?`,
+            )
+          )
+            return;
+          const lock = await ensureAccountIsOpen({
+            accountId: form.account_id,
+            competenceId: effectiveCompetenceId,
+          });
+          if (!lock.allowed) {
+            alert(lock.message);
+            return;
+          }
+          const transactionPayload = {
+            description: form.description,
             value: numericValue,
             due_date: form.due_date,
-            type: "Transferência",
+            type: "Despesa",
             mode: "unico",
-            status: "Pago",
+            status: form.status,
             account_id: form.account_id,
-            category_id: null,
+            category_id: form.category_id,
             competence_id: effectiveCompetenceId,
-            origin_account_id: form.account_id,
-            destination_account_id: form.destination_account_id,
             owner_id: ownerId,
-          },
-          {
-            description: form.description || `Transferência recebida de ${originAccount?.name ?? "conta origem"}`,
-            value: numericValue,
-            due_date: form.due_date,
-            type: "Transferência",
-            mode: "unico",
-            status: "Recebido",
-            account_id: form.destination_account_id,
-            category_id: null,
-            competence_id: effectiveCompetenceId,
-            origin_account_id: form.account_id,
-            destination_account_id: form.destination_account_id,
-            owner_id: ownerId,
-          },
-        ];
+          };
+          const transactionResult = editingTransactionId
+            ? await supabase
+                .from("transactions")
+                .update(transactionPayload)
+                .eq("id", editingTransactionId)
+                .eq("owner_id", ownerId)
+                .select("id")
+                .single()
+            : await supabase
+                .from("transactions")
+                .insert(transactionPayload)
+                .select("id")
+                .single();
+          if (transactionResult.error)
+            throw new Error(transactionResult.error.message);
 
-        for (const transaction of transferTransactions) {
+          const transactionId = transactionResult.data.id;
+          const fuelRecordPayload = {
+            owner_id: ownerId,
+            transaction_id: transactionId,
+            vehicle_id: fuelForm.vehicle_id,
+            fuel_station_id: fuelForm.fuel_station_id || null,
+            fuel_type: fuelForm.fuel_type,
+            odometer,
+            liters,
+            price_per_liter: price,
+            total_value: numericValue,
+            full_tank: fuelForm.full_tank,
+            latitude: fuelForm.latitude || null,
+            longitude: fuelForm.longitude || null,
+            recorded_at: form.due_date,
+          };
+          const { error: fuelRecordError } = await supabase
+            .from("fuel_records")
+            .upsert(fuelRecordPayload, { onConflict: "transaction_id" });
+          if (fuelRecordError) {
+            if (!editingTransactionId) {
+              await supabase
+                .from("transactions")
+                .delete()
+                .eq("id", transactionId)
+                .eq("owner_id", ownerId);
+            }
+            throw new Error(fuelRecordError.message);
+          }
+          closeDrawer();
+          await loadTransactions({
+            competenceId: competenceFilter,
+            accountId: accountFilter,
+            type: typeFilter,
+            status: statusFilter,
+            categoryId: categoryFilter,
+            search: debouncedSearchTerm,
+            listMode,
+          });
+          return;
+        }
+
+        if (form.type === "Transferência" && !editingTransactionId) {
+          const originAccount = accounts.find(
+            (account) => account.id === form.account_id,
+          );
+
+          const destinationAccount = accounts.find(
+            (account) => account.id === form.destination_account_id,
+          );
+
+          const transferTransactions = [
+            {
+              description:
+                form.description ||
+                `Transferência para ${destinationAccount?.name ?? "conta destino"}`,
+              value: numericValue,
+              due_date: form.due_date,
+              type: "Transferência",
+              mode: "unico",
+              status: "Pago",
+              account_id: form.account_id,
+              category_id: null,
+              competence_id: effectiveCompetenceId,
+              origin_account_id: form.account_id,
+              destination_account_id: form.destination_account_id,
+              owner_id: ownerId,
+            },
+            {
+              description:
+                form.description ||
+                `Transferência recebida de ${originAccount?.name ?? "conta origem"}`,
+              value: numericValue,
+              due_date: form.due_date,
+              type: "Transferência",
+              mode: "unico",
+              status: "Recebido",
+              account_id: form.destination_account_id,
+              category_id: null,
+              competence_id: effectiveCompetenceId,
+              origin_account_id: form.account_id,
+              destination_account_id: form.destination_account_id,
+              owner_id: ownerId,
+            },
+          ];
+
+          for (const transaction of transferTransactions) {
+            if (!transaction.account_id) {
+              alert("Conta/cartão inválido para validar fechamento.");
+              return;
+            }
+
+            const lock = await ensureAccountIsOpen({
+              accountId: transaction.account_id,
+              competenceId: transaction.competence_id,
+            });
+
+            if (!lock.allowed) {
+              alert(lock.message);
+              return;
+            }
+          }
+
+          const { error } = await supabase
+            .from("transactions")
+            .insert(transferTransactions);
+
+          if (error) {
+            throw new Error(error.message);
+          }
+
+          if (!editingTransactionId) {
+            saveTransactionDefaults(form);
+          }
+
+          closeDrawer();
+
+          await loadTransactions({
+            competenceId: competenceFilter,
+            accountId: accountFilter,
+            type: typeFilter,
+            status: statusFilter,
+            categoryId: categoryFilter,
+            search: debouncedSearchTerm,
+            listMode,
+          });
+
+          return;
+        }
+
+        const installmentDates =
+          form.mode === "parcelado" && !editingTransactionId
+            ? Array.from({ length: installmentCount }, (_, index) =>
+                addMonths(form.due_date, index),
+              )
+            : [];
+        const ensuredInstallmentCompetences =
+          await ensureCompetencesExist(installmentDates);
+
+        const transactionsToSave =
+          form.mode === "parcelado" && !editingTransactionId
+            ? Array.from({ length: installmentCount }, (_, index) => {
+                const dueDate = addMonths(form.due_date, index);
+                const competenceId = ensuredInstallmentCompetences.get(
+                  toCompetenceKey(dueDate),
+                )?.id;
+
+                if (!competenceId) {
+                  throw new Error(
+                    `Não foi possível preparar a competência de ${toCompetenceKey(dueDate)}.`,
+                  );
+                }
+
+                return {
+                  description: `${form.description} ${index + 1}/${installmentCount}`,
+                  value: Number((numericValue / installmentCount).toFixed(2)),
+                  due_date: dueDate,
+                  type: form.type,
+                  mode: form.mode,
+                  status: form.status,
+                  account_id: form.account_id,
+                  category_id:
+                    form.type === "Transferência" ||
+                    form.type === "Pagamento de Fatura"
+                      ? null
+                      : form.category_id,
+                  competence_id: competenceId,
+                  origin_account_id:
+                    form.type === "Transferência"
+                      ? form.origin_account_id || form.account_id
+                      : null,
+                  destination_account_id:
+                    form.type === "Transferência"
+                      ? form.destination_account_id || null
+                      : null,
+                  parcel_number: index + 1,
+                  total_parcels: installmentCount,
+                  owner_id: ownerId,
+                };
+              })
+            : [
+                {
+                  description: form.description,
+                  value: numericValue,
+                  due_date: form.due_date,
+                  type: form.type,
+                  mode: form.mode,
+                  status: form.status,
+                  account_id: form.account_id,
+                  category_id:
+                    form.type === "Transferência" ||
+                    form.type === "Pagamento de Fatura"
+                      ? null
+                      : form.category_id || null,
+                  competence_id: effectiveCompetenceId,
+                  origin_account_id:
+                    form.type === "Transferência"
+                      ? form.origin_account_id || form.account_id || null
+                      : null,
+                  destination_account_id:
+                    form.type === "Transferência"
+                      ? form.destination_account_id || null
+                      : null,
+                  owner_id: ownerId,
+                },
+              ];
+
+        for (const transaction of transactionsToSave) {
           if (!transaction.account_id) {
             alert("Conta/cartão inválido para validar fechamento.");
             return;
@@ -909,13 +1227,20 @@ function TransactionsPageContent() {
           }
         }
 
-        const { error } = await supabase
-          .from("transactions")
-          .insert(transferTransactions);
+        const { error } = editingTransactionId
+          ? await supabase
+              .from("transactions")
+              .update(transactionsToSave[0])
+              .eq("id", editingTransactionId)
+              .eq("owner_id", ownerId)
+          : await supabase.from("transactions").insert(transactionsToSave);
 
         if (error) {
           throw new Error(error.message);
         }
+
+        if (editingTransactionId)
+          await removeFuelRecordForTransaction(editingTransactionId);
 
         if (!editingTransactionId) {
           saveTransactionDefaults(form);
@@ -932,178 +1257,67 @@ function TransactionsPageContent() {
           search: debouncedSearchTerm,
           listMode,
         });
+      } catch (error) {
+        console.error("Erro ao salvar lançamento:", error);
 
-        return;
+        alert(
+          error instanceof Error ? error.message : "Erro ao salvar lançamento.",
+        );
       }
-
-      const installmentDates =
-        form.mode === "parcelado" && !editingTransactionId
-          ? Array.from({ length: installmentCount }, (_, index) =>
-              addMonths(form.due_date, index)
-            )
-          : [];
-      const ensuredInstallmentCompetences = await ensureCompetencesExist(installmentDates);
-
-      const transactionsToSave = form.mode === "parcelado" && !editingTransactionId
-        ? Array.from({ length: installmentCount }, (_, index) => {
-          const dueDate = addMonths(form.due_date, index);
-          const competenceId = ensuredInstallmentCompetences.get(toCompetenceKey(dueDate))?.id;
-
-          if (!competenceId) {
-            throw new Error(`Não foi possível preparar a competência de ${toCompetenceKey(dueDate)}.`);
-          }
-
-          return {
-            description: `${form.description} ${index + 1}/${installmentCount}`,
-            value: Number((numericValue / installmentCount).toFixed(2)),
-            due_date: dueDate,
-            type: form.type,
-            mode: form.mode,
-            status: form.status,
-            account_id: form.account_id,
-            category_id:
-              form.type === "Transferência" || form.type === "Pagamento de Fatura"
-                ? null
-                : form.category_id,
-            competence_id: competenceId,
-            origin_account_id:
-              form.type === "Transferência"
-                ? form.origin_account_id || form.account_id
-                : null,
-            destination_account_id:
-              form.type === "Transferência"
-                ? form.destination_account_id || null
-                : null,
-            parcel_number: index + 1,
-            total_parcels: installmentCount,
-            owner_id: ownerId,
-          };
-        })
-        : [{
-          description: form.description,
-          value: numericValue,
-          due_date: form.due_date,
-          type: form.type,
-          mode: form.mode,
-          status: form.status,
-          account_id: form.account_id,
-          category_id:
-            form.type === "Transferência" || form.type === "Pagamento de Fatura"
-              ? null
-              : form.category_id || null,
-          competence_id: effectiveCompetenceId,
-          origin_account_id:
-            form.type === "Transferência"
-              ? form.origin_account_id || form.account_id || null
-              : null,
-          destination_account_id:
-            form.type === "Transferência"
-              ? form.destination_account_id || null
-              : null,
-          owner_id: ownerId,
-        }];
-
-      for (const transaction of transactionsToSave) {
-        if (!transaction.account_id) {
-          alert("Conta/cartão inválido para validar fechamento.");
-          return;
-        }
-
-        const lock = await ensureAccountIsOpen({
-          accountId: transaction.account_id,
-          competenceId: transaction.competence_id,
-        });
-
-        if (!lock.allowed) {
-          alert(lock.message);
-          return;
-        }
-      }
-
-      const { error } = editingTransactionId
-        ? await supabase
-          .from("transactions")
-          .update(transactionsToSave[0])
-          .eq("id", editingTransactionId)
-          .eq("owner_id", ownerId)
-        : await supabase.from("transactions").insert(transactionsToSave);
-
-      if (error) {
-        throw new Error(error.message);
-      }
-
-      if (editingTransactionId) await removeFuelRecordForTransaction(editingTransactionId);
-
-      if (!editingTransactionId) {
-        saveTransactionDefaults(form);
-      }
-
-      closeDrawer();
-
-      await loadTransactions({
-        competenceId: competenceFilter,
-        accountId: accountFilter,
-        type: typeFilter,
-        status: statusFilter,
-        categoryId: categoryFilter,
-        search: debouncedSearchTerm,
-        listMode,
-      });
-    } catch (error) {
-      console.error("Erro ao salvar lançamento:", error);
-
-      alert(
-        error instanceof Error
-          ? error.message
-          : "Erro ao salvar lançamento."
-      );
-    }
+    });
   }
 
   async function handleDeleteTransaction(transaction: Transaction) {
-    const confirmed = window.confirm(
-      "Tem certeza que deseja excluir este lançamento? Se ele estiver conciliado, a conciliação será desfeita automaticamente."
+    return mutation.run(
+      "handleDeleteTransaction" + ":" + transaction.id,
+      async () => {
+        const confirmed = window.confirm(
+          "Tem certeza que deseja excluir este lançamento? Se ele estiver conciliado, a conciliação será desfeita automaticamente.",
+        );
+
+        if (isTransactionLocked(transaction)) {
+          alert("Esta conta/cartão já está fechado nesta competência.");
+          return;
+        }
+
+        if (!confirmed) return;
+
+        try {
+          const result = await deleteTransactionService(transaction.id);
+
+          if (!result.success) {
+            alert(result.message ?? "Erro ao excluir lançamento.");
+            return;
+          }
+
+          await loadTransactions({
+            competenceId: competenceFilter,
+            accountId: accountFilter,
+            type: typeFilter,
+            status: statusFilter,
+            categoryId: categoryFilter,
+            search: debouncedSearchTerm,
+            listMode,
+          });
+        } catch (error) {
+          console.error("Erro ao excluir lançamento:", error);
+
+          alert(
+            error instanceof Error
+              ? error.message
+              : "Erro ao excluir lançamento.",
+          );
+        }
+      },
     );
-
-    if (isTransactionLocked(transaction)) {
-      alert("Esta conta/cartão já está fechado nesta competência.");
-      return;
-    }
-
-    if (!confirmed) return;
-
-    try {
-      const result = await deleteTransactionService(transaction.id);
-
-      if (!result.success) {
-        alert(result.message ?? "Erro ao excluir lançamento.");
-        return;
-      }
-
-      await loadTransactions({
-        competenceId: competenceFilter,
-        accountId: accountFilter,
-        type: typeFilter,
-        status: statusFilter,
-        categoryId: categoryFilter,
-        search: debouncedSearchTerm,
-        listMode,
-      });
-    } catch (error) {
-      console.error("Erro ao excluir lançamento:", error);
-
-      alert(
-        error instanceof Error
-          ? error.message
-          : "Erro ao excluir lançamento."
-      );
-    }
   }
 
   const selectedCompetence = competences.find(
-    (item) => item.id === competenceFilter
+    (item) => item.id === competenceFilter,
   );
-  const selectedCategory = categories.find((category) => category.id === form.category_id);
+  const selectedCategory = categories.find(
+    (category) => category.id === form.category_id,
+  );
   const isFuelCategory = selectedCategory?.special_type === "fuel";
 
   function getCompetenceOrder(competence: Competence) {
@@ -1111,7 +1325,10 @@ function TransactionsPageContent() {
   }
 
   function getClosureBalance(closure: AccountClosure) {
-    if (closure.closing_balance === null || closure.closing_balance === undefined) {
+    if (
+      closure.closing_balance === null ||
+      closure.closing_balance === undefined
+    ) {
       return null;
     }
 
@@ -1128,7 +1345,7 @@ function TransactionsPageContent() {
     const previousClosures = accountClosures
       .map((closure) => {
         const closureCompetence = competences.find(
-          (competence) => competence.id === closure.competence_id
+          (competence) => competence.id === closure.competence_id,
         );
 
         return {
@@ -1146,8 +1363,7 @@ function TransactionsPageContent() {
         if (!a.competence || !b.competence) return 0;
 
         return (
-          getCompetenceOrder(b.competence) -
-          getCompetenceOrder(a.competence)
+          getCompetenceOrder(b.competence) - getCompetenceOrder(a.competence)
         );
       });
 
@@ -1165,7 +1381,7 @@ function TransactionsPageContent() {
     const year = date.getFullYear();
 
     return competences.find(
-      (competence) => competence.month === month && competence.year === year
+      (competence) => competence.month === month && competence.year === year,
     );
   }
 
@@ -1177,14 +1393,14 @@ function TransactionsPageContent() {
     const centerDate = new Date(
       selectedCompetence.year,
       selectedCompetence.month - 1,
-      1
+      1,
     );
 
     const dates: Date[] = [];
 
     for (let offset = -3; offset <= 3; offset++) {
       dates.push(
-        new Date(centerDate.getFullYear(), centerDate.getMonth() + offset, 1)
+        new Date(centerDate.getFullYear(), centerDate.getMonth() + offset, 1),
       );
     }
 
@@ -1219,7 +1435,7 @@ function TransactionsPageContent() {
     const previousDate = new Date(
       selectedCompetence.year,
       selectedCompetence.month - 2,
-      1
+      1,
     );
 
     selectCompetenceByDate(previousDate);
@@ -1231,7 +1447,7 @@ function TransactionsPageContent() {
     const nextDate = new Date(
       selectedCompetence.year,
       selectedCompetence.month,
-      1
+      1,
     );
 
     selectCompetenceByDate(nextDate);
@@ -1264,76 +1480,113 @@ function TransactionsPageContent() {
     });
   }
 
+  function formatCompetenceLabel(value: string) {
+    const match = /^(\d{4})-(\d{2})$/.exec(value);
+
+    if (!match) {
+      return value;
+    }
+
+    const [, year, month] = match;
+
+    const monthLabels = [
+      "jan",
+      "fev",
+      "mar",
+      "abr",
+      "mai",
+      "jun",
+      "jul",
+      "ago",
+      "set",
+      "out",
+      "nov",
+      "dez",
+    ];
+
+    const monthIndex = Number(month) - 1;
+
+    if (monthIndex < 0 || monthIndex > 11) {
+      return value;
+    }
+
+    return `${monthLabels[monthIndex]}/${year}`;
+  }
+
   const today = new Date().toISOString().split("T")[0];
 
   const selectedAccount = accounts.find(
-    (account) => account.id === accountFilter
+    (account) => account.id === accountFilter,
   );
 
   const currentTransactions = transactions.filter(
-    (transaction) => transaction.due_date <= today
+    (transaction) => transaction.due_date <= today,
   );
 
   const openingBalance = selectedAccount
     ? (() => {
-      const selectedCompetenceOrder = selectedCompetence
-        ? selectedCompetence.year * 100 + selectedCompetence.month
-        : 0;
+        const selectedCompetenceOrder = selectedCompetence
+          ? selectedCompetence.year * 100 + selectedCompetence.month
+          : 0;
 
-      const previousClosure = accountClosures
-        .map((closure) => {
-          const closureCompetence = competences.find(
-            (competence) => competence.id === closure.competence_id
-          );
+        const previousClosure = accountClosures
+          .map((closure) => {
+            const closureCompetence = competences.find(
+              (competence) => competence.id === closure.competence_id,
+            );
 
-          return {
-            closure,
-            competence: closureCompetence,
-          };
-        })
-        .filter((item) => {
-          if (item.closure.account_id !== selectedAccount.id) return false;
-          if (!item.competence) return false;
+            return {
+              closure,
+              competence: closureCompetence,
+            };
+          })
+          .filter((item) => {
+            if (item.closure.account_id !== selectedAccount.id) return false;
+            if (!item.competence) return false;
 
-          const closureOrder = item.competence.year * 100 + item.competence.month;
+            const closureOrder =
+              item.competence.year * 100 + item.competence.month;
 
-          return closureOrder < selectedCompetenceOrder;
-        })
-        .sort((a, b) => {
-          if (!a.competence || !b.competence) return 0;
+            return closureOrder < selectedCompetenceOrder;
+          })
+          .sort((a, b) => {
+            if (!a.competence || !b.competence) return 0;
 
-          const orderA = a.competence.year * 100 + a.competence.month;
-          const orderB = b.competence.year * 100 + b.competence.month;
+            const orderA = a.competence.year * 100 + a.competence.month;
+            const orderB = b.competence.year * 100 + b.competence.month;
 
-          return orderB - orderA;
-        })[0];
+            return orderB - orderA;
+          })[0];
 
-      return Number(previousClosure?.closure.closing_balance ?? 0);
-    })()
+        return Number(previousClosure?.closure.closing_balance ?? 0);
+      })()
     : 0;
 
   const selectedAccountTransactions = selectedAccount
     ? transactions.filter(
-      (transaction) =>
-        transaction.account_id === selectedAccount.id ||
-        transaction.destination_account_id === selectedAccount.id
-    )
+        (transaction) =>
+          transaction.account_id === selectedAccount.id ||
+          transaction.destination_account_id === selectedAccount.id,
+      )
     : [];
 
   const currentBalance = selectedAccount
     ? calculateAccountFinalBalance({
-      accountId: selectedAccount.id,
-      openingBalance,
-      transactions: filterTransactionsUntilDate(selectedAccountTransactions, today),
-    })
+        accountId: selectedAccount.id,
+        openingBalance,
+        transactions: filterTransactionsUntilDate(
+          selectedAccountTransactions,
+          today,
+        ),
+      })
     : 0;
 
   const futureBalance = selectedAccount
     ? calculateAccountFinalBalance({
-      accountId: selectedAccount.id,
-      openingBalance,
-      transactions,
-    })
+        accountId: selectedAccount.id,
+        openingBalance,
+        transactions,
+      })
     : 0;
 
   const totalIncome = transactions
@@ -1347,8 +1600,7 @@ function TransactionsPageContent() {
   const totalCashExpenses = transactions
     .filter(
       (transaction) =>
-        transaction.type === "Despesa" &&
-        transaction.account?.type === "Conta"
+        transaction.type === "Despesa" && transaction.account?.type === "Conta",
     )
     .reduce((sum, transaction) => sum + Number(transaction.value), 0);
 
@@ -1356,8 +1608,7 @@ function TransactionsPageContent() {
     .filter((transaction) => transaction.type === "Pagamento de Fatura")
     .reduce((sum, transaction) => sum + Number(transaction.value), 0);
 
-  const cashFlowResult =
-    totalIncome - totalCashExpenses - totalInvoicePayments;
+  const cashFlowResult = totalIncome - totalCashExpenses - totalInvoicePayments;
 
   const totalTransfers = transactions
     .filter((transaction) => transaction.type === "Transferência")
@@ -1378,9 +1629,7 @@ function TransactionsPageContent() {
   }, 0);
 
   const cardAvailableLimit =
-    selectedAccount?.type === "Cartão"
-      ? cardLimit - cardUsedLimit
-      : 0;
+    selectedAccount?.type === "Cartão" ? cardLimit - cardUsedLimit : 0;
 
   const advancedFilterCount =
     Number(Boolean(categoryFilter)) +
@@ -1399,9 +1648,37 @@ function TransactionsPageContent() {
     localStorage.setItem("finance-smart-transactions-density", nextDensity);
   }
 
+  function changeTransactionType(newType: string) {
+    const newStatus = getAutomaticStatus(newType, form.due_date);
+
+    setForm((current) => ({
+      ...current,
+      type: newType,
+      status: newStatus,
+      category_id: newType === "Transferência" ? "" : current.category_id,
+      destination_account_id:
+        newType === "Transferência" ? current.destination_account_id : "",
+      mode: newType === "Transferência" ? "unico" : current.mode,
+    }));
+
+    updateTransactionDefaults({
+      type: newType,
+      status: newStatus,
+    });
+  }
+
+  function changeTransactionMode(newMode: string) {
+    setForm((current) => ({
+      ...current,
+      mode: newMode,
+    }));
+  }
+
   return (
     <AppShell>
-      <div className={`transactions-page transactions-density-${density} space-y-3`}>
+      <div
+        className={`transactions-page transactions-density-${density} space-y-3`}
+      >
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h1 className="theme-text text-2xl font-bold">Lançamentos</h1>
@@ -1422,76 +1699,80 @@ function TransactionsPageContent() {
         </div>
 
         <div className="transactions-surface w-full rounded-xl border p-1.5">
-              <div className="flex min-w-0 items-center gap-1">
-                <button
-                  type="button"
-                  onClick={goToPreviousCompetence}
-                  className="theme-muted theme-hover flex h-8 w-8 shrink-0 items-center justify-center rounded-lg"
-                  title="Competência anterior"
-                  aria-label="Competência anterior"
-                >
-                  <ChevronLeft size={18} />
-                </button>
+          <div className="flex min-w-0 items-center gap-1">
+            <button
+              type="button"
+              onClick={goToPreviousCompetence}
+              className="theme-muted theme-hover flex h-8 w-8 shrink-0 items-center justify-center rounded-lg"
+              title="Competência anterior"
+              aria-label="Competência anterior"
+            >
+              <ChevronLeft size={18} />
+            </button>
 
-                <div className="flex min-w-0 flex-1 items-center justify-center gap-1 overflow-hidden">
-                  {getVisibleMonthDates().map((date, index) => {
-                    const foundCompetence = getCompetenceByDate(date);
-                    const isSelected =
-                      foundCompetence?.id === selectedCompetence?.id;
+            <div className="flex min-w-0 flex-1 items-center justify-center gap-1 overflow-hidden">
+              {getVisibleMonthDates().map((date, index) => {
+                const foundCompetence = getCompetenceByDate(date);
+                const isSelected =
+                  foundCompetence?.id === selectedCompetence?.id;
 
-                    const today = new Date();
-                    const isCurrentMonth =
-                      date.getMonth() === today.getMonth() &&
-                      date.getFullYear() === today.getFullYear();
+                const today = new Date();
+                const isCurrentMonth =
+                  date.getMonth() === today.getMonth() &&
+                  date.getFullYear() === today.getFullYear();
 
-                    return (
-                      <button
-                        key={`${date.getFullYear()}-${date.getMonth()}`}
-                        type="button"
-                        disabled={!foundCompetence}
-                        onClick={() => selectCompetenceByDate(date)}
-                        className={`${index < 2 || index > 4 ? "hidden sm:inline-flex" : "inline-flex"} shrink-0 whitespace-nowrap rounded-lg px-3 py-1.5 text-xs font-semibold transition ${isSelected
-                          ? "bg-blue-600 text-white"
-                          : isCurrentMonth
-                            ? "bg-cyan-500/10 text-cyan-300"
-                            : foundCompetence
-                              ? "theme-muted theme-hover"
-                              : "cursor-not-allowed bg-white/[0.02] text-slate-700"
-                          }`}
-                      >
-                        <span className="sm:hidden">
-                          {formatCompactMonthLabel(date)}
-                        </span>
-                        <span className="hidden sm:inline">
-                          {formatMonthLabel(date)}
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
+                return (
+                  <button
+                    key={`${date.getFullYear()}-${date.getMonth()}`}
+                    type="button"
+                    disabled={!foundCompetence}
+                    onClick={() => selectCompetenceByDate(date)}
+                    className={`${index < 2 || index > 4 ? "hidden sm:inline-flex" : "inline-flex"} shrink-0 whitespace-nowrap rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
+                      isSelected
+                        ? "bg-blue-600 text-white"
+                        : isCurrentMonth
+                          ? "bg-cyan-500/10 text-cyan-300"
+                          : foundCompetence
+                            ? "theme-muted theme-hover"
+                            : "cursor-not-allowed bg-white/[0.02] text-slate-700"
+                    }`}
+                  >
+                    <span className="sm:hidden">
+                      {formatCompactMonthLabel(date)}
+                    </span>
+                    <span className="hidden sm:inline">
+                      {formatMonthLabel(date)}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
 
-                <button
-                  type="button"
-                  onClick={goToNextCompetence}
-                  className="theme-muted theme-hover flex h-8 w-8 shrink-0 items-center justify-center rounded-lg"
-                  title="Próxima competência"
-                  aria-label="Próxima competência"
-                >
-                  <ChevronRight size={18} />
-                </button>
-              <button
-                type="button"
-                onClick={goToCurrentCompetence}
-                className="theme-muted theme-hover shrink-0 rounded-lg px-3 py-1.5 text-xs font-semibold"
-              >
-                Hoje
-              </button>
-              </div>
+            <button
+              type="button"
+              onClick={goToNextCompetence}
+              className="theme-muted theme-hover flex h-8 w-8 shrink-0 items-center justify-center rounded-lg"
+              title="Próxima competência"
+              aria-label="Próxima competência"
+            >
+              <ChevronRight size={18} />
+            </button>
+            <button
+              type="button"
+              onClick={goToCurrentCompetence}
+              className="theme-muted theme-hover shrink-0 rounded-lg px-3 py-1.5 text-xs font-semibold"
+            >
+              Hoje
+            </button>
+          </div>
         </div>
         <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-[minmax(220px,1fr)_minmax(180px,260px)_minmax(180px,240px)_auto_auto]">
           <label className="relative">
             <span className="sr-only">Buscar lançamento</span>
-            <Search className="theme-muted pointer-events-none absolute left-3 top-1/2 -translate-y-1/2" size={16} />
+            <Search
+              className="theme-muted pointer-events-none absolute left-3 top-1/2 -translate-y-1/2"
+              size={16}
+            />
             <input
               value={searchTerm}
               onChange={(event) => setSearchTerm(event.target.value)}
@@ -1509,7 +1790,9 @@ function TransactionsPageContent() {
           >
             <option value="">Todas as contas</option>
             {financialLedgerAccounts.map((account) => (
-              <option key={account.id} value={account.id}>{account.name}</option>
+              <option key={account.id} value={account.id}>
+                {account.name}
+              </option>
             ))}
           </select>
 
@@ -1548,7 +1831,9 @@ function TransactionsPageContent() {
             title={`Modo atual: ${density === "compact" ? "Compacto" : "Confortável"}`}
           >
             <Rows3 size={16} />
-            <span className="sm:hidden lg:inline">{density === "compact" ? "Compacto" : "Confortável"}</span>
+            <span className="sm:hidden lg:inline">
+              {density === "compact" ? "Compacto" : "Confortável"}
+            </span>
           </button>
         </div>
 
@@ -1572,8 +1857,9 @@ function TransactionsPageContent() {
               <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-5">
                 <p className="text-sm text-slate-400">Fluxo de caixa</p>
                 <p
-                  className={`mt-2 text-2xl font-bold ${cashFlowResult >= 0 ? "text-emerald-300" : "text-red-300"
-                    }`}
+                  className={`mt-2 text-2xl font-bold ${
+                    cashFlowResult >= 0 ? "text-emerald-300" : "text-red-300"
+                  }`}
                 >
                   {formatCurrency(cashFlowResult)}
                 </p>
@@ -1600,8 +1886,9 @@ function TransactionsPageContent() {
               <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-5">
                 <p className="text-sm text-slate-400">Saldo anterior</p>
                 <p
-                  className={`mt-2 text-2xl font-bold ${openingBalance >= 0 ? "text-blue-300" : "text-red-300"
-                    }`}
+                  className={`mt-2 text-2xl font-bold ${
+                    openingBalance >= 0 ? "text-blue-300" : "text-red-300"
+                  }`}
                 >
                   {formatCurrency(openingBalance)}
                 </p>
@@ -1610,8 +1897,9 @@ function TransactionsPageContent() {
               <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-5">
                 <p className="text-sm text-slate-400">Saldo atual</p>
                 <p
-                  className={`mt-2 text-2xl font-bold ${currentBalance >= 0 ? "text-emerald-300" : "text-red-300"
-                    }`}
+                  className={`mt-2 text-2xl font-bold ${
+                    currentBalance >= 0 ? "text-emerald-300" : "text-red-300"
+                  }`}
                 >
                   {formatCurrency(currentBalance)}
                 </p>
@@ -1620,8 +1908,9 @@ function TransactionsPageContent() {
               <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-5">
                 <p className="text-sm text-slate-400">Futuro</p>
                 <p
-                  className={`mt-2 text-2xl font-bold ${futureBalance >= 0 ? "text-emerald-300" : "text-red-300"
-                    }`}
+                  className={`mt-2 text-2xl font-bold ${
+                    futureBalance >= 0 ? "text-emerald-300" : "text-red-300"
+                  }`}
                 >
                   {formatCurrency(futureBalance)}
                 </p>
@@ -1648,15 +1937,20 @@ function TransactionsPageContent() {
               <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-5">
                 <p className="text-sm text-slate-400">Limite disponível</p>
                 <p
-                  className={`mt-2 text-2xl font-bold ${cardAvailableLimit >= 0 ? "text-emerald-300" : "text-red-300"
-                    }`}
+                  className={`mt-2 text-2xl font-bold ${
+                    cardAvailableLimit >= 0
+                      ? "text-emerald-300"
+                      : "text-red-300"
+                  }`}
                 >
                   {formatCurrency(cardAvailableLimit)}
                 </p>
               </div>
 
               <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-5">
-                <p className="text-sm text-slate-400">Fechamento / Vencimento</p>
+                <p className="text-sm text-slate-400">
+                  Fechamento / Vencimento
+                </p>
                 <p className="mt-2 text-xl font-bold text-blue-300">
                   {selectedAccount.closing_day
                     ? `Fecha dia ${selectedAccount.closing_day}`
@@ -1676,19 +1970,32 @@ function TransactionsPageContent() {
           <table className="transactions-table min-w-[620px] w-full table-fixed text-left text-sm md:min-w-[1040px]">
             <thead className="sticky top-0 z-10">
               <tr>
-                <th className="w-[70px] px-3 py-4 md:w-[110px] md:px-4">Data</th>
+                <th className="w-[70px] px-3 py-4 md:w-[110px] md:px-4">
+                  Data
+                </th>
                 <th className="px-3 py-4 md:px-4">Descrição</th>
-                <th className="hidden w-[180px] px-4 py-4 md:table-cell">Conta / Cartão</th>
-                <th className="hidden w-[110px] px-3 py-4 md:table-cell">Categoria</th>
-                <th className="w-[95px] px-2 py-4 text-right md:w-[120px] md:px-3">Valor</th>
-                <th className="w-[76px] px-2 py-4 text-right md:w-[90px] md:px-3">Ações</th>
+                <th className="hidden w-[180px] px-4 py-4 md:table-cell">
+                  Conta / Cartão
+                </th>
+                <th className="hidden w-[110px] px-3 py-4 md:table-cell">
+                  Categoria
+                </th>
+                <th className="w-[95px] px-2 py-4 text-right md:w-[120px] md:px-3">
+                  Valor
+                </th>
+                <th className="w-[76px] px-2 py-4 text-right md:w-[90px] md:px-3">
+                  Ações
+                </th>
               </tr>
             </thead>
 
             <tbody className="divide-y">
               {isLoading && (
                 <tr>
-                  <td colSpan={6} className="px-5 py-10 text-center text-slate-400">
+                  <td
+                    colSpan={6}
+                    className="px-5 py-10 text-center text-slate-400"
+                  >
                     Carregando lançamentos...
                   </td>
                 </tr>
@@ -1697,10 +2004,13 @@ function TransactionsPageContent() {
               {!isLoading &&
                 transactions.map((transaction, index) => (
                   <tr key={`${transaction.id}-${index}`}>
-
                     <td className="w-[70px] px-3 py-4 text-slate-300 md:w-[110px] md:px-4">
-                      <span className="md:hidden">{formatShortDate(transaction.due_date)}</span>
-                      <span className="hidden md:inline">{formatFullDate(transaction.due_date)}</span>
+                      <span className="md:hidden">
+                        {formatShortDate(transaction.due_date)}
+                      </span>
+                      <span className="hidden md:inline">
+                        {formatFullDate(transaction.due_date)}
+                      </span>
                     </td>
 
                     <td className="min-w-0 px-3 py-4 md:px-4">
@@ -1728,14 +2038,15 @@ function TransactionsPageContent() {
                           }`}
                         >
                           <span
-                            className={`whitespace-nowrap rounded-full px-2.5 py-0.5 text-xs font-semibold ${transaction.type === "Receita"
-                              ? "bg-emerald-500/10 text-emerald-300"
-                              : transaction.type === "Transferência"
-                                ? "bg-blue-500/10 text-blue-300"
-                                : transaction.type === "Pagamento de Fatura"
-                                  ? "bg-cyan-500/10 text-cyan-300"
-                                  : "bg-red-500/10 text-red-300"
-                              }`}
+                            className={`whitespace-nowrap rounded-full px-2.5 py-0.5 text-xs font-semibold ${
+                              transaction.type === "Receita"
+                                ? "bg-emerald-500/10 text-emerald-300"
+                                : transaction.type === "Transferência"
+                                  ? "bg-blue-500/10 text-blue-300"
+                                  : transaction.type === "Pagamento de Fatura"
+                                    ? "bg-cyan-500/10 text-cyan-300"
+                                    : "bg-red-500/10 text-red-300"
+                            }`}
                           >
                             {transaction.type}
                           </span>
@@ -1766,12 +2077,13 @@ function TransactionsPageContent() {
                     </td>
 
                     <td
-                      className={`w-[95px] px-2 py-4 text-right text-xs font-semibold md:w-[120px] md:px-3 md:text-sm ${transaction.type === "Receita"
-                        ? "text-emerald-300"
-                        : transaction.type === "Transferência"
-                          ? "text-blue-300"
-                          : "text-red-300"
-                        }`}
+                      className={`w-[95px] px-2 py-4 text-right text-xs font-semibold md:w-[120px] md:px-3 md:text-sm ${
+                        transaction.type === "Receita"
+                          ? "text-emerald-300"
+                          : transaction.type === "Transferência"
+                            ? "text-blue-300"
+                            : "text-red-300"
+                      }`}
                     >
                       {formatCurrency(transaction.value)}
                     </td>
@@ -1782,21 +2094,29 @@ function TransactionsPageContent() {
                           Fechada
                         </span>
                       ) : (
-                        <div className="flex justify-end gap-1 md:gap-2">
+                        <div className="flex items-center justify-end gap-1 md:gap-2">
                           <button
-                            onClick={() => openEditDrawer(transaction)}
+                            type="button"
+                            disabled={mutation.isPending}
+                            onClick={() => void openEditDrawer(transaction)}
                             title="Editar"
-                            className="transaction-action rounded-lg p-2 text-blue-400 hover:bg-blue-500/10 hover:text-blue-300"
+                            aria-label="Editar lançamento"
+                            className="transaction-action inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-blue-400 hover:bg-blue-500/10 hover:text-blue-300"
                           >
-                            ✏️
+                            <Pencil size={16} strokeWidth={2} />
                           </button>
 
                           <button
-                            onClick={() => handleDeleteTransaction(transaction)}
+                            type="button"
+                            disabled={mutation.isPending}
+                            onClick={() =>
+                              void handleDeleteTransaction(transaction)
+                            }
                             title="Excluir"
-                            className="transaction-action rounded-lg p-2 text-red-400 hover:bg-red-500/10 hover:text-red-300"
+                            aria-label="Excluir lançamento"
+                            className="transaction-action inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-red-400 hover:bg-red-500/10 hover:text-red-300"
                           >
-                            🗑️
+                            <Trash2 size={16} strokeWidth={2} />
                           </button>
                         </div>
                       )}
@@ -1806,7 +2126,10 @@ function TransactionsPageContent() {
 
               {!isLoading && transactions.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="px-5 py-10 text-center text-slate-400">
+                  <td
+                    colSpan={6}
+                    className="px-5 py-10 text-center text-slate-400"
+                  >
                     Nenhum lançamento encontrado.
                   </td>
                 </tr>
@@ -1831,8 +2154,15 @@ function TransactionsPageContent() {
           >
             <div className="mb-5 flex items-center justify-between gap-3">
               <div>
-                <h2 id="advanced-filters-title" className="theme-text text-xl font-bold">Mais filtros</h2>
-                <p className="theme-muted text-sm">Combine os critérios sem perder suas seleções.</p>
+                <h2
+                  id="advanced-filters-title"
+                  className="theme-text text-xl font-bold"
+                >
+                  Mais filtros
+                </h2>
+                <p className="theme-muted text-sm">
+                  Combine os critérios sem perder suas seleções.
+                </p>
               </div>
               <button
                 type="button"
@@ -1846,7 +2176,9 @@ function TransactionsPageContent() {
 
             <div className="space-y-4">
               <label className="block">
-                <span className="theme-muted-strong mb-1.5 block text-sm font-semibold">Categoria</span>
+                <span className="theme-muted-strong mb-1.5 block text-sm font-semibold">
+                  Categoria
+                </span>
                 <select
                   value={categoryFilter}
                   onChange={(event) => setCategoryFilter(event.target.value)}
@@ -1854,13 +2186,17 @@ function TransactionsPageContent() {
                 >
                   <option value="">Todas as categorias</option>
                   {categories.map((category) => (
-                    <option key={category.id} value={category.id}>{category.name}</option>
+                    <option key={category.id} value={category.id}>
+                      {category.name}
+                    </option>
                   ))}
                 </select>
               </label>
 
               <label className="block">
-                <span className="theme-muted-strong mb-1.5 block text-sm font-semibold">Tipo</span>
+                <span className="theme-muted-strong mb-1.5 block text-sm font-semibold">
+                  Tipo
+                </span>
                 <select
                   value={typeFilter}
                   onChange={(event) => setTypeFilter(event.target.value)}
@@ -1870,12 +2206,16 @@ function TransactionsPageContent() {
                   <option value="Despesa">Despesa</option>
                   <option value="Receita">Receita</option>
                   <option value="Transferência">Transferência</option>
-                  <option value="Pagamento de Fatura">Pagamento de Fatura</option>
+                  <option value="Pagamento de Fatura">
+                    Pagamento de Fatura
+                  </option>
                 </select>
               </label>
 
               <label className="block">
-                <span className="theme-muted-strong mb-1.5 block text-sm font-semibold">Status</span>
+                <span className="theme-muted-strong mb-1.5 block text-sm font-semibold">
+                  Status
+                </span>
                 <select
                   value={statusFilter}
                   onChange={(event) => setStatusFilter(event.target.value)}
@@ -1910,270 +2250,580 @@ function TransactionsPageContent() {
       )}
 
       {isDrawerOpen && (
-        <div
-          className="transactions-page transactions-overlay fixed inset-0 z-50 flex justify-end"
-          onMouseDown={(event) => {
-            if (event.target === event.currentTarget) closeDrawer();
-          }}
-        >
-          <div role="dialog" aria-modal="true" className="transactions-drawer h-full w-full max-w-xl overflow-y-auto border-l p-6 shadow-2xl">
-            <div className="mb-6 flex items-center justify-between">
-              <div>
-                <h2 className="text-2xl font-bold text-white">
-                  {editingTransactionId ? "Editar lançamento" : "Novo lançamento"}
-                </h2>
-                <p className="text-sm text-slate-400">
-                  Cadastre uma receita, despesa ou transferência.
-                </p>
+        <MutationScope busy={mutation.isPending} isLocked={mutation.isLocked}>
+          <div
+            className="transactions-page transactions-overlay fixed inset-0 z-50 flex justify-end"
+            onMouseDown={(event) => {
+              if (event.target === event.currentTarget) closeDrawer();
+            }}
+          >
+            <div
+              role="dialog"
+              aria-modal="true"
+              className="transactions-drawer h-full w-full max-w-xl overflow-y-auto border-l p-4 shadow-2xl sm:p-6"
+            >
+              <div className="mb-6">
+                <div className="mb-6 flex items-start justify-between gap-4">
+                  <div>
+                    <h2 className="theme-text text-2xl font-bold">
+                      {editingTransactionId
+                        ? "Editar lançamento"
+                        : "Novo lançamento"}
+                    </h2>
+
+                    <p className="theme-muted mt-1 text-sm">
+                      {editingTransactionId
+                        ? "Altere as informações do lançamento."
+                        : "Registre uma nova movimentação financeira."}
+                    </p>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={closeDrawer}
+                    className="theme-muted theme-hover flex h-10 w-10 shrink-0 items-center justify-center rounded-xl"
+                    aria-label="Fechar"
+                    title="Fechar"
+                  >
+                    <X size={20} />
+                  </button>
+                </div>
+
+                {!editingTransactionId && (
+                  <div className="space-y-3">
+                    <div className="grid grid-cols-3 gap-2">
+                      {[
+                        { value: "Despesa", label: "Despesa", icon: "↓" },
+                        { value: "Receita", label: "Receita", icon: "↑" },
+                        {
+                          value: "Transferência",
+                          label: "Transferência",
+                          icon: "⇄",
+                        },
+                      ].map((option) => {
+                        const selected = form.type === option.value;
+
+                        return (
+                          <button
+                            key={option.value}
+                            type="button"
+                            onClick={() => changeTransactionType(option.value)}
+                            className={`flex min-h-[72px] flex-col items-center justify-center gap-1 rounded-xl border px-2 transition ${
+                              selected
+                                ? option.value === "Despesa"
+                                  ? "border-red-500 bg-red-500/10 text-red-500"
+                                  : option.value === "Receita"
+                                    ? "border-emerald-500 bg-emerald-500/10 text-emerald-500"
+                                    : "border-blue-500 bg-blue-500/10 text-blue-500"
+                                : "border-white/10 bg-white/[0.02] text-slate-400 hover:border-white/20 hover:bg-white/[0.05] hover:text-white"
+                            }`}
+                          >
+                            <span className="text-xl leading-none">
+                              {option.icon}
+                            </span>
+
+                            <span className="text-xs font-semibold sm:text-sm">
+                              {option.label}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    {form.type !== "Pagamento de Fatura" ? (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          changeTransactionType("Pagamento de Fatura")
+                        }
+                        className="theme-muted theme-hover text-sm font-medium"
+                      >
+                        Pagar uma fatura de cartão
+                      </button>
+                    ) : (
+                      <div className="flex items-center justify-between gap-3 rounded-xl border border-cyan-500/20 bg-cyan-500/5 px-3 py-2">
+                        <span className="text-sm font-medium text-cyan-300">
+                          Pagamento de fatura de cartão
+                        </span>
+
+                        <button
+                          type="button"
+                          onClick={() => changeTransactionType("Despesa")}
+                          className="text-xs font-semibold text-cyan-300 hover:text-cyan-200"
+                        >
+                          Voltar
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
 
-              <button
-                onClick={closeDrawer}
-                className="rounded-lg px-3 py-2 text-slate-400 hover:bg-white/10 hover:text-white"
-              >
-                Fechar
-              </button>
-            </div>
-            <div className="space-y-4">
-              <input
-                value={form.due_date}
-                onChange={(event) => {
-                  const newDate = event.target.value;
-                  const newCompetenceId = getCompetenceIdByDate(newDate);
-                  const newStatus = getAutomaticStatus(form.type, newDate);
+              <div className="space-y-5">
+                <div>
+                  <label className="theme-muted-strong mb-1.5 block text-sm font-semibold">
+                    Descrição
+                  </label>
 
-                  setForm({
-                    ...form,
-                    due_date: newDate,
-                    competence_id: newCompetenceId,
-                    status: newStatus,
-                  });
+                  <input
+                    value={form.description}
+                    onChange={(event) => {
+                      const description = event.target.value;
 
-                  updateTransactionDefaults({
-                    due_date: newDate,
-                    competence_id: newCompetenceId,
-                    status: newStatus,
-                  });
-                }}
-                type="date"
-                className="w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none"
-              />
+                      setForm((current) => ({
+                        ...current,
+                        description,
+                      }));
 
-              {form.type !== "Pagamento de Fatura" && form.type !== "Transferência" && (
-                <select value={form.category_id} onChange={(event) => { const categoryId=event.target.value; const category=categories.find(item=>item.id===categoryId); const fuel=category?.special_type==="fuel"; const type=category?.type??form.type; setForm({ ...form, category_id:categoryId, type:fuel?"Despesa":type, mode:fuel?"unico":form.mode, status:getAutomaticStatus(fuel?"Despesa":type,form.due_date) }); updateTransactionDefaults({category_id:categoryId,type:fuel?"Despesa":type}); }} className="w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none">
-                  <option value="">Categoria</option>{categories.map((category)=><option key={category.id} value={category.id}>{category.name}</option>)}
-                </select>
-              )}
+                      const matchedSuggestion = descriptionSuggestions.find(
+                        (suggestion) =>
+                          suggestion.toLocaleLowerCase("pt-BR") ===
+                          description.toLocaleLowerCase("pt-BR"),
+                      );
 
-              {isFuelCategory && (
-                <FuelTransactionFields value={fuelForm} onChange={setFuelForm} onTotalChange={(total) => setForm((current) => ({ ...current, value: formatCurrencyFromNumber(total) }))} isEditing={editingTransactionId !== null} />
-              )}
+                      if (matchedSuggestion) {
+                        void applyDescriptionSuggestion(matchedSuggestion);
+                      }
+                    }}
+                    placeholder="Ex.: Estacionamento"
+                    list="transaction-description-suggestions"
+                    className="theme-field w-full rounded-xl border px-4 py-3 text-sm outline-none"
+                  />
 
-              <input
-                value={form.description}
-                onChange={(event) =>
-                  setForm({ ...form, description: event.target.value })
-                }
-                placeholder="Descrição"
-                list="transaction-description-suggestions"
-                className="w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none"
-              />
-
-              <datalist id="transaction-description-suggestions">
-                {descriptionSuggestions.map((description) => (
-                  <option key={description} value={description} />
-                ))}
-              </datalist>
-
-              <input
-                value={form.value}
-                onChange={(event) => { const value=formatCurrencyInput(event.target.value); setForm({ ...form, value }); if(isFuelCategory){const total=parseCurrencyInput(value),liters=parsePtBrNumber(fuelForm.liters);if(total>0&&liters>0)setFuelForm(current=>({...current,price_per_liter:(total/liters).toFixed(3).replace(".",",")}));} }}
-                placeholder="Valor"
-                inputMode="numeric"
-                className="w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none"
-              />
-
-              <select
-                value={form.account_id}
-                onChange={(event) => {
-                  const accountId = event.target.value;
-
-                  setForm({ ...form, account_id: accountId });
-                  updateTransactionDefaults({ account_id: accountId });
-                }}
-                className="w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none"
-              >
-                <option value="">Conta / Cartão</option>
-                {formAccountOptions.map((account) => (
-                  <option key={account.id} value={account.id}>
-                    {account.name}
-                  </option>
-                ))}
-              </select>
-
-              {form.type === "Pagamento de Fatura" && (
-                <select
-                  value={form.card_payment_account_id}
-                  onChange={(event) =>
-                    setForm({
-                      ...form,
-                      card_payment_account_id: event.target.value,
-                    })
-                  }
-                  className="w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none"
-                >
-                  <option value="">Conta utilizada no pagamento</option>
-
-                  {financialAccounts.map((account) => (
-                      <option key={account.id} value={account.id}>
-                        {account.name}
-                      </option>
+                  <datalist id="transaction-description-suggestions">
+                    {descriptionSuggestions.map((description) => (
+                      <option key={description} value={description} />
                     ))}
-                </select>
-              )}
+                  </datalist>
+                </div>
 
-              {!isFuelCategory && <select
-                value={form.type}
-                onChange={(event) => {
-                  const newType = event.target.value;
-                  const newStatus = getAutomaticStatus(newType, form.due_date);
+                <div>
+                  <label className="theme-muted-strong mb-1.5 block text-sm font-semibold">
+                    Valor
+                  </label>
 
-                  setForm({
-                    ...form,
-                    type: newType,
-                    status: newStatus,
-                  });
+                  <input
+                    value={form.value}
+                    onChange={(event) => {
+                      const value = formatCurrencyInput(event.target.value);
 
-                  updateTransactionDefaults({
-                    type: newType,
-                    status: newStatus,
-                  });
-                }}
-                className="w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none"
-              >
-                <option value="Receita">Receita</option>
-                <option value="Despesa">Despesa</option>
-                <option value="Transferência">Transferência</option>
-                <option value="Pagamento de Fatura">Pagamento de Fatura</option>
-              </select>}
-
-              {form.type === "Transferência" && (
-                <div className="space-y-3">
-                  <select
-                    value={form.destination_account_id}
-                    onChange={(event) =>
                       setForm({
                         ...form,
-                        destination_account_id: event.target.value,
-                      })
-                    }
-                    className="w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none"
-                  >
-                    <option value="">Conta destino</option>
+                        value,
+                      });
 
-                    {financialAccounts
-                      .filter((account) => account.id !== form.account_id)
-                      .map((account) => (
+                      if (isFuelCategory) {
+                        const total = parseCurrencyInput(value);
+                        const liters = parsePtBrNumber(fuelForm.liters);
+
+                        if (total > 0 && liters > 0) {
+                          setFuelForm((current) => ({
+                            ...current,
+                            price_per_liter: (total / liters)
+                              .toFixed(3)
+                              .replace(".", ","),
+                          }));
+                        }
+                      }
+                    }}
+                    placeholder="R$ 0,00"
+                    inputMode="numeric"
+                    className="theme-field w-full rounded-xl border px-4 py-3 text-sm outline-none"
+                  />
+                </div>
+
+                {form.type === "Transferência" ? (
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <div>
+                      <label className="theme-muted-strong mb-1.5 block text-sm font-semibold">
+                        Conta de origem
+                      </label>
+
+                      <select
+                        value={form.account_id}
+                        onChange={(event) => {
+                          const accountId = event.target.value;
+
+                          setForm({
+                            ...form,
+                            account_id: accountId,
+                            destination_account_id:
+                              form.destination_account_id === accountId
+                                ? ""
+                                : form.destination_account_id,
+                          });
+
+                          updateTransactionDefaults({
+                            account_id: accountId,
+                          });
+                        }}
+                        className="theme-field w-full rounded-xl border px-4 py-3 text-sm outline-none"
+                      >
+                        <option value="">Selecione</option>
+
+                        {financialAccounts.map((account) => (
+                          <option key={account.id} value={account.id}>
+                            {account.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="theme-muted-strong mb-1.5 block text-sm font-semibold">
+                        Conta de destino
+                      </label>
+
+                      <select
+                        value={form.destination_account_id}
+                        onChange={(event) =>
+                          setForm({
+                            ...form,
+                            destination_account_id: event.target.value,
+                          })
+                        }
+                        className="theme-field w-full rounded-xl border px-4 py-3 text-sm outline-none"
+                      >
+                        <option value="">Selecione</option>
+
+                        {financialAccounts
+                          .filter((account) => account.id !== form.account_id)
+                          .map((account) => (
+                            <option key={account.id} value={account.id}>
+                              {account.name}
+                            </option>
+                          ))}
+                      </select>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    {form.type !== "Pagamento de Fatura" && (
+                      <div>
+                        <label className="theme-muted-strong mb-1.5 block text-sm font-semibold">
+                          Categoria
+                        </label>
+
+                        <select
+                          value={form.category_id}
+                          onChange={(event) => {
+                            const categoryId = event.target.value;
+
+                            const category = categories.find(
+                              (item) => item.id === categoryId,
+                            );
+
+                            const fuel = category?.special_type === "fuel";
+
+                            const type = category?.type ?? form.type;
+
+                            setForm({
+                              ...form,
+                              category_id: categoryId,
+                              type: fuel ? "Despesa" : type,
+                              mode: fuel ? "unico" : form.mode,
+                              status: getAutomaticStatus(
+                                fuel ? "Despesa" : type,
+                                form.due_date,
+                              ),
+                            });
+
+                            updateTransactionDefaults({
+                              category_id: categoryId,
+                              type: fuel ? "Despesa" : type,
+                            });
+                          }}
+                          className="theme-field w-full rounded-xl border px-4 py-3 text-sm outline-none"
+                        >
+                          <option value="">Selecione</option>
+
+                          {categories.map((category) => (
+                            <option key={category.id} value={category.id}>
+                              {category.name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+
+                    <div
+                      className={
+                        form.type === "Pagamento de Fatura"
+                          ? "sm:col-span-2"
+                          : ""
+                      }
+                    >
+                      <label className="theme-muted-strong mb-1.5 block text-sm font-semibold">
+                        {form.type === "Pagamento de Fatura"
+                          ? "Cartão"
+                          : "Conta / Cartão"}
+                      </label>
+
+                      <select
+                        value={form.account_id}
+                        onChange={(event) => {
+                          const accountId = event.target.value;
+
+                          setForm({
+                            ...form,
+                            account_id: accountId,
+                          });
+
+                          updateTransactionDefaults({
+                            account_id: accountId,
+                          });
+                        }}
+                        className="theme-field w-full rounded-xl border px-4 py-3 text-sm outline-none"
+                      >
+                        <option value="">Selecione</option>
+
+                        {formAccountOptions.map((account) => (
+                          <option key={account.id} value={account.id}>
+                            {account.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                )}
+
+                {form.type === "Pagamento de Fatura" && (
+                  <div>
+                    <label className="theme-muted-strong mb-1.5 block text-sm font-semibold">
+                      Conta utilizada no pagamento
+                    </label>
+
+                    <select
+                      value={form.card_payment_account_id}
+                      onChange={(event) =>
+                        setForm({
+                          ...form,
+                          card_payment_account_id: event.target.value,
+                        })
+                      }
+                      className="theme-field w-full rounded-xl border px-4 py-3 text-sm outline-none"
+                    >
+                      <option value="">Selecione</option>
+
+                      {financialAccounts.map((account) => (
                         <option key={account.id} value={account.id}>
                           {account.name}
                         </option>
                       ))}
-                  </select>
+                    </select>
+                  </div>
+                )}
+
+                {isFuelCategory && (
+                  <FuelTransactionFields
+                    value={fuelForm}
+                    onChange={setFuelForm}
+                    onTotalChange={(total) =>
+                      setForm((current) => ({
+                        ...current,
+                        value: formatCurrencyFromNumber(total),
+                      }))
+                    }
+                    isEditing={editingTransactionId !== null}
+                  />
+                )}
+
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div>
+                    <label className="theme-muted-strong mb-1.5 block text-sm font-semibold">
+                      Data
+                    </label>
+
+                    <input
+                      value={form.due_date}
+                      onChange={(event) => {
+                        const newDate = event.target.value;
+                        const newCompetenceId = getCompetenceIdByDate(newDate);
+                        const newStatus = getAutomaticStatus(
+                          form.type,
+                          newDate,
+                        );
+
+                        setForm({
+                          ...form,
+                          due_date: newDate,
+                          competence_id: newCompetenceId,
+                          status: newStatus,
+                        });
+
+                        updateTransactionDefaults({
+                          due_date: newDate,
+                          competence_id: newCompetenceId,
+                          status: newStatus,
+                        });
+                      }}
+                      type="date"
+                      className="theme-field w-full rounded-xl border px-4 py-3 text-sm outline-none"
+                    />
+                  </div>
+
+                  <div>
+                    <div>
+                      <label className="theme-muted-strong mb-1.5 block text-sm font-semibold">
+                        Competência
+                      </label>
+
+                      <select
+                        value={form.competence_id}
+                        onChange={(event) => {
+                          const competenceId = event.target.value;
+
+                          setForm((current) => ({
+                            ...current,
+                            competence_id: competenceId,
+                          }));
+
+                          updateTransactionDefaults({
+                            competence_id: competenceId,
+                          });
+                        }}
+                        className="theme-field w-full rounded-xl border px-4 py-3 text-sm outline-none"
+                      >
+                        <option value="">Selecione</option>
+
+                        {competences.map((competence) => (
+                          <option key={competence.id} value={competence.id}>
+                            {formatCompetenceLabel(competence.name)}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
                 </div>
-              )}
 
-              {!isFuelCategory && <select
-                value={form.mode}
-                onChange={(event) =>
-                  setForm({ ...form, mode: event.target.value })
-                }
-                className="w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none"
-              >
-                <option value="unico">Único</option>
-                <option value="recorrente">Recorrente</option>
-                <option value="parcelado">Parcelado</option>
-              </select>}
+                {form.type !== "Transferência" &&
+                  form.type !== "Pagamento de Fatura" &&
+                  !isFuelCategory && (
+                    <div>
+                      <label className="theme-muted-strong mb-1.5 block text-sm font-semibold">
+                        Forma
+                      </label>
 
-              {!isFuelCategory && form.mode === "parcelado" && !editingTransactionId && (
-                <input
-                  value={form.installments}
-                  onChange={(event) =>
-                    setForm({ ...form, installments: event.target.value })
-                  }
-                  placeholder="Quantidade de parcelas"
-                  type="number"
-                  min="2"
-                  className="w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none"
-                />
-              )}
-              {false && form.type !== "Pagamento de Fatura" && form.type !== "Transferência" && (
-                <select
-                  value={form.category_id}
-                  onChange={(event) => {
-                    const categoryId = event.target.value;
+                      <div className="grid grid-cols-3 gap-2">
+                        {[
+                          { value: "unico", label: "Único" },
+                          { value: "parcelado", label: "Parcelado" },
+                          { value: "recorrente", label: "Recorrente" },
+                        ].map((option) => {
+                          const selected = form.mode === option.value;
 
-                    setForm({ ...form, category_id: categoryId });
-                    updateTransactionDefaults({ category_id: categoryId });
-                  }}
-                  className="w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none"
-                >
-                  <option value="">Categoria</option>
-                  {categories.map((category) => (
-                    <option key={category.id} value={category.id}>
-                      {category.name}
-                    </option>
-                  ))}
-                </select>
-              )}
+                          return (
+                            <button
+                              key={option.value}
+                              type="button"
+                              onClick={() =>
+                                changeTransactionMode(option.value)
+                              }
+                              className={`rounded-xl border px-2 py-3 text-sm font-semibold transition ${
+                                selected
+                                  ? "border-blue-500 bg-blue-500/10 text-blue-300"
+                                  : "theme-field theme-hover"
+                              }`}
+                            >
+                              {option.label}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
 
-              <select
-                value={form.competence_id}
-                onChange={(event) =>
-                  setForm({ ...form, competence_id: event.target.value })
-                }
-                className="w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none"
-              >
-                <option value="">Competência</option>
-                {competences.map((competence) => (
-                  <option key={competence.id} value={competence.id}>
-                    {competence.name}
-                  </option>
-                ))}
-              </select>
+                {!isFuelCategory &&
+                  form.type !== "Transferência" &&
+                  form.type !== "Pagamento de Fatura" &&
+                  form.mode === "parcelado" &&
+                  !editingTransactionId && (
+                    <div>
+                      <label className="theme-muted-strong mb-1.5 block text-sm font-semibold">
+                        Quantidade de parcelas
+                      </label>
 
-              <select
-                value={form.status}
-                onChange={(event) =>
-                  setForm({ ...form, status: event.target.value })
-                }
-                className="w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none"
-              >
-                <option value="Pendente">Pendente</option>
-                <option value="Pago">Pago</option>
-                <option value="Recebido">Recebido</option>
-              </select>
+                      <input
+                        value={form.installments}
+                        onChange={(event) =>
+                          setForm({
+                            ...form,
+                            installments: event.target.value,
+                          })
+                        }
+                        type="number"
+                        min="2"
+                        inputMode="numeric"
+                        className="theme-field w-full rounded-xl border px-4 py-3 text-sm outline-none"
+                      />
+                    </div>
+                  )}
 
-              <div className="flex gap-3 pt-2">
-                <button
-                  onClick={closeDrawer}
-                  className="w-full rounded-xl border border-white/10 px-5 py-3 font-semibold text-white hover:bg-white/10"
-                >
-                  Cancelar
-                </button>
+                {form.type !== "Transferência" &&
+                  form.type !== "Pagamento de Fatura" && (
+                    <label className="theme-field flex cursor-pointer items-center justify-between gap-4 rounded-xl border px-4 py-3">
+                      <div>
+                        <span className="theme-text block text-sm font-semibold">
+                          {form.type === "Receita"
+                            ? "Já foi recebido"
+                            : "Já foi pago"}
+                        </span>
 
-                <button
-                  onClick={saveTransaction}
-                  className="w-full rounded-xl bg-blue-600 px-5 py-3 font-semibold text-white hover:bg-blue-500"
-                >
-                  {editingTransactionId
-                    ? "Atualizar lançamento"
-                    : "Salvar lançamento"}
-                </button>
+                        <span className="theme-muted mt-0.5 block text-xs">
+                          {form.status === "Pendente"
+                            ? "Pendente"
+                            : form.type === "Receita"
+                              ? "Recebido"
+                              : "Pago"}
+                        </span>
+                      </div>
+
+                      <input
+                        type="checkbox"
+                        checked={
+                          form.type === "Receita"
+                            ? form.status === "Recebido"
+                            : form.status === "Pago"
+                        }
+                        onChange={(event) =>
+                          setForm({
+                            ...form,
+                            status: event.target.checked
+                              ? form.type === "Receita"
+                                ? "Recebido"
+                                : "Pago"
+                              : "Pendente",
+                          })
+                        }
+                        className="h-5 w-5 accent-blue-600"
+                      />
+                    </label>
+                  )}
+
+                <div className="flex flex-col-reverse gap-3 pt-2 sm:flex-row">
+                  <button
+                    type="button"
+                    onClick={closeDrawer}
+                    className="theme-field theme-hover w-full rounded-xl border px-5 py-3 font-semibold"
+                  >
+                    Cancelar
+                  </button>
+
+                  <ProcessingButton
+                    busy={mutation.pending === "saveTransaction"}
+                    disabled={mutation.isPending}
+                    onClick={saveTransaction}
+                    className="w-full rounded-xl bg-blue-600 px-5 py-3 font-semibold text-white hover:bg-blue-500"
+                  >
+                    {editingTransactionId
+                      ? "Atualizar lançamento"
+                      : "Salvar lançamento"}
+                  </ProcessingButton>
+                </div>
               </div>
             </div>
-
           </div>
-        </div>
+        </MutationScope>
       )}
     </AppShell>
   );
