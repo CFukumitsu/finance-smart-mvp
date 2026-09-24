@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 // @ts-expect-error Node's native TypeScript test runner requires the extension.
-import { createIdleSession, idleSessionKey, IDLE_TIMEOUT, IDLE_WARNING_TIME } from "./idleSession.ts";
+import { createIdleSession, idleSessionKey, IDLE_TIMEOUT, IDLE_WARNING_TIME, recordIdleLogin, idleLoginRecord, importIdleLogin } from "./idleSession.ts";
 
 function fixture(shared = new Map<string, string>(), key = "session-a") {
   let now = 1_000_000_000;
+  if (!shared.has(key)) shared.set(key, String(now)); // Successful explicit login.
   let expired = 0;
   let state = "";
   let pending: { callback: () => void; at: number } | null = null;
@@ -173,6 +174,7 @@ test("registros inválidos, futuros ou removidos bloqueiam a sessão", () => {
 });
 
 test("armazenamento indisponível falha fechado e solicita logout", () => {
+
   let expired = 0;
   const controller = createIdleSession({
     key: "session",
@@ -202,4 +204,59 @@ test("fallback diferencia logins quando não há claim session_id", () => {
   const a = { access_token: "invalid", user: { id: "user", last_sign_in_at: "2026-09-23" } };
   const b = { ...a, user: { ...a.user, last_sign_in_at: "2026-09-24" } };
   assert.notEqual(idleSessionKey(a), idleSessionKey(b));
+});
+test("sessão restaurada sem histórico expira sem criar horário novo", () => {
+  const f = fixture();
+  f.shared.clear();
+  f.controller.check();
+  assert.equal(f.state(), "expired");
+  assert.equal(f.shared.get("session-a"), "0");
+});
+
+test("verificações passivas não escrevem atividade nem reagendam timer", () => {
+  let now = 1_000_000_000;
+  let writes = 0;
+  let schedules = 0;
+  const controller = createIdleSession({
+    key: "session",
+    storage: { getItem: () => "1000000000", setItem: () => { writes++; } },
+    now: () => now,
+    schedule: () => { schedules++; return () => {}; },
+    onState: () => {},
+    onExpire: () => {},
+  });
+  controller.check();
+  for (let n = 0; n < 100; n++) { now += 100; controller.check(); }
+  assert.equal(writes, 0);
+  assert.equal(schedules, 1);
+});
+
+test("login explícito registra atividade, callback importa horário original sem renová-lo", () => {
+  const session = { access_token: "legacy", user: { id: "user", last_sign_in_at: "2026-09-24" } };
+  const values = new Map<string, string>();
+  const storage = { getItem: (key: string) => values.get(key) ?? null, setItem: (key: string, value: string) => { values.set(key, value); } };
+  const at = 1_000_000_000;
+  const key = idleSessionKey(session);
+  recordIdleLogin(session, storage, at);
+  assert.equal(values.get(key), String(at));
+  values.clear();
+  const cookie = JSON.stringify(idleLoginRecord(session, at));
+  assert.equal(importIdleLogin(session, cookie, storage, at + 10_000), true);
+  assert.equal(values.get(key), String(at));
+  values.set(key, "0");
+  importIdleLogin(session, cookie, storage, at + 20_000);
+  assert.equal(values.get(key), "0");
+});
+
+test("callback vencido, inválido ou de outra sessão não recria atividade", () => {
+  const session = { access_token: "legacy", user: { id: "user", last_sign_in_at: "2026-09-24" } };
+  let writes = 0;
+  const storage = { getItem: () => null, setItem: () => { writes++; } };
+  const at = 1_000_000_000;
+  const cookie = JSON.stringify(idleLoginRecord(session, at));
+  assert.equal(importIdleLogin(session, cookie, storage, at + IDLE_TIMEOUT), false);
+  assert.equal(importIdleLogin(session, cookie, storage, at - 1), false);
+  assert.equal(importIdleLogin(session, "invalid", storage, at), false);
+  assert.equal(importIdleLogin({ ...session, user: { id: "other" } }, cookie, storage, at), false);
+  assert.equal(writes, 0);
 });

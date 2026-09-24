@@ -1,12 +1,11 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { usePathname } from "next/navigation";
-import type { User } from "@supabase/supabase-js";
+import type { User, Session, AuthChangeEvent } from "@supabase/supabase-js";
 import { AuthContext } from "@/src/contexts/AuthContext";
 import { supabase } from "@/src/lib/supabase";
 import { signOut } from "@/src/services/authService";
-import { createIdleSession, idleSessionKey, IDLE_LOGOUT_RETRY, type IdleState } from "@/src/utils/idleSession";
+import { createIdleSession, idleSessionKey, IDLE_LOGOUT_RETRY, IDLE_LOGIN_COOKIE, importIdleLogin, recordIdleLogin, type IdleState } from "@/src/utils/idleSession";
 import IdleSessionWarning from "@/src/components/auth/IdleSessionWarning";
 
 export default function AuthProvider({ children }: { children: React.ReactNode }) {
@@ -15,8 +14,6 @@ export default function AuthProvider({ children }: { children: React.ReactNode }
   const [idleState, setIdleState] = useState<IdleState>("active");
   const [logoutFailed, setLogoutFailed] = useState(false);
   const activityRef = useRef<(() => void) | null>(null);
-  const pathname = usePathname();
-  const previousPath = useRef(pathname);
 
   useEffect(() => {
     let mounted = true;
@@ -24,6 +21,7 @@ export default function AuthProvider({ children }: { children: React.ReactNode }
     let key: string | null = null;
     let controller: ReturnType<typeof createIdleSession> | null = null;
     let logoutTimer: ReturnType<typeof setTimeout> | undefined;
+    let authTimer: ReturnType<typeof setTimeout> | undefined;
     let loggingOut = false;
     let navigating = false;
 
@@ -51,7 +49,7 @@ export default function AuthProvider({ children }: { children: React.ReactNode }
       }
     }
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+    function handleSession(event: AuthChangeEvent, session: Session | null) {
       if (!mounted || navigating) return;
       if (!session) {
         const hadSession = currentUser !== null;
@@ -71,6 +69,19 @@ export default function AuthProvider({ children }: { children: React.ReactNode }
       }
 
       currentUser = session.user;
+      try {
+        const loginCookie = document.cookie.split("; ").find((cookie) => cookie.startsWith(`${IDLE_LOGIN_COOKIE}=`));
+        if (loginCookie) {
+          importIdleLogin(session, decodeURIComponent(loginCookie.slice(IDLE_LOGIN_COOKIE.length + 1)), window.localStorage);
+          document.cookie = `${IDLE_LOGIN_COOKIE}=; Path=/; Max-Age=0; SameSite=Lax`;
+        }
+        // A verified recovery link is a new authentication operation. Use its
+        // original sign-in time; receiving the event must not extend old activity.
+        if (event === "PASSWORD_RECOVERY" && window.localStorage.getItem(idleSessionKey(session)) === null) {
+          const signedInAt = Date.parse(session.user.last_sign_in_at ?? "");
+          if (Number.isFinite(signedInAt)) recordIdleLogin(session, window.localStorage, signedInAt);
+        }
+      } catch { /* The monitor fails closed if storage cannot be read. */ }
       const nextKey = idleSessionKey(session);
       if (nextKey !== key) {
         controller?.stop();
@@ -100,6 +111,13 @@ export default function AuthProvider({ children }: { children: React.ReactNode }
       }
       // INITIAL_SESSION, SIGNED_IN and TOKEN_REFRESHED never count as activity.
       controller?.check();
+    }
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      // The password login service records its successful login before this
+      // macrotask runs. Never initialize lastActivityAt inside the auth callback.
+      clearTimeout(authTimer);
+      authTimer = setTimeout(() => handleSession(event, session), 0);
     });
 
     function interaction(event: Event) {
@@ -120,6 +138,7 @@ export default function AuthProvider({ children }: { children: React.ReactNode }
       mounted = false;
       controller?.stop();
       clearTimeout(logoutTimer);
+      clearTimeout(authTimer);
       activityRef.current = null;
       subscription.unsubscribe();
       events.forEach((event) => document.removeEventListener(event, interaction, true));
@@ -130,12 +149,6 @@ export default function AuthProvider({ children }: { children: React.ReactNode }
     };
   }, []);
 
-  useEffect(() => {
-    if (previousPath.current !== pathname) {
-      previousPath.current = pathname;
-      activityRef.current?.();
-    }
-  }, [pathname]);
 
   return (
     <AuthContext.Provider value={{ user, loading }}>
@@ -148,7 +161,7 @@ export default function AuthProvider({ children }: { children: React.ReactNode }
             : "Encerrando sessão..."}
         </p>
       ) : children}
-      {idleState === "warning" && <IdleSessionWarning onContinue={() => activityRef.current?.()} />}
+      {idleState === "warning" && <IdleSessionWarning onContinue={(event) => { if (event.isTrusted) activityRef.current?.(); }} />}
     </AuthContext.Provider>
   );
 }

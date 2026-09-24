@@ -1,10 +1,15 @@
 import { supabase } from "@/src/lib/supabase";
+import { recordIdleLogin } from "@/src/utils/idleSession";
 
 export async function signInWithEmailAndPassword(email: string, password: string) {
-  return supabase.auth.signInWithPassword({
+  const result = await supabase.auth.signInWithPassword({
     email,
     password,
   });
+  if (!result.error && result.data.session) {
+    try { recordIdleLogin(result.data.session, window.localStorage); } catch { /* Provider fails closed. */ }
+  }
+  return result;
 }
 
 export async function signOut(scope: "global" | "local" = "global") {
