@@ -9,6 +9,7 @@ export type FuelStationOption = {
   longitude: number | null;
   active: boolean;
   station_type: FuelStationType;
+  google_place_id?: string | null;
 };
 
 export type FuelRecord = {

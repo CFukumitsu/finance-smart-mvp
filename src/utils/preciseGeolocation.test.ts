@@ -266,3 +266,35 @@ async function rejectionMessage(promise: Promise<unknown>) {
     return error instanceof Error ? error.message : String(error);
   }
 }
+
+test("POSITION_UNAVAILABLE depois de uma leitura válida usa a melhor posição obtida", async () => {
+  // Cenário do celular sob a cobertura do posto: uma leitura aproximada chega,
+  // o fluxo aguarda uma segunda leitura e o GPS passa a responder com erro.
+  const geolocation = new MockGeolocation();
+  const request = requestPreciseGeolocation(geolocation, {
+    ...fastTimeouts(),
+    minimumSampleCount: 2,
+    minimumWaitMs: 3_000,
+  });
+
+  geolocation.emitPosition(1, 300);
+  geolocation.emitError(1, 2);
+  geolocation.emitError(2, 2);
+
+  assert.equal((await request.promise).coords.accuracy, 300);
+});
+
+test("POSITION_UNAVAILABLE sem leitura válida continua sendo erro", async () => {
+  const geolocation = new MockGeolocation();
+  const request = requestPreciseGeolocation(geolocation, {
+    ...fastTimeouts(),
+    maximumAccuracyMeters: 250,
+  });
+
+  geolocation.emitPosition(1, 5_000);
+  geolocation.emitError(1, 2);
+  geolocation.emitError(2, 2);
+
+  await assertGeolocationError(request.promise, "POSITION_UNAVAILABLE");
+  assert.match(await rejectionMessage(request.promise), /GPS/);
+});

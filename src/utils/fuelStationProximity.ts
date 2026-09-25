@@ -192,3 +192,51 @@ export function suggestNearestFuelStation<T extends StationWithCoordinates>(
     ? { status: "matched", ...nearest, radiusMeters }
     : { status: "none-nearby", radiusMeters };
 }
+
+// Busca no Google quando nenhum posto cadastrado serve: o raio cobre o
+// terreno do posto somado à incerteza da leitura (limitado pela API a 5 km).
+export const GOOGLE_STATION_SEARCH_BASE_RADIUS_METERS = 300;
+export const GOOGLE_STATION_SUGGESTION_LIMIT = 5;
+
+export type GoogleStationSearchDecision =
+  | { search: true; radiusMeters: number }
+  | { search: false; reason: "matched" | "manual-selection" | "invalid-origin" };
+
+export function decideGoogleStationSearch(
+  suggestionStatus: FuelStationSuggestion<unknown>["status"],
+  accuracyMeters: number,
+  hasManualSelection: boolean
+): GoogleStationSearchDecision {
+  if (hasManualSelection) return { search: false, reason: "manual-selection" };
+  if (suggestionStatus === "matched") return { search: false, reason: "matched" };
+  if (suggestionStatus === "invalid-origin") {
+    return { search: false, reason: "invalid-origin" };
+  }
+
+  const radiusMeters = calculateNearbyFuelStationSearchRadius(
+    accuracyMeters,
+    GOOGLE_STATION_SEARCH_BASE_RADIUS_METERS
+  );
+  return radiusMeters === null
+    ? { search: false, reason: "invalid-origin" }
+    : { search: true, radiusMeters };
+}
+
+export function markRegisteredGooglePlaces<
+  T extends { googlePlaceId: string },
+>(
+  places: T[],
+  stations: { id: string; google_place_id?: string | null }[],
+  limit = GOOGLE_STATION_SUGGESTION_LIMIT
+) {
+  const stationIdByPlaceId = new Map(
+    stations.flatMap((station) =>
+      station.google_place_id ? [[station.google_place_id, station.id] as const] : []
+    )
+  );
+
+  return places.slice(0, limit).map((place) => ({
+    ...place,
+    registeredStationId: stationIdByPlaceId.get(place.googlePlaceId) ?? null,
+  }));
+}

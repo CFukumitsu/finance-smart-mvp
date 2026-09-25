@@ -105,7 +105,7 @@ function errorForCode(code: PreciseGeolocationErrorCode) {
   if (code === "POSITION_UNAVAILABLE") {
     return new PreciseGeolocationError(
       code,
-      "Não foi possível determinar sua localização atual. Toque em Atualizar localização para tentar novamente.",
+      "Não foi possível determinar sua localização atual. Verifique se a localização (GPS) do aparelho está ativada e toque em Atualizar localização para tentar novamente.",
     );
   }
 
@@ -224,6 +224,25 @@ export function requestPreciseGeolocation(
     resolvePromise = resolve;
     rejectPromise = reject;
   });
+
+  // Uma falha depois de uma leitura válida (ex.: GPS perde o sinal sob a
+  // cobertura do posto) não deve descartar a posição já obtida.
+  function rejectUnlessBestPositionUsable(
+    code: PreciseGeolocationErrorCode,
+    phase: GeolocationPhase,
+  ) {
+    if (bestPosition && bestPosition.coords.accuracy <= maximumAccuracyMeters) {
+      logFuelGeolocationDev("best_position_used_after_error", {
+        requestId,
+        phase,
+        code,
+        accuracy: bestPosition.coords.accuracy,
+      });
+      resolveWith(bestPosition, phase);
+      return;
+    }
+    rejectWith(errorForCode(code), phase);
+  }
 
   function finishTimeout(phase: GeolocationPhase, source: TimeoutSource) {
     logFuelGeolocationDev("geolocation_timeout", {
@@ -397,7 +416,7 @@ export function requestPreciseGeolocation(
           } else if (phase === "high-accuracy" && allowLowAccuracyFallback) {
             startPhase("fallback");
           } else {
-            rejectWith(errorForCode(classification), phase);
+            rejectUnlessBestPositionUsable(classification, phase);
           }
         },
         positionOptions,
@@ -418,7 +437,7 @@ export function requestPreciseGeolocation(
       if (phase === "high-accuracy" && allowLowAccuracyFallback) {
         startPhase("fallback");
       } else {
-        rejectWith(errorForCode("POSITION_UNAVAILABLE"), phase);
+        rejectUnlessBestPositionUsable("POSITION_UNAVAILABLE", phase);
       }
     }
   }

@@ -24,7 +24,7 @@ export async function loadActiveFuelStations(): Promise<FuelStationOption[]> {
   const ownerId = await getCurrentUserId();
   let { data, error } = await supabase
     .from("fuel_stations")
-    .select("id,name,latitude,longitude,active,station_type")
+    .select("id,name,latitude,longitude,active,station_type,google_place_id")
     .eq("owner_id", ownerId)
     .eq("active", true)
     .order("station_type", { ascending: false })
@@ -33,7 +33,7 @@ export async function loadActiveFuelStations(): Promise<FuelStationOption[]> {
   if (isMissingFuelStationTypeColumn(error)) {
     const legacyResponse = await supabase
       .from("fuel_stations")
-      .select("id,name,latitude,longitude,active")
+      .select("id,name,latitude,longitude,active,google_place_id")
       .eq("owner_id", ownerId)
       .eq("active", true)
       .order("name", { ascending: true });
@@ -139,6 +139,81 @@ export async function loadGoogleFuelStationDetails(
   );
 
   return readApiResponse<GoogleFuelStationDetails>(response);
+}
+
+// Cadastra (ou reaproveita) um posto encontrado pelo Google a partir do
+// lançamento, com os mesmos dados que o cadastro de postos grava.
+export async function registerFuelStationFromGoogle(
+  googlePlaceId: string
+): Promise<{ id: string; name: string; created: boolean }> {
+  const ownerId = await getCurrentUserId();
+
+  const findExisting = async () => {
+    const { data, error } = await supabase
+      .from("fuel_stations")
+      .select("id,name,active")
+      .eq("owner_id", ownerId)
+      .eq("google_place_id", googlePlaceId)
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    return data;
+  };
+
+  const existing = await findExisting();
+  if (existing) {
+    if (!existing.active) {
+      const { error } = await supabase
+        .from("fuel_stations")
+        .update({ active: true })
+        .eq("id", existing.id)
+        .eq("owner_id", ownerId);
+      if (error) throw new Error(error.message);
+    }
+    return { id: existing.id, name: existing.name, created: false };
+  }
+
+  const details = await loadGoogleFuelStationDetails(googlePlaceId);
+  const postalDigits = details.postalCode.replace(/\D/g, "").slice(0, 8);
+  const { data, error } = await supabase
+    .from("fuel_stations")
+    .insert({
+      owner_id: ownerId,
+      name: details.name,
+      brand: null,
+      address: details.address || details.formattedAddress || null,
+      neighborhood: details.neighborhood || null,
+      city: details.city || null,
+      state: details.state.toUpperCase().replace(/[^A-Z]/g, "").slice(0, 2) || null,
+      postal_code:
+        postalDigits.length > 5
+          ? `${postalDigits.slice(0, 5)}-${postalDigits.slice(5)}`
+          : postalDigits || null,
+      latitude: details.latitude,
+      longitude: details.longitude,
+      google_place_id: details.googlePlaceId,
+      google_maps_uri: details.googleMapsUri,
+      google_rating: details.rating,
+      google_user_rating_count: details.userRatingCount,
+      google_business_status: details.businessStatus,
+      google_primary_type: details.primaryType,
+      google_display_name: details.name,
+      google_formatted_address: details.formattedAddress || null,
+      google_last_synced_at: new Date().toISOString(),
+      active: true,
+    })
+    .select("id,name")
+    .single();
+
+  if (error) {
+    // Cadastro concorrente do mesmo Place ID: reaproveita o existente.
+    if (error.code === "23505") {
+      const concurrent = await findExisting();
+      if (concurrent) return { id: concurrent.id, name: concurrent.name, created: false };
+    }
+    throw new Error(error.message);
+  }
+
+  return { id: data.id, name: data.name, created: true };
 }
 
 export async function loadFuelRecords(): Promise<FuelRecord[]> {

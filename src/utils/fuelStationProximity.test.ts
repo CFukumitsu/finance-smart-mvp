@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 // @ts-expect-error Node's native TypeScript test runner requires the extension.
-import { buildNearbyFuelStationSearchParams, calculateDistanceMeters, calculateNearbyFuelStationSearchRadius, calculateStationMatchRadius, findNearestRegisteredStation, FUEL_STATION_MATCH_BASE_RADIUS_METERS, FUEL_STATION_MATCH_MAXIMUM_ACCURACY_METERS, FUEL_STATION_MATCH_MAXIMUM_RADIUS_METERS, MAXIMUM_NEARBY_FUEL_STATION_RADIUS_METERS, NEARBY_HIGH_ACCURACY_TIMEOUT_MS, PREFERRED_NEARBY_LOCATION_ACCURACY_METERS, sortFuelStationsByDistance, suggestNearestFuelStation, toCoordinate, type StationWithCoordinates } from "./fuelStationProximity.ts";
+import { buildNearbyFuelStationSearchParams, calculateDistanceMeters, calculateNearbyFuelStationSearchRadius, calculateStationMatchRadius, decideGoogleStationSearch, findNearestRegisteredStation, GOOGLE_STATION_SUGGESTION_LIMIT, markRegisteredGooglePlaces, FUEL_STATION_MATCH_BASE_RADIUS_METERS, FUEL_STATION_MATCH_MAXIMUM_ACCURACY_METERS, FUEL_STATION_MATCH_MAXIMUM_RADIUS_METERS, MAXIMUM_NEARBY_FUEL_STATION_RADIUS_METERS, NEARBY_HIGH_ACCURACY_TIMEOUT_MS, PREFERRED_NEARBY_LOCATION_ACCURACY_METERS, sortFuelStationsByDistance, suggestNearestFuelStation, toCoordinate, type StationWithCoordinates } from "./fuelStationProximity.ts";
 
 const origin = { latitude: -23.55052, longitude: -46.633308 };
 
@@ -200,4 +200,35 @@ test("posto com coordenada em string não normalizada é ignorado com segurança
   const raw = { ...stationNorthOf("raw", 0), latitude: String(origin.latitude) as unknown as number };
 
   assert.deepEqual(suggestNearestFuelStation(origin, 10, [raw]), { status: "no-stations-with-location" });
+});
+
+test("busca no Google só quando nenhum posto cadastrado serve", () => {
+  assert.deepEqual(decideGoogleStationSearch("matched", 20, false), { search: false, reason: "matched" });
+  assert.deepEqual(decideGoogleStationSearch("none-nearby", 20, false), { search: true, radiusMeters: 320 });
+  assert.deepEqual(decideGoogleStationSearch("no-stations-with-location", 0, false), { search: true, radiusMeters: 300 });
+  assert.deepEqual(decideGoogleStationSearch("invalid-origin", 20, false), { search: false, reason: "invalid-origin" });
+});
+
+test("localização imprecisa ainda busca no Google com raio ampliado e limitado", () => {
+  assert.deepEqual(decideGoogleStationSearch("inaccurate", 900, false), { search: true, radiusMeters: 1_200 });
+  assert.deepEqual(decideGoogleStationSearch("inaccurate", 20_000, false), {
+    search: true,
+    radiusMeters: MAXIMUM_NEARBY_FUEL_STATION_RADIUS_METERS,
+  });
+});
+
+test("escolha manual do posto nunca dispara busca nem substituição", () => {
+  assert.deepEqual(decideGoogleStationSearch("none-nearby", 20, true), { search: false, reason: "manual-selection" });
+});
+
+test("marca postos do Google já cadastrados e limita as sugestões", () => {
+  const places = ["p1", "p2", "p3", "p4", "p5", "p6"].map((googlePlaceId) => ({ googlePlaceId }));
+  const marked = markRegisteredGooglePlaces(places, [
+    { id: "station-2", google_place_id: "p2" },
+    { id: "manual", google_place_id: null },
+  ]);
+
+  assert.equal(marked.length, GOOGLE_STATION_SUGGESTION_LIMIT);
+  assert.equal(marked[0].registeredStationId, null);
+  assert.equal(marked[1].registeredStationId, "station-2");
 });
