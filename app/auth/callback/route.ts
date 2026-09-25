@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createSupabaseServerClient } from "@/src/lib/supabaseServer";
 import { safeInternalRedirect } from "@/src/utils/identity";
+import { IDLE_LOGIN_COOKIE, IDLE_TIMEOUT, idleLoginRecord } from "@/src/utils/idleSession";
 
 export async function GET(request: Request) {
   const url = new URL(request.url);
@@ -12,10 +13,11 @@ export async function GET(request: Request) {
 
   const supabase = await createSupabaseServerClient();
   const { data, error } = await supabase.auth.exchangeCodeForSession(code);
-  if (error || !data.user) {
+  if (error || !data.user || !data.session) {
     return NextResponse.redirect(new URL("/login?error=oauth_callback", url.origin));
   }
 
+  const loginRecord = idleLoginRecord(data.session);
   const metadata = data.user.user_metadata ?? {};
   const fullName = String(metadata.full_name ?? metadata.name ?? "").trim();
   const firstName = String(metadata.given_name ?? fullName.split(" ")[0] ?? "").trim();
@@ -28,5 +30,10 @@ export async function GET(request: Request) {
       updated_at: new Date().toISOString(),
     }).eq("id", data.user.id);
   }
-  return NextResponse.redirect(new URL(next, url.origin));
+  const response = NextResponse.redirect(new URL(next, url.origin));
+  response.cookies.set(IDLE_LOGIN_COOKIE, JSON.stringify(loginRecord), {
+    path: "/", sameSite: "lax", secure: url.protocol === "https:",
+    maxAge: IDLE_TIMEOUT / 1000,
+  });
+  return response;
 }
