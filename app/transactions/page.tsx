@@ -3,16 +3,39 @@
 
 import { useMutation } from "@/src/hooks/useMutation";
 import { ProcessingButton, MutationScope } from "@/src/components/ui/Mutation";
-import { Suspense, useEffect, useRef, useState } from "react";
+import { Suspense, useEffect, useRef, useState, type ReactNode } from "react";
 import {
+  ArrowDownLeft,
+  ArrowLeftRight,
+  ArrowUpRight,
+  Car,
   ChevronLeft,
   ChevronRight,
+  CreditCard,
+  Dices,
+  Fuel,
+  Gift,
+  GraduationCap,
+  HeartPulse,
+  House,
+  Lock,
+  PawPrint,
   Pencil,
+  Plane,
+  Plus,
+  Receipt,
   Rows3,
   Search,
+  Shirt,
+  ShoppingCart,
   SlidersHorizontal,
   Trash2,
+  TrendingUp,
+  Utensils,
+  Wallet,
   X,
+  Zap,
+  type LucideIcon,
 } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import AppShell from "../components/layout/AppShell";
@@ -100,6 +123,172 @@ type AccountClosure = {
   closing_balance: number | null;
 };
 
+type SummaryTone = "positive" | "negative" | "warning" | "info" | "neutral";
+
+const summaryToneClasses: Record<SummaryTone, { value: string; dot: string }> =
+  {
+    positive: { value: "text-emerald-300", dot: "bg-emerald-400" },
+    negative: { value: "text-red-300", dot: "bg-red-400" },
+    warning: { value: "text-orange-300", dot: "bg-orange-400" },
+    info: { value: "text-blue-300", dot: "bg-blue-400" },
+    neutral: { value: "theme-text", dot: "bg-slate-400" },
+  };
+
+function SummaryCard({
+  label,
+  value,
+  tone,
+  hint,
+  primary = false,
+}: {
+  label: string;
+  value: string;
+  tone: SummaryTone;
+  hint?: string;
+  primary?: boolean;
+}) {
+  const toneClasses = summaryToneClasses[tone];
+
+  return (
+    <div
+      className={`min-w-0 rounded-2xl border border-white/10 bg-slate-950/60 p-5 shadow-sm ${
+        primary
+          ? "ring-1 ring-inset ring-blue-500/25 sm:col-span-3 lg:col-span-2"
+          : ""
+      }`}
+    >
+      <p className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+        <span
+          aria-hidden="true"
+          className={`h-1.5 w-1.5 shrink-0 rounded-full ${toneClasses.dot}`}
+        />
+        <span className="truncate">{label}</span>
+      </p>
+      {primary ? (
+        <div
+          className={`mt-1.5 truncate text-3xl font-semibold tabular-nums tracking-tight ${toneClasses.value}`}
+          title={value}
+        >
+          {value}
+        </div>
+      ) : (
+        <p
+          className={`mt-2 truncate font-semibold tabular-nums tracking-tight ${toneClasses.value}`}
+          title={value}
+        >
+          {value}
+        </p>
+      )}
+      {hint && (
+        <span className="mt-0.5 block truncate text-xs text-slate-400">
+          {hint}
+        </span>
+      )}
+    </div>
+  );
+}
+
+const badgeBaseClass =
+  "inline-flex items-center whitespace-nowrap rounded-full px-2 py-0.5 text-[11px] font-medium leading-4";
+
+function getTypeBadgeClass(type: string) {
+  if (type === "Receita") return "bg-emerald-500/10 text-emerald-300";
+  if (type === "Transferência") return "bg-blue-500/10 text-blue-300";
+  if (type === "Pagamento de Fatura") return "bg-orange-500/10 text-orange-300";
+  return "bg-red-500/10 text-red-300";
+}
+
+function getStatusBadgeClass(status: string | null) {
+  return status === "Pendente"
+    ? "border border-transparent bg-amber-500/10 text-amber-300"
+    : "border border-white/10 text-slate-400";
+}
+
+function getValueColorClass(type: string) {
+  if (type === "Receita") return "text-emerald-300";
+  if (type === "Transferência") return "text-blue-300";
+  return "text-red-300";
+}
+
+const transactionModeLabels: Record<string, string> = {
+  unico: "Único",
+  parcelado: "Parcelado",
+  recorrente: "Recorrente",
+};
+
+function normalizeForMatch(value: string) {
+  return value
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .toLocaleLowerCase("pt-BR");
+}
+
+// Visual-only hints keyed on category-name word prefixes; unmatched categories
+// fall back to an icon derived from the transaction type.
+const categoryIconRules: { prefixes: string[]; icon: LucideIcon }[] = [
+  { prefixes: ["combust", "abastec", "gasolina"], icon: Fuel },
+  { prefixes: ["aliment", "restaurante", "refei", "lanche", "delivery"], icon: Utensils },
+  { prefixes: ["mercado", "supermercado", "compra"], icon: ShoppingCart },
+  { prefixes: ["transporte", "uber", "carro", "veicul", "estacionamento", "pedagio"], icon: Car },
+  { prefixes: ["viage", "passage", "hotel"], icon: Plane },
+  { prefixes: ["presente"], icon: Gift },
+  { prefixes: ["saude", "farmacia", "medic", "hospital"], icon: HeartPulse },
+  { prefixes: ["moradia", "casa", "aluguel", "condominio"], icon: House },
+  { prefixes: ["educa", "curso", "escola", "faculdade"], icon: GraduationCap },
+  { prefixes: ["pet", "pets"], icon: PawPrint },
+  { prefixes: ["energia", "luz"], icon: Zap },
+  { prefixes: ["roupa", "vestuario"], icon: Shirt },
+  { prefixes: ["invest"], icon: TrendingUp },
+  { prefixes: ["salario", "renda"], icon: Wallet },
+];
+
+function getTransactionIcon(
+  transaction: Transaction,
+  categorySpecialType: string | null | undefined,
+): LucideIcon {
+  if (transaction.investment_integration_group_id) return TrendingUp;
+  if (transaction.bankroll_integration_group_id) return Dices;
+  if (transaction.type === "Transferência") return ArrowLeftRight;
+  if (transaction.type === "Pagamento de Fatura") return CreditCard;
+  if (categorySpecialType === "fuel") return Fuel;
+
+  const categoryName = transaction.category?.name;
+
+  if (categoryName) {
+    const words = normalizeForMatch(categoryName).split(/[^a-z0-9]+/);
+    const rule = categoryIconRules.find((item) =>
+      item.prefixes.some((prefix) =>
+        words.some((word) => word.startsWith(prefix)),
+      ),
+    );
+
+    if (rule) return rule.icon;
+  }
+
+  if (transaction.type === "Receita") return ArrowDownLeft;
+  if (transaction.type === "Despesa") return ArrowUpRight;
+  return Receipt;
+}
+
+function formatWeekday(date: string, weekday: "short" | "long") {
+  const label = new Date(date + "T00:00:00")
+    .toLocaleDateString("pt-BR", { weekday })
+    .replace(".", "");
+
+  return label.charAt(0).toLocaleUpperCase("pt-BR") + label.slice(1);
+}
+
+function DetailField({ label, value }: { label: string; value: ReactNode }) {
+  return (
+    <div className="theme-divider flex items-start justify-between gap-4 border-b py-3 last:border-b-0">
+      <dt className="shrink-0 text-xs font-medium text-slate-400">{label}</dt>
+      <dd className="theme-text min-w-0 text-right text-sm font-medium">
+        {value}
+      </dd>
+    </div>
+  );
+}
+
 function TransactionsPageContent() {
   const mutation = useMutation();
   const isMutationLocked = mutation.isLocked;
@@ -133,6 +322,9 @@ function TransactionsPageContent() {
     "competence",
   );
   const [showFilters, setShowFilters] = useState(false);
+  const [detailTransactionId, setDetailTransactionId] = useState<
+    string | null
+  >(null);
   const [density, setDensity] = useState<"compact" | "comfortable">("compact");
   const [plannedCardLimit, setPlannedCardLimit] = useState(0);
   const [accountClosures, setAccountClosures] = useState<AccountClosure[]>([]);
@@ -682,11 +874,15 @@ function TransactionsPageContent() {
         setShowFilters(false);
         return;
       }
-      if (isDrawerOpen) closeDrawer();
+      if (isDrawerOpen) {
+        closeDrawer();
+        return;
+      }
+      if (detailTransactionId) setDetailTransactionId(null);
     }
     document.addEventListener("keydown", closeOnEscape);
     return () => document.removeEventListener("keydown", closeOnEscape);
-  }, [showFilters, isDrawerOpen, isMutationLocked]);
+  }, [showFilters, isDrawerOpen, detailTransactionId, isMutationLocked]);
 
   useEffect(() => {
     if (
@@ -1642,6 +1838,39 @@ function TransactionsPageContent() {
     setStatusFilter("");
   }
 
+  const quickTypeFilters = [
+    { value: "", label: "Todos" },
+    { value: "Receita", label: "Receitas" },
+    { value: "Despesa", label: "Despesas" },
+    { value: "Transferência", label: "Transferências" },
+    { value: "Pagamento de Fatura", label: "Faturas" },
+  ];
+
+  const quickStatusFilters = [
+    { value: "", label: "Todos" },
+    { value: "Pendente", label: "Pendente" },
+    { value: "Pago", label: "Pago" },
+    { value: "Recebido", label: "Recebido" },
+  ];
+
+  // Derived from the loaded list so the panel reflects reloads and closes
+  // itself when the transaction leaves the current result set.
+  const detailTransaction = detailTransactionId
+    ? (transactions.find(
+        (transaction) => transaction.id === detailTransactionId,
+      ) ?? null)
+    : null;
+
+  function getCategorySpecialType(transaction: Transaction) {
+    return categories.find((category) => category.id === transaction.category_id)
+      ?.special_type;
+  }
+
+  function editFromDetail(transaction: Transaction) {
+    setDetailTransactionId(null);
+    void openEditDrawer(transaction);
+  }
+
   function toggleDensity() {
     const nextDensity = density === "compact" ? "comfortable" : "compact";
     setDensity(nextDensity);
@@ -1677,33 +1906,37 @@ function TransactionsPageContent() {
   return (
     <AppShell>
       <div
-        className={`transactions-page transactions-density-${density} space-y-3`}
+        className={`transactions-page transactions-density-${density} space-y-4`}
       >
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <h1 className="theme-text text-2xl font-bold">Lançamentos</h1>
-            <p className="theme-muted text-sm">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+          <div className="min-w-0">
+            <h1 className="theme-text text-2xl font-semibold tracking-tight sm:text-[1.75rem]">
+              Lançamentos
+            </h1>
+            <p className="theme-muted mt-0.5 text-sm">
               Gestão completa dos lançamentos financeiros.
             </p>
           </div>
 
           <button
+            type="button"
             onClick={() => {
               resetForm();
               setIsDrawerOpen(true);
             }}
-            className="w-full rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-500 sm:w-auto"
+            className="inline-flex h-10 w-full items-center justify-center gap-1.5 rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-blue-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/50 sm:w-auto"
           >
+            <Plus size={16} strokeWidth={2.5} aria-hidden="true" />
             Novo lançamento
           </button>
         </div>
 
-        <div className="transactions-surface w-full rounded-xl border p-1.5">
+        <div className="transactions-surface w-full rounded-2xl border p-1 shadow-sm">
           <div className="flex min-w-0 items-center gap-1">
             <button
               type="button"
               onClick={goToPreviousCompetence}
-              className="theme-muted theme-hover flex h-8 w-8 shrink-0 items-center justify-center rounded-lg"
+              className="theme-muted theme-hover flex h-9 w-9 shrink-0 items-center justify-center rounded-xl transition-colors"
               title="Competência anterior"
               aria-label="Competência anterior"
             >
@@ -1727,14 +1960,15 @@ function TransactionsPageContent() {
                     type="button"
                     disabled={!foundCompetence}
                     onClick={() => selectCompetenceByDate(date)}
-                    className={`${index < 2 || index > 4 ? "hidden sm:inline-flex" : "inline-flex"} shrink-0 whitespace-nowrap rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
+                    aria-current={isSelected ? "date" : undefined}
+                    className={`${index < 2 || index > 4 ? "hidden sm:inline-flex" : "inline-flex"} h-9 shrink-0 items-center whitespace-nowrap rounded-xl px-3.5 text-xs transition-colors ${
                       isSelected
-                        ? "bg-blue-600 text-white"
+                        ? "bg-blue-600 font-semibold text-white shadow-sm"
                         : isCurrentMonth
-                          ? "bg-cyan-500/10 text-cyan-300"
+                          ? "font-semibold text-cyan-300 ring-1 ring-inset ring-cyan-500/30 hover:bg-cyan-500/10"
                           : foundCompetence
-                            ? "theme-muted theme-hover"
-                            : "cursor-not-allowed bg-white/[0.02] text-slate-700"
+                            ? "theme-muted theme-hover font-medium"
+                            : "cursor-not-allowed font-medium text-slate-600 opacity-50"
                     }`}
                   >
                     <span className="sm:hidden">
@@ -1751,391 +1985,732 @@ function TransactionsPageContent() {
             <button
               type="button"
               onClick={goToNextCompetence}
-              className="theme-muted theme-hover flex h-8 w-8 shrink-0 items-center justify-center rounded-lg"
+              className="theme-muted theme-hover flex h-9 w-9 shrink-0 items-center justify-center rounded-xl transition-colors"
               title="Próxima competência"
               aria-label="Próxima competência"
             >
               <ChevronRight size={18} />
             </button>
+            <span
+              aria-hidden="true"
+              className="theme-divider mx-1 h-5 shrink-0 border-l"
+            />
             <button
               type="button"
               onClick={goToCurrentCompetence}
-              className="theme-muted theme-hover shrink-0 rounded-lg px-3 py-1.5 text-xs font-semibold"
+              className="theme-muted theme-hover h-9 shrink-0 rounded-xl px-3.5 text-xs font-semibold transition-colors"
             >
               Hoje
             </button>
           </div>
         </div>
-        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-[minmax(220px,1fr)_minmax(180px,260px)_minmax(180px,240px)_auto_auto]">
-          <label className="relative">
-            <span className="sr-only">Buscar lançamento</span>
-            <Search
-              className="theme-muted pointer-events-none absolute left-3 top-1/2 -translate-y-1/2"
-              size={16}
-            />
-            <input
-              value={searchTerm}
-              onChange={(event) => setSearchTerm(event.target.value)}
-              enterKeyHint="search"
-              placeholder="Buscar lançamento..."
-              className="theme-field h-10 w-full rounded-xl border py-2 pl-9 pr-3 text-sm outline-none"
-            />
-          </label>
 
-          <select
-            aria-label="Conta ou cartão"
-            value={accountFilter}
-            onChange={(event) => setAccountFilter(event.target.value)}
-            className="theme-field h-10 min-w-0 rounded-xl border px-3 text-sm outline-none"
-          >
-            <option value="">Todas as contas</option>
-            {financialLedgerAccounts.map((account) => (
-              <option key={account.id} value={account.id}>
-                {account.name}
-              </option>
-            ))}
-          </select>
+        <div className="transactions-surface rounded-2xl border p-2 shadow-sm">
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-[minmax(220px,1fr)_minmax(180px,260px)_minmax(180px,240px)_auto_auto]">
+            <label className="relative">
+              <span className="sr-only">Buscar lançamento</span>
+              <Search
+                className="theme-muted pointer-events-none absolute left-3 top-1/2 -translate-y-1/2"
+                size={16}
+              />
+              <input
+                value={searchTerm}
+                onChange={(event) => setSearchTerm(event.target.value)}
+                enterKeyHint="search"
+                placeholder="Buscar lançamento..."
+                className="theme-field h-10 w-full rounded-xl border py-2 pl-9 pr-3 text-sm outline-none transition-shadow"
+              />
+            </label>
 
-          <select
-            aria-label="Ordenação"
-            value={listMode}
-            onChange={(event) =>
-              setListMode(event.target.value as "competence" | "latest")
-            }
-            className="theme-field h-10 min-w-0 rounded-xl border px-3 text-sm outline-none"
-          >
-            <option value="competence">Por data do lançamento</option>
-            <option value="latest">Últimos 20 cadastrados</option>
-          </select>
+            <select
+              aria-label="Conta ou cartão"
+              value={accountFilter}
+              onChange={(event) => setAccountFilter(event.target.value)}
+              className="theme-field h-10 min-w-0 cursor-pointer rounded-xl border px-3 text-sm outline-none transition-shadow"
+            >
+              <option value="">Todas as contas</option>
+              {financialLedgerAccounts.map((account) => (
+                <option key={account.id} value={account.id}>
+                  {account.name}
+                </option>
+              ))}
+            </select>
 
-          <button
-            type="button"
-            onClick={() => setShowFilters(true)}
-            aria-expanded={showFilters}
-            className="theme-field theme-hover flex h-10 items-center justify-center gap-2 rounded-xl border px-3 text-sm font-semibold"
-          >
-            <SlidersHorizontal size={16} />
-            Mais filtros
-            {advancedFilterCount > 0 && (
-              <span className="rounded-full bg-blue-600 px-1.5 py-0.5 text-[11px] leading-none text-white">
-                {advancedFilterCount}
+            <select
+              aria-label="Ordenação"
+              value={listMode}
+              onChange={(event) =>
+                setListMode(event.target.value as "competence" | "latest")
+              }
+              className="theme-field h-10 min-w-0 cursor-pointer rounded-xl border px-3 text-sm outline-none transition-shadow"
+            >
+              <option value="competence">Por data do lançamento</option>
+              <option value="latest">Últimos 20 cadastrados</option>
+            </select>
+
+            <button
+              type="button"
+              onClick={() => setShowFilters(true)}
+              aria-expanded={showFilters}
+              className="theme-field theme-hover flex h-10 items-center justify-center gap-2 whitespace-nowrap rounded-xl border px-3.5 text-sm font-medium transition-colors"
+            >
+              <SlidersHorizontal size={16} aria-hidden="true" />
+              Mais filtros
+              {advancedFilterCount > 0 && (
+                <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-blue-600 px-1.5 text-[11px] font-semibold leading-none text-white">
+                  {advancedFilterCount}
+                </span>
+              )}
+            </button>
+
+            <button
+              type="button"
+              onClick={toggleDensity}
+              aria-pressed={density === "compact"}
+              className="theme-field theme-hover flex h-10 items-center justify-center gap-2 whitespace-nowrap rounded-xl border px-3.5 text-sm font-medium transition-colors"
+              title={`Modo atual: ${density === "compact" ? "Compacto" : "Confortável"}`}
+            >
+              <Rows3 size={16} aria-hidden="true" />
+              <span className="sm:hidden lg:inline">
+                {density === "compact" ? "Compacto" : "Confortável"}
               </span>
-            )}
-          </button>
+            </button>
+          </div>
 
-          <button
-            type="button"
-            onClick={toggleDensity}
-            aria-pressed={density === "compact"}
-            className="theme-field theme-hover flex h-10 items-center justify-center gap-2 rounded-xl border px-3 text-sm font-semibold"
-            title={`Modo atual: ${density === "compact" ? "Compacto" : "Confortável"}`}
-          >
-            <Rows3 size={16} />
-            <span className="sm:hidden lg:inline">
-              {density === "compact" ? "Compacto" : "Confortável"}
-            </span>
-          </button>
+          <div className="theme-divider mt-2 flex flex-wrap items-center gap-x-4 gap-y-2 border-t px-1 pt-2">
+            <div
+              role="group"
+              aria-label="Filtro rápido por tipo"
+              className="flex min-w-0 items-center gap-1 overflow-x-auto"
+            >
+              <span className="mr-1 shrink-0 text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+                Tipo
+              </span>
+              {quickTypeFilters.map((option) => {
+                const active = typeFilter === option.value;
+
+                return (
+                  <button
+                    key={option.value || "all"}
+                    type="button"
+                    aria-pressed={active}
+                    onClick={() => setTypeFilter(option.value)}
+                    className={`h-8 shrink-0 whitespace-nowrap rounded-lg px-3 text-xs transition-colors ${
+                      active
+                        ? "bg-blue-500/10 font-semibold text-blue-300 ring-1 ring-inset ring-blue-500/30"
+                        : "theme-muted theme-hover font-medium"
+                    }`}
+                  >
+                    {option.label}
+                  </button>
+                );
+              })}
+            </div>
+
+            <div
+              role="group"
+              aria-label="Filtro rápido por status"
+              className="flex min-w-0 items-center gap-1 overflow-x-auto"
+            >
+              <span className="mr-1 shrink-0 text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+                Status
+              </span>
+              {quickStatusFilters.map((option) => {
+                const active = statusFilter === option.value;
+
+                return (
+                  <button
+                    key={option.value || "all"}
+                    type="button"
+                    aria-pressed={active}
+                    onClick={() => setStatusFilter(option.value)}
+                    className={`h-8 shrink-0 whitespace-nowrap rounded-lg px-3 text-xs transition-colors ${
+                      active
+                        ? "bg-blue-500/10 font-semibold text-blue-300 ring-1 ring-inset ring-blue-500/30"
+                        : "theme-muted theme-hover font-medium"
+                    }`}
+                  >
+                    {option.label}
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="flex min-w-0 items-center gap-2">
+              <span className="shrink-0 text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+                Categoria
+              </span>
+              <select
+                aria-label="Filtro rápido por categoria"
+                value={categoryFilter}
+                onChange={(event) => setCategoryFilter(event.target.value)}
+                className="theme-field h-8 min-w-0 max-w-[220px] cursor-pointer rounded-lg border px-2.5 text-xs outline-none transition-shadow"
+              >
+                <option value="">Todas</option>
+                {categories.map((category) => (
+                  <option key={category.id} value={category.id}>
+                    {category.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {advancedFilterCount > 0 && (
+              <button
+                type="button"
+                onClick={clearAdvancedFilters}
+                className="ml-auto inline-flex h-8 shrink-0 items-center gap-1 rounded-lg px-2.5 text-xs font-medium text-blue-300 transition-colors hover:bg-blue-500/10"
+              >
+                <X size={13} aria-hidden="true" />
+                Limpar filtros
+              </button>
+            )}
+          </div>
         </div>
 
-        <div className="transactions-summary grid gap-2 sm:grid-cols-2 md:grid-cols-4">
+        <div
+          className={`transactions-summary grid gap-3 ${
+            selectedAccount
+              ? "sm:grid-cols-2 lg:grid-cols-4"
+              : "sm:grid-cols-3 lg:grid-cols-5"
+          }`}
+        >
           {!selectedAccount && (
             <>
-              <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-5">
-                <p className="text-sm text-slate-400">Receitas</p>
-                <p className="mt-2 text-2xl font-bold text-emerald-300">
-                  {formatCurrency(totalIncome)}
-                </p>
-              </div>
-
-              <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-5">
-                <p className="text-sm text-slate-400">Despesas diretas</p>
-                <p className="mt-2 text-2xl font-bold text-red-300">
-                  {formatCurrency(totalDirectExpenses)}
-                </p>
-              </div>
-
-              <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-5">
-                <p className="text-sm text-slate-400">Fluxo de caixa</p>
-                <p
-                  className={`mt-2 text-2xl font-bold ${
-                    cashFlowResult >= 0 ? "text-emerald-300" : "text-red-300"
-                  }`}
-                >
-                  {formatCurrency(cashFlowResult)}
-                </p>
-              </div>
-
-              <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-5">
-                <p className="text-sm text-slate-400">Pagamentos de fatura</p>
-                <p className="mt-2 text-2xl font-bold text-orange-300">
-                  {formatCurrency(totalInvoicePayments)}
-                </p>
-              </div>
+              <SummaryCard
+                label="Saldo do mês"
+                value={formatCurrency(cashFlowResult)}
+                tone={cashFlowResult >= 0 ? "positive" : "negative"}
+                hint="Receitas − despesas em conta − pagamentos de fatura"
+                primary
+              />
+              <SummaryCard
+                label="Receitas"
+                value={formatCurrency(totalIncome)}
+                tone="positive"
+              />
+              <SummaryCard
+                label="Despesas diretas"
+                value={formatCurrency(totalDirectExpenses)}
+                tone="negative"
+              />
+              <SummaryCard
+                label="Pagamentos de fatura"
+                value={formatCurrency(totalInvoicePayments)}
+                tone="warning"
+              />
             </>
           )}
 
           {selectedAccount?.type === "Conta" && (
             <>
-              <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-5">
-                <p className="text-sm text-slate-400">Conta selecionada</p>
-                <p className="mt-2 text-xl font-bold text-white">
-                  {selectedAccount.name}
-                </p>
-              </div>
-
-              <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-5">
-                <p className="text-sm text-slate-400">Saldo anterior</p>
-                <p
-                  className={`mt-2 text-2xl font-bold ${
-                    openingBalance >= 0 ? "text-blue-300" : "text-red-300"
-                  }`}
-                >
-                  {formatCurrency(openingBalance)}
-                </p>
-              </div>
-
-              <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-5">
-                <p className="text-sm text-slate-400">Saldo atual</p>
-                <p
-                  className={`mt-2 text-2xl font-bold ${
-                    currentBalance >= 0 ? "text-emerald-300" : "text-red-300"
-                  }`}
-                >
-                  {formatCurrency(currentBalance)}
-                </p>
-              </div>
-
-              <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-5">
-                <p className="text-sm text-slate-400">Futuro</p>
-                <p
-                  className={`mt-2 text-2xl font-bold ${
-                    futureBalance >= 0 ? "text-emerald-300" : "text-red-300"
-                  }`}
-                >
-                  {formatCurrency(futureBalance)}
-                </p>
-              </div>
+              <SummaryCard
+                label="Conta selecionada"
+                value={selectedAccount.name}
+                tone="neutral"
+              />
+              <SummaryCard
+                label="Saldo anterior"
+                value={formatCurrency(openingBalance)}
+                tone={openingBalance >= 0 ? "info" : "negative"}
+              />
+              <SummaryCard
+                label="Saldo atual"
+                value={formatCurrency(currentBalance)}
+                tone={currentBalance >= 0 ? "positive" : "negative"}
+              />
+              <SummaryCard
+                label="Futuro"
+                value={formatCurrency(futureBalance)}
+                tone={futureBalance >= 0 ? "positive" : "negative"}
+              />
             </>
           )}
 
           {selectedAccount?.type === "Cartão" && (
             <>
-              <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-5">
-                <p className="text-sm text-slate-400">Cartão selecionado</p>
-                <p className="mt-2 text-xl font-bold text-white">
-                  {selectedAccount.name}
-                </p>
-              </div>
-
-              <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-5">
-                <p className="text-sm text-slate-400">Total da fatura</p>
-                <p className="mt-2 text-2xl font-bold text-red-300">
-                  {formatCurrency(cardUsedLimit)}
-                </p>
-              </div>
-
-              <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-5">
-                <p className="text-sm text-slate-400">Limite disponível</p>
-                <p
-                  className={`mt-2 text-2xl font-bold ${
-                    cardAvailableLimit >= 0
-                      ? "text-emerald-300"
-                      : "text-red-300"
-                  }`}
-                >
-                  {formatCurrency(cardAvailableLimit)}
-                </p>
-              </div>
-
-              <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-5">
-                <p className="text-sm text-slate-400">
-                  Fechamento / Vencimento
-                </p>
-                <p className="mt-2 text-xl font-bold text-blue-300">
-                  {selectedAccount.closing_day
+              <SummaryCard
+                label="Cartão selecionado"
+                value={selectedAccount.name}
+                tone="neutral"
+              />
+              <SummaryCard
+                label="Total da fatura"
+                value={formatCurrency(cardUsedLimit)}
+                tone="negative"
+              />
+              <SummaryCard
+                label="Limite disponível"
+                value={formatCurrency(cardAvailableLimit)}
+                tone={cardAvailableLimit >= 0 ? "positive" : "negative"}
+              />
+              <SummaryCard
+                label="Fechamento / Vencimento"
+                value={
+                  selectedAccount.closing_day
                     ? `Fecha dia ${selectedAccount.closing_day}`
-                    : "Fechamento não informado"}
-                </p>
-                <p className="mt-1 text-sm text-slate-400">
-                  {selectedAccount.due_day
+                    : "Fechamento não informado"
+                }
+                tone="info"
+                hint={
+                  selectedAccount.due_day
                     ? `Vence dia ${selectedAccount.due_day}`
-                    : "Vencimento não informado"}
-                </p>
-              </div>
+                    : "Vencimento não informado"
+                }
+              />
             </>
           )}
         </div>
 
-        <div className="transactions-surface w-full overflow-x-auto rounded-xl border">
-          <table className="transactions-table min-w-[620px] w-full table-fixed text-left text-sm md:min-w-[1040px]">
-            <thead className="sticky top-0 z-10">
-              <tr>
-                <th className="w-[70px] px-3 py-4 md:w-[110px] md:px-4">
-                  Data
-                </th>
-                <th className="px-3 py-4 md:px-4">Descrição</th>
-                <th className="hidden w-[180px] px-4 py-4 md:table-cell">
-                  Conta / Cartão
-                </th>
-                <th className="hidden w-[110px] px-3 py-4 md:table-cell">
-                  Categoria
-                </th>
-                <th className="w-[95px] px-2 py-4 text-right md:w-[120px] md:px-3">
-                  Valor
-                </th>
-                <th className="w-[76px] px-2 py-4 text-right md:w-[90px] md:px-3">
-                  Ações
-                </th>
-              </tr>
-            </thead>
-
-            <tbody className="divide-y">
-              {isLoading && (
-                <tr>
-                  <td
-                    colSpan={6}
-                    className="px-5 py-10 text-center text-slate-400"
-                  >
-                    Carregando lançamentos...
-                  </td>
+        <div
+          className={
+            detailTransaction
+              ? "min-[1800px]:grid min-[1800px]:grid-cols-[minmax(0,1fr)_360px] min-[1800px]:items-start min-[1800px]:gap-4"
+              : ""
+          }
+        >
+          <div className="transactions-surface w-full overflow-x-auto rounded-2xl border shadow-sm">
+            <table className="transactions-table min-w-[620px] w-full table-fixed text-left text-sm md:min-w-[1080px]">
+              <thead className="sticky top-0 z-10">
+                <tr className="theme-muted text-[11px] font-semibold uppercase tracking-wider">
+                  <th className="w-[76px] px-3 py-4 font-semibold md:w-[104px] md:px-5">
+                    Data
+                  </th>
+                  <th className="px-3 py-4 font-semibold md:px-4">Descrição</th>
+                  <th className="hidden w-[120px] px-3 py-4 font-semibold md:table-cell">
+                    Tipo
+                  </th>
+                  <th className="hidden w-[160px] px-3 py-4 font-semibold md:table-cell">
+                    Conta / Cartão
+                  </th>
+                  <th className="hidden w-[136px] px-3 py-4 font-semibold md:table-cell">
+                    Categoria
+                  </th>
+                  <th className="w-[95px] px-2 py-4 text-right font-semibold md:w-[124px] md:px-3">
+                    Valor
+                  </th>
+                  <th className="hidden w-[116px] px-3 py-4 font-semibold md:table-cell">
+                    Status
+                  </th>
+                  <th className="w-[84px] px-2 py-4 text-right font-semibold md:w-[92px] md:px-4">
+                    Ações
+                  </th>
                 </tr>
-              )}
+              </thead>
 
-              {!isLoading &&
-                transactions.map((transaction, index) => (
-                  <tr key={`${transaction.id}-${index}`}>
-                    <td className="w-[70px] px-3 py-4 text-slate-300 md:w-[110px] md:px-4">
-                      <span className="md:hidden">
-                        {formatShortDate(transaction.due_date)}
-                      </span>
-                      <span className="hidden md:inline">
-                        {formatFullDate(transaction.due_date)}
-                      </span>
+              <tbody className="divide-y divide-white/[0.06]">
+                {isLoading && (
+                  <tr>
+                    <td
+                      colSpan={8}
+                      className="px-5 py-12 text-center text-sm text-slate-400"
+                    >
+                      Carregando lançamentos...
                     </td>
+                  </tr>
+                )}
 
-                    <td className="min-w-0 px-3 py-4 md:px-4">
-                      <div
-                        className={
-                          density === "compact"
-                            ? "flex min-w-0 items-center gap-1.5 overflow-hidden"
-                            : ""
-                        }
+                {!isLoading &&
+                  transactions.map((transaction, index) => {
+                    const isLocked = isTransactionLocked(transaction);
+                    const isSelected = transaction.id === detailTransactionId;
+                    const TransactionIcon = getTransactionIcon(
+                      transaction,
+                      getCategorySpecialType(transaction),
+                    );
+
+                    return (
+                      <tr
+                        key={`${transaction.id}-${index}`}
+                        tabIndex={0}
+                        aria-selected={isSelected}
+                        onClick={() => setDetailTransactionId(transaction.id)}
+                        onKeyDown={(event) => {
+                          if (event.target !== event.currentTarget) return;
+                          if (event.key !== "Enter" && event.key !== " ") return;
+                          event.preventDefault();
+                          setDetailTransactionId(transaction.id);
+                        }}
+                        className={`cursor-pointer outline-none transition-colors focus-visible:bg-blue-500/5 ${
+                          isSelected ? "bg-blue-500/10" : ""
+                        }`}
                       >
-                        <div
-                          className={`transaction-description theme-text truncate font-medium ${
-                            density === "compact" ? "min-w-0 flex-1" : ""
-                          }`}
-                          title={transaction.description}
-                        >
-                          {transaction.description}
-                        </div>
+                        <td className="w-[76px] whitespace-nowrap px-3 py-4 tabular-nums md:w-[104px] md:px-5">
+                          <span className="block text-xs text-slate-300 md:text-[13px]">
+                            <span className="md:hidden">
+                              {formatShortDate(transaction.due_date)}
+                            </span>
+                            <span className="hidden md:inline">
+                              {formatFullDate(transaction.due_date)}
+                            </span>
+                          </span>
+                          <span className="block text-[11px] leading-4 text-slate-400">
+                            {formatWeekday(transaction.due_date, "short")}
+                          </span>
+                        </td>
 
-                        <div
-                          className={`transaction-badges flex ${
-                            density === "compact"
-                              ? "shrink-0 flex-nowrap items-center gap-1"
-                              : "mt-1 flex-wrap gap-2"
-                          }`}
-                        >
+                        <td className="min-w-0 px-3 py-4 md:px-4">
+                          <div className="flex min-w-0 items-center gap-3">
+                            <span
+                              aria-hidden="true"
+                              className={`inline-flex shrink-0 items-center justify-center rounded-lg ${
+                                density === "compact" ? "h-7 w-7" : "h-8 w-8"
+                              } ${getTypeBadgeClass(transaction.type)}`}
+                            >
+                              <TransactionIcon size={15} strokeWidth={2} />
+                            </span>
+
+                            <div className="min-w-0 flex-1">
+                              <div
+                                className={
+                                  density === "compact"
+                                    ? "flex min-w-0 items-center gap-2 overflow-hidden"
+                                    : "min-w-0"
+                                }
+                              >
+                                <div
+                                  className={`theme-text truncate text-[13px] font-medium md:text-sm ${
+                                    density === "compact" ? "min-w-0 flex-1" : ""
+                                  }`}
+                                  title={transaction.description}
+                                >
+                                  {transaction.description}
+                                </div>
+
+                                {(transaction.bankroll_integration_group_id ||
+                                  transaction.investment_integration_group_id) && (
+                                  <div
+                                    className={`transaction-badges flex ${
+                                      density === "compact"
+                                        ? "shrink-0 flex-nowrap items-center gap-1"
+                                        : "mt-1 flex-wrap items-center gap-1.5"
+                                    }`}
+                                  >
+                                    {transaction.bankroll_integration_group_id && (
+                                      <span
+                                        className={`${badgeBaseClass} bg-cyan-500/10 text-cyan-300`}
+                                      >
+                                        Origem: Bankroll Poker
+                                      </span>
+                                    )}
+                                    {transaction.investment_integration_group_id && (
+                                      <span
+                                        className={`${badgeBaseClass} bg-cyan-500/10 text-cyan-300`}
+                                      >
+                                        Origem: Investimentos
+                                      </span>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+
+                              <div className="mt-1 flex flex-wrap items-center gap-1 md:hidden">
+                                <span
+                                  className={`${badgeBaseClass} ${getTypeBadgeClass(transaction.type)}`}
+                                >
+                                  {transaction.type}
+                                </span>
+                                <span
+                                  className={`${badgeBaseClass} ${getStatusBadgeClass(transaction.status)}`}
+                                >
+                                  {transaction.status ?? "-"}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+                        </td>
+
+                        <td className="hidden w-[120px] px-3 py-4 md:table-cell">
                           <span
-                            className={`whitespace-nowrap rounded-full px-2.5 py-0.5 text-xs font-semibold ${
-                              transaction.type === "Receita"
-                                ? "bg-emerald-500/10 text-emerald-300"
-                                : transaction.type === "Transferência"
-                                  ? "bg-blue-500/10 text-blue-300"
-                                  : transaction.type === "Pagamento de Fatura"
-                                    ? "bg-cyan-500/10 text-cyan-300"
-                                    : "bg-red-500/10 text-red-300"
-                            }`}
+                            className={`${badgeBaseClass} ${getTypeBadgeClass(transaction.type)}`}
                           >
                             {transaction.type}
                           </span>
+                        </td>
 
-                          <span className="whitespace-nowrap rounded-full bg-white/[0.04] px-2.5 py-0.5 text-xs font-semibold text-slate-400">
-                            {transaction.status ?? "-"}
-                          </span>
-                          {transaction.bankroll_integration_group_id && (
-                            <span className="whitespace-nowrap rounded-full bg-cyan-500/10 px-2.5 py-0.5 text-xs font-semibold text-cyan-300">
-                              Origem: Bankroll Poker
+                        <td
+                          className="hidden w-[160px] max-w-[160px] truncate px-3 py-4 text-[13px] text-slate-300 md:table-cell"
+                          title={transaction.account?.name ?? undefined}
+                        >
+                          {transaction.account?.name ?? "-"}
+                        </td>
+
+                        <td
+                          className="hidden w-[136px] max-w-[136px] truncate px-3 py-4 text-[13px] text-slate-400 md:table-cell"
+                          title={transaction.category?.name ?? undefined}
+                        >
+                          {transaction.category?.name ?? "-"}
+                        </td>
+
+                        <td
+                          className={`w-[95px] whitespace-nowrap px-2 py-4 text-right text-xs font-semibold tabular-nums md:w-[124px] md:px-3 md:text-sm ${getValueColorClass(
+                            transaction.type,
+                          )}`}
+                        >
+                          {formatCurrency(transaction.value)}
+                        </td>
+
+                        <td className="hidden w-[116px] px-3 py-4 md:table-cell">
+                          <div className="flex flex-wrap items-center gap-1">
+                            <span
+                              className={`${badgeBaseClass} ${getStatusBadgeClass(transaction.status)}`}
+                            >
+                              {transaction.status ?? "-"}
                             </span>
-                          )}
-                          {transaction.investment_integration_group_id && (
-                            <span className="whitespace-nowrap rounded-full bg-cyan-500/10 px-2.5 py-0.5 text-xs font-semibold text-cyan-300">
-                              Origem: Investimentos
+                            {isLocked && (
+                              <span
+                                className={`${badgeBaseClass} gap-1 border border-white/10 text-slate-400`}
+                                title="Conta/cartão fechado nesta competência"
+                              >
+                                <Lock size={11} aria-hidden="true" />
+                                Fechada
+                              </span>
+                            )}
+                          </div>
+                        </td>
+
+                        <td className="w-[84px] px-2 py-4 text-right md:w-[92px] md:px-4">
+                          {isLocked ? (
+                            <span
+                              className="inline-flex h-8 w-8 items-center justify-center text-slate-400"
+                              title="Conta/cartão fechado nesta competência"
+                            >
+                              <Lock size={14} aria-hidden="true" />
+                              <span className="sr-only">Fechada</span>
                             </span>
+                          ) : (
+                            <div className="flex items-center justify-end gap-1">
+                              <button
+                                type="button"
+                                disabled={mutation.isPending}
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  void openEditDrawer(transaction);
+                                }}
+                                onKeyDown={(event) => event.stopPropagation()}
+                                title="Editar"
+                                aria-label="Editar lançamento"
+                                className="transaction-action inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-blue-400 transition-colors hover:bg-blue-500/10 hover:text-blue-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 disabled:cursor-not-allowed disabled:opacity-40"
+                              >
+                                <Pencil size={15} strokeWidth={2} aria-hidden="true" />
+                              </button>
+
+                              <button
+                                type="button"
+                                disabled={mutation.isPending}
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  void handleDeleteTransaction(transaction);
+                                }}
+                                onKeyDown={(event) => event.stopPropagation()}
+                                title="Excluir"
+                                aria-label="Excluir lançamento"
+                                className="transaction-action inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-red-400 transition-colors hover:bg-red-500/10 hover:text-red-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500/40 disabled:cursor-not-allowed disabled:opacity-40"
+                              >
+                                <Trash2 size={15} strokeWidth={2} aria-hidden="true" />
+                              </button>
+                            </div>
                           )}
-                        </div>
-                      </div>
-                    </td>
+                        </td>
+                      </tr>
+                    );
+                  })}
 
-                    <td className="hidden w-[180px] max-w-[180px] truncate px-4 py-4 text-slate-300 md:table-cell">
-                      {transaction.account?.name ?? "-"}
-                    </td>
-
-                    <td className="hidden w-[110px] max-w-[110px] truncate px-3 py-4 text-slate-300 md:table-cell">
-                      {transaction.category?.name ?? "-"}
-                    </td>
-
-                    <td
-                      className={`w-[95px] px-2 py-4 text-right text-xs font-semibold md:w-[120px] md:px-3 md:text-sm ${
-                        transaction.type === "Receita"
-                          ? "text-emerald-300"
-                          : transaction.type === "Transferência"
-                            ? "text-blue-300"
-                            : "text-red-300"
-                      }`}
-                    >
-                      {formatCurrency(transaction.value)}
-                    </td>
-
-                    <td className="w-[76px] px-2 py-4 text-right md:w-[90px] md:px-3">
-                      {isTransactionLocked(transaction) ? (
-                        <span className="rounded-full bg-emerald-500/10 px-3 py-1 text-xs font-medium text-emerald-300">
-                          Fechada
-                        </span>
-                      ) : (
-                        <div className="flex items-center justify-end gap-1 md:gap-2">
-                          <button
-                            type="button"
-                            disabled={mutation.isPending}
-                            onClick={() => void openEditDrawer(transaction)}
-                            title="Editar"
-                            aria-label="Editar lançamento"
-                            className="transaction-action inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-blue-400 hover:bg-blue-500/10 hover:text-blue-300"
-                          >
-                            <Pencil size={16} strokeWidth={2} />
-                          </button>
-
-                          <button
-                            type="button"
-                            disabled={mutation.isPending}
-                            onClick={() =>
-                              void handleDeleteTransaction(transaction)
-                            }
-                            title="Excluir"
-                            aria-label="Excluir lançamento"
-                            className="transaction-action inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-red-400 hover:bg-red-500/10 hover:text-red-300"
-                          >
-                            <Trash2 size={16} strokeWidth={2} />
-                          </button>
-                        </div>
-                      )}
+                {!isLoading && transactions.length === 0 && (
+                  <tr>
+                    <td colSpan={8} className="px-5 py-12 text-center">
+                      <p className="theme-text text-sm font-medium">
+                        Nenhum lançamento encontrado.
+                      </p>
+                      <p className="mt-1 text-xs text-slate-400">
+                        Ajuste a competência ou os filtros para ver outros
+                        lançamentos.
+                      </p>
                     </td>
                   </tr>
-                ))}
+                )}
+              </tbody>
+            </table>
+          </div>
 
-              {!isLoading && transactions.length === 0 && (
-                <tr>
-                  <td
-                    colSpan={6}
-                    className="px-5 py-10 text-center text-slate-400"
+          {detailTransaction &&
+            (() => {
+              const isDetailLocked = isTransactionLocked(detailTransaction);
+              const DetailIcon = getTransactionIcon(
+                detailTransaction,
+                getCategorySpecialType(detailTransaction),
+              );
+
+              return (
+                <>
+                  <div
+                    aria-hidden="true"
+                    className="transactions-overlay fixed inset-0 z-40 min-[1800px]:hidden"
+                    onMouseDown={() => setDetailTransactionId(null)}
+                  />
+
+                  <aside
+                    aria-labelledby="transaction-detail-title"
+                    className="transactions-drawer fixed inset-y-0 right-0 z-50 flex w-full max-w-md flex-col border-l shadow-2xl min-[1800px]:static min-[1800px]:z-auto min-[1800px]:max-w-none min-[1800px]:rounded-2xl min-[1800px]:border min-[1800px]:shadow-sm"
                   >
-                    Nenhum lançamento encontrado.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
+                    <div className="theme-divider flex items-center justify-between gap-3 border-b px-5 py-4">
+                      <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+                        Detalhes do lançamento
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => setDetailTransactionId(null)}
+                        className="theme-muted theme-hover flex h-9 w-9 shrink-0 items-center justify-center rounded-xl transition-colors"
+                        aria-label="Fechar detalhes"
+                        title="Fechar"
+                      >
+                        <X size={18} />
+                      </button>
+                    </div>
+
+                    <div className="flex-1 overflow-y-auto px-5 py-5">
+                      <div className="flex items-start gap-3">
+                        <span
+                          aria-hidden="true"
+                          className={`inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl ${getTypeBadgeClass(
+                            detailTransaction.type,
+                          )}`}
+                        >
+                          <DetailIcon size={20} strokeWidth={2} />
+                        </span>
+                        <div className="min-w-0">
+                          <h2
+                            id="transaction-detail-title"
+                            className="theme-text break-words text-lg font-semibold leading-snug tracking-tight"
+                          >
+                            {detailTransaction.description}
+                          </h2>
+                          <p
+                            className={`mt-1 text-2xl font-semibold tabular-nums tracking-tight ${getValueColorClass(
+                              detailTransaction.type,
+                            )}`}
+                          >
+                            {formatCurrency(detailTransaction.value)}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="mt-4 flex flex-wrap items-center gap-1.5">
+                        <span
+                          className={`${badgeBaseClass} ${getTypeBadgeClass(detailTransaction.type)}`}
+                        >
+                          {detailTransaction.type}
+                        </span>
+                        <span
+                          className={`${badgeBaseClass} ${getStatusBadgeClass(detailTransaction.status)}`}
+                        >
+                          {detailTransaction.status ?? "-"}
+                        </span>
+                        {isDetailLocked && (
+                          <span
+                            className={`${badgeBaseClass} gap-1 border border-white/10 text-slate-400`}
+                          >
+                            <Lock size={11} aria-hidden="true" />
+                            Fechada
+                          </span>
+                        )}
+                        {detailTransaction.bankroll_integration_group_id && (
+                          <span
+                            className={`${badgeBaseClass} bg-cyan-500/10 text-cyan-300`}
+                          >
+                            Origem: Bankroll Poker
+                          </span>
+                        )}
+                        {detailTransaction.investment_integration_group_id && (
+                          <span
+                            className={`${badgeBaseClass} bg-cyan-500/10 text-cyan-300`}
+                          >
+                            Origem: Investimentos
+                          </span>
+                        )}
+                      </div>
+
+                      <dl className="mt-5">
+                        <DetailField
+                          label="Data"
+                          value={
+                            <>
+                              {formatFullDate(detailTransaction.due_date)}
+                              <span className="block text-xs font-normal text-slate-400">
+                                {formatWeekday(detailTransaction.due_date, "long")}
+                              </span>
+                            </>
+                          }
+                        />
+                        <DetailField
+                          label="Competência"
+                          value={
+                            detailTransaction.competence?.name
+                              ? formatCompetenceLabel(
+                                  detailTransaction.competence.name,
+                                )
+                              : "-"
+                          }
+                        />
+                        <DetailField
+                          label="Conta / Cartão"
+                          value={detailTransaction.account?.name ?? "-"}
+                        />
+                        <DetailField
+                          label="Categoria"
+                          value={detailTransaction.category?.name ?? "-"}
+                        />
+                        {detailTransaction.mode && (
+                          <DetailField
+                            label="Forma"
+                            value={
+                              transactionModeLabels[detailTransaction.mode] ??
+                              detailTransaction.mode
+                            }
+                          />
+                        )}
+                      </dl>
+
+                      {isDetailLocked && (
+                        <p className="mt-4 flex items-start gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2.5 text-xs text-slate-400">
+                          <Lock size={14} className="mt-px shrink-0" aria-hidden="true" />
+                          Conta/cartão fechado nesta competência. Edição e
+                          exclusão estão bloqueadas.
+                        </p>
+                      )}
+                    </div>
+
+                    {!isDetailLocked && (
+                      <div className="theme-divider flex flex-col gap-2 border-t px-5 py-4 sm:flex-row">
+                        <button
+                          type="button"
+                          disabled={mutation.isPending}
+                          onClick={() => editFromDetail(detailTransaction)}
+                          className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white transition-colors hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          <Pencil size={15} aria-hidden="true" />
+                          Editar lançamento
+                        </button>
+                        <ProcessingButton
+                          busy={
+                            mutation.pending ===
+                            `handleDeleteTransaction:${detailTransaction.id}`
+                          }
+                          disabled={mutation.isPending}
+                          onClick={() =>
+                            void handleDeleteTransaction(detailTransaction)
+                          }
+                          className="inline-flex h-10 w-full items-center justify-center rounded-xl border border-red-500/30 px-4 text-sm font-semibold text-red-300 transition-colors hover:bg-red-500/10 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          <Trash2 size={15} aria-hidden="true" />
+                          Excluir lançamento
+                        </ProcessingButton>
+                      </div>
+                    )}
+                  </aside>
+                </>
+              );
+            })()}
         </div>
       </div>
 
@@ -2265,7 +2840,7 @@ function TransactionsPageContent() {
               <div className="mb-6">
                 <div className="mb-6 flex items-start justify-between gap-4">
                   <div>
-                    <h2 className="theme-text text-2xl font-bold">
+                    <h2 className="theme-text text-2xl font-semibold tracking-tight">
                       {editingTransactionId
                         ? "Editar lançamento"
                         : "Novo lançamento"}
