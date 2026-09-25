@@ -16,6 +16,7 @@ import {
   toCoordinate,
 } from "@/src/utils/fuelStationProximity";
 import { logFuelGeolocationDev } from "@/src/utils/fuelGeolocationDiagnostics";
+import { getSuggestedFuelFormPatch } from "@/src/utils/fuelTransactionDefaults";
 
 export const INITIAL_NEARBY_FUEL_STATION_RADIUS_METERS = 1500;
 
@@ -145,6 +146,33 @@ export async function loadFuelRecords(): Promise<FuelRecord[]> {
   const { data, error } = await supabase.from("fuel_records").select(`id, transaction_id, vehicle_id, fuel_station_id, fuel_type, odometer, liters, price_per_liter, total_value, full_tank, latitude, longitude, recorded_at, created_at, transaction:transactions!fuel_records_transaction_id_fkey(due_date, description), vehicle:vehicles!fuel_records_vehicle_id_fkey(name), station:fuel_stations!fuel_records_fuel_station_id_fkey(name, google_rating)`).eq("owner_id", ownerId);
   if (error) throw new Error(error.message);
   return (data ?? []) as unknown as FuelRecord[];
+}
+
+// Base para preencher um novo abastecimento a partir de uma descrição sugerida.
+// É apenas uma conveniência: qualquer falha resulta em nenhum preenchimento.
+export async function loadSuggestedFuelFormPatch(
+  transactionId: string,
+  ownerId: string
+) {
+  const { data, error } = await supabase
+    .from("fuel_records")
+    .select("vehicle_id, fuel_type, vehicle:vehicles!fuel_records_vehicle_id_fkey(active)")
+    .eq("transaction_id", transactionId)
+    .eq("owner_id", ownerId)
+    .maybeSingle();
+
+  if (error) {
+    console.warn("Não foi possível reaproveitar o último abastecimento:", error);
+    return {};
+  }
+  if (!data) return {};
+
+  const vehicle = Array.isArray(data.vehicle) ? data.vehicle[0] : data.vehicle;
+  return getSuggestedFuelFormPatch({
+    vehicle_id: data.vehicle_id,
+    fuel_type: data.fuel_type,
+    vehicle_active: vehicle?.active === true,
+  });
 }
 
 export async function removeFuelRecordForTransaction(transactionId: string) {

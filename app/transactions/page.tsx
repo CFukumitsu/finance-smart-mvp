@@ -46,7 +46,10 @@ import FuelTransactionFields, {
   type FuelForm,
 } from "@/src/components/fuel/FuelTransactionFields";
 import { parsePtBrNumber } from "@/src/utils/fuelCalculations";
-import { removeFuelRecordForTransaction } from "@/src/services/fuelService";
+import {
+  loadSuggestedFuelFormPatch,
+  removeFuelRecordForTransaction,
+} from "@/src/services/fuelService";
 import { ensureAccountIsOpen } from "@/src/utils/accountLock";
 import {
   ensureCompetenceExists,
@@ -600,7 +603,7 @@ function TransactionsPageContent() {
 
       const { data, error } = await supabase
         .from("transactions")
-        .select("category_id, type")
+        .select("id, category_id, type, account_id")
         .eq("owner_id", ownerId)
         .eq("description", description)
         .not("category_id", "is", null)
@@ -624,6 +627,29 @@ function TransactionsPageContent() {
       }
 
       const isFuel = category.special_type === "fuel";
+      const isNewTransaction = editingTransactionId === null;
+
+      // Em novo abastecimento, reaproveita a conta/cartão e os dados que se
+      // repetem do último lançamento com a mesma descrição. Na edição, só a
+      // categoria continua sendo sugerida, como antes.
+      const suggestedAccountId =
+        isFuel &&
+        isNewTransaction &&
+        data.account_id &&
+        financialLedgerAccounts.some((account) => account.id === data.account_id)
+          ? data.account_id
+          : null;
+
+      // Os dados do abastecimento são buscados antes de marcar a categoria para
+      // que o bloco de combustível já monte com o veículo correto.
+      const fuelPatch =
+        isFuel && isNewTransaction
+          ? await loadSuggestedFuelFormPatch(data.id, ownerId)
+          : {};
+
+      if (Object.keys(fuelPatch).length > 0) {
+        setFuelForm((current) => ({ ...current, ...fuelPatch }));
+      }
 
       setForm((current) => ({
         ...current,
@@ -634,6 +660,7 @@ function TransactionsPageContent() {
         status: isFuel
           ? getAutomaticStatus("Despesa", current.due_date)
           : current.status,
+        account_id: suggestedAccountId ?? current.account_id,
       }));
 
       updateTransactionDefaults({
@@ -644,6 +671,7 @@ function TransactionsPageContent() {
               status: getAutomaticStatus("Despesa", form.due_date),
             }
           : {}),
+        ...(suggestedAccountId ? { account_id: suggestedAccountId } : {}),
       });
     } catch (error) {
       console.error("Erro ao aplicar categoria da descrição sugerida:", error);

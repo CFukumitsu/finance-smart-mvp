@@ -21,6 +21,7 @@ import {
 } from "@/src/utils/fuelStationProximity";
 import {
   DEFAULT_NEW_FUEL_TYPE,
+  FUEL_TYPE_OPTIONS,
   getAutomaticVehicleSelectionPatch,
 } from "@/src/utils/fuelTransactionDefaults";
 
@@ -356,7 +357,7 @@ export default function FuelTransactionFields({
           onChange={(event) => applyChange({ fuel_type: event.target.value })}
           className="rounded-xl bg-slate-900 p-3 text-white"
         >
-          {["Gasolina comum", "Gasolina aditivada", "Gasolina premium", "Etanol", "Diesel S10", "Diesel S500", "GNV", "Energia elétrica", "Outro"].map((fuel) => (
+          {FUEL_TYPE_OPTIONS.map((fuel) => (
             <option key={fuel}>{fuel}</option>
           ))}
         </select>
