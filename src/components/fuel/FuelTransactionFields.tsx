@@ -57,7 +57,7 @@ export const emptyFuelForm: FuelForm = {
   odometer: "",
   liters: "",
   price_per_liter: "",
-  full_tank: false,
+  full_tank: true,
   latitude: "",
   longitude: "",
 };
