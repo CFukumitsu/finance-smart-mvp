@@ -1,5 +1,6 @@
 "use client";
 
+import { ProcessingButton, MutationScope } from "@/src/components/ui/Mutation";
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { Pencil, Plus, Search, Trash2, X } from "lucide-react";
@@ -79,9 +80,11 @@ export function InvestmentToolbar({
 }
 
 export function InvestmentAddButton({
+  disabled = false,
   onClick,
   children,
 }: {
+  disabled?: boolean;
   onClick: () => void;
   children: ReactNode;
 }) {
@@ -89,6 +92,7 @@ export function InvestmentAddButton({
     <button
       type="button"
       onClick={onClick}
+      disabled={disabled}
       className="flex items-center justify-center gap-2 rounded-xl bg-cyan-500 px-4 py-2.5 text-sm font-black text-slate-950 transition hover:bg-cyan-300"
     >
       <Plus size={17} />
@@ -146,9 +150,13 @@ export function InvestmentTd({
 }
 
 export function InvestmentActions({
+  busy = false,
+  disabled = false,
   onEdit,
   onDelete,
 }: {
+  busy?: boolean;
+  disabled?: boolean;
   onEdit: () => void;
   onDelete: () => void;
 }) {
@@ -159,11 +167,12 @@ export function InvestmentActions({
         aria-label="Editar"
         title="Editar"
         onClick={onEdit}
+        disabled={disabled}
         className="rounded-lg border border-cyan-400/20 p-2 text-cyan-300 transition hover:bg-cyan-500/10"
       >
         <Pencil size={15} />
       </button>
-      <button
+      <ProcessingButton busy={busy} disabled={disabled}
         type="button"
         aria-label="Excluir"
         title="Excluir"
@@ -171,7 +180,7 @@ export function InvestmentActions({
         className="rounded-lg border border-red-400/20 p-2 text-red-300 transition hover:bg-red-500/10"
       >
         <Trash2 size={15} />
-      </button>
+      </ProcessingButton>
     </div>
   );
 }
@@ -200,23 +209,26 @@ export function InvestmentModal({
   title,
   close,
   saving,
+  isLocked,
   submit,
   children,
 }: {
   title: string;
   close: () => void;
   saving: boolean;
+  isLocked: () => boolean;
   submit: () => void;
   children: ReactNode;
 }) {
   useModalShortcuts({
     enabled: true,
+    isBlocked: isLocked,
     onEscape: close,
     onEnter: submit,
   });
 
   return (
-    <div
+    <MutationScope busy={saving} isLocked={isLocked}><div
       role="dialog"
       aria-modal="true"
       aria-label={title}
@@ -247,17 +259,17 @@ export function InvestmentModal({
           >
             Cancelar
           </button>
-          <button
+          <ProcessingButton busy={saving}
             type="button"
             onClick={submit}
             disabled={saving}
             className="rounded-xl bg-cyan-500 px-5 py-2.5 text-sm font-black text-slate-950 hover:bg-cyan-300 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {saving ? "Salvando..." : "Salvar"}
-          </button>
+          </ProcessingButton>
         </div>
       </div>
-    </div>
+    </div></MutationScope>
   );
 }
 

@@ -1,5 +1,8 @@
 "use client";
 
+
+import { useMutation } from "@/src/hooks/useMutation";
+import { ProcessingButton, MutationScope } from "@/src/components/ui/Mutation";
 import { useEffect, useMemo, useState } from "react";
 import {
   Check,
@@ -84,6 +87,7 @@ const emptyForm = {
 };
 
 export default function FuelStationsPage() {
+  const mutation = useMutation();
   const [stations, setStations] = useState<FuelStation[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
@@ -549,6 +553,9 @@ export default function FuelStationsPage() {
   }
 
   async function saveStation() {
+    return mutation.run("saveStation", async () => {
+      try {
+
     const name = form.name.trim();
     const latitude = parseCoordinate(form.latitude);
     const longitude = parseCoordinate(form.longitude);
@@ -670,9 +677,14 @@ export default function FuelStationsPage() {
     } finally {
       setIsSaving(false);
     }
+
+      } finally { setIsSaving(false); }
+    });
   }
 
   async function toggleStationStatus(station: FuelStation) {
+    return mutation.run("toggleStationStatus" + ":" + (station).id, async () => {
+
     const action = station.active ? "inativar" : "ativar";
 
     const confirmed = window.confirm(
@@ -703,6 +715,8 @@ export default function FuelStationsPage() {
       console.error("Erro ao alterar status do posto:", error);
       alert("Erro ao alterar status do posto.");
     }
+
+    });
   }
 
   function openStationMap(station: FuelStation) {
@@ -896,7 +910,7 @@ export default function FuelStationsPage() {
                             <Pencil size={18} />
                           </button>
 
-                          <button
+                          <ProcessingButton busy={mutation.pending === ("toggleStationStatus" + ":" + (station).id)} disabled={mutation.isPending}
                             type="button"
                             onClick={() => toggleStationStatus(station)}
                             title={station.active ? "Inativar" : "Ativar"}
@@ -911,7 +925,7 @@ export default function FuelStationsPage() {
                             ) : (
                               <Power size={18} />
                             )}
-                          </button>
+                          </ProcessingButton>
                         </div>
                       </td>
                     </tr>
@@ -934,7 +948,7 @@ export default function FuelStationsPage() {
       </div>
 
       {isDrawerOpen && (
-        <div className="fixed inset-0 z-50 flex justify-end bg-black/60">
+        <MutationScope busy={mutation.isPending} isLocked={mutation.isLocked}><div className="fixed inset-0 z-50 flex justify-end bg-black/60">
           <div className="h-full w-full max-w-xl overflow-y-auto border-l border-white/10 bg-slate-950 p-6 shadow-2xl">
             <div className="mb-6 flex items-center justify-between gap-4">
               <div>
@@ -1395,10 +1409,10 @@ export default function FuelStationsPage() {
                   Cancelar
                 </button>
 
-                <button
+                <ProcessingButton busy={mutation.pending === ("saveStation")}
                   type="button"
                   onClick={saveStation}
-                  disabled={isSaving}
+                  disabled={mutation.isPending || (isSaving)}
                   className="flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 py-3 font-semibold text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   <Check size={18} />
@@ -1408,11 +1422,11 @@ export default function FuelStationsPage() {
                     : editingStationId
                       ? "Atualizar posto"
                       : "Salvar posto"}
-                </button>
+                </ProcessingButton>
               </div>
             </div>
           </div>
-        </div>
+        </div></MutationScope>
       )}
     </AppShell>
   );

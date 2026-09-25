@@ -1,5 +1,6 @@
 "use client";
 
+import { useMutation } from "@/src/hooks/useMutation";
 import { useCallback, useMemo, useRef, useState } from "react";
 import { deleteInvestmentValuation, saveInvestmentValuation } from "@/src/services/investmentService";
 import type { InvestmentData, InvestmentExchangeContext, InvestmentMonthlyValuation } from "@/src/types/investments";
@@ -34,6 +35,7 @@ type ValuationForm = {
 };
 
 export default function InvestmentValuations({ data, exchangeContext, reload }: { data: InvestmentData; exchangeContext: InvestmentExchangeContext; reload: () => Promise<void> }) {
+  const mutation = useMutation();
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState("month-desc");
   const [open, setOpen] = useState(false);
@@ -113,6 +115,9 @@ export default function InvestmentValuations({ data, exchangeContext, reload }: 
   }
 
   async function submit() {
+    return mutation.run("submit", async () => {
+      try {
+
     if (submissionLock.current) return;
     const unitValue = parseInvestmentDecimal(form.unitValue);
     const totalValue = parseInvestmentDecimal(form.totalValue);
@@ -148,13 +153,20 @@ export default function InvestmentValuations({ data, exchangeContext, reload }: 
       submissionLock.current = false;
       setSaving(false);
     }
+
+      } finally { setSaving(false); }
+    });
   }
 
   async function remove(valuation: InvestmentMonthlyValuation) {
+    return mutation.run("remove" + ":" + (valuation).id, async () => {
+
     const asset = assetsById.get(valuation.asset_id);
     if (!confirm(`Excluir a valorização de ${asset?.name ?? "este ativo"} em ${formatInvestmentMonth(valuation.reference_month)}?`)) return;
     try { await deleteInvestmentValuation(valuation.id); await reload(); }
     catch (value) { alert(value instanceof Error ? value.message : "Não foi possível excluir."); }
+
+    });
   }
 
   return <section className="space-y-4">
@@ -166,7 +178,7 @@ export default function InvestmentValuations({ data, exchangeContext, reload }: 
       <select aria-label="Ordenação das valorizações" className={investmentField} value={sort} onChange={(event) => setSort(event.target.value)}>
         <option value="month-desc">Mês mais recente</option><option value="month-asc">Mês mais antigo</option><option value="asset">Ativo</option>
       </select>
-      <InvestmentAddButton onClick={() => show()}>Nova valorização</InvestmentAddButton>
+      <InvestmentAddButton disabled={mutation.isPending} onClick={() => show()}>Nova valorização</InvestmentAddButton>
     </InvestmentToolbar>
 
     {rows.length ? <InvestmentTable headers={["Mês", "Ativo", "Preço por unidade", "Valor da posição", "Valor consolidado", "Observações", "Ações"]} minWidth="1040px">
@@ -179,12 +191,12 @@ export default function InvestmentValuations({ data, exchangeContext, reload }: 
           <InvestmentTd>{valuation.total_market_value === null ? "—" : formatInvestmentMoney(valuation.total_market_value, valuation.currency)}</InvestmentTd>
           <InvestmentTd>{valuation.total_market_value === null ? "—" : formatInvestmentMoney(valuation.total_market_value * valuation.exchange_rate, valuation.consolidation_currency)}</InvestmentTd>
           <InvestmentTd>{valuation.notes || "—"}</InvestmentTd>
-          <InvestmentTd><InvestmentActions onEdit={() => show(valuation)} onDelete={() => void remove(valuation)} /></InvestmentTd>
+          <InvestmentTd><InvestmentActions disabled={mutation.isPending} busy={mutation.pending === ("remove" + ":" + (valuation).id)} onEdit={() => show(valuation)} onDelete={() => void remove(valuation)} /></InvestmentTd>
         </tr>;
       })}
     </InvestmentTable> : <InvestmentEmpty title="Nenhuma valorização encontrada" text={data.assets.length ? "Registre o primeiro valor mensal de mercado." : "Cadastre um ativo antes de informar valorizações."} href={data.assets.length ? undefined : "/investments/assets"} actionLabel="Cadastrar ativo" />}
 
-    {open && <InvestmentModal title={editing ? "Editar valorização" : "Nova valorização"} close={close} saving={saving} submit={submit}>
+    {open && <InvestmentModal isLocked={mutation.isLocked} title={editing ? "Editar valorização" : "Nova valorização"} close={close} saving={mutation.isPending || (saving)} submit={submit}>
       <div className="grid gap-4 sm:grid-cols-2">
         <InvestmentInput label="Mês"><input autoFocus type="month" className={investmentField} value={form.month} disabled={Boolean(editing)} onChange={(event) => setForm({ ...form, month: event.target.value, unitValue: "", totalValue: "" })} /></InvestmentInput>
         <InvestmentInput label="Ativo"><select className={investmentField} value={form.assetId} disabled={Boolean(editing)} onChange={(event) => setForm({ ...form, assetId: event.target.value, unitValue: "", totalValue: "" })}>

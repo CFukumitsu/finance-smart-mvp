@@ -1,5 +1,7 @@
 "use client";
 
+
+import { useMutation } from "@/src/hooks/useMutation";
 import { useCallback, useMemo, useRef, useState } from "react";
 import {
   deleteInvestmentAsset,
@@ -37,6 +39,7 @@ export default function InvestmentAssets({
   data: InvestmentData;
   reload: () => Promise<void>;
 }) {
+  const mutation = useMutation();
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState<"active" | "inactive" | "all">("active");
   const [sort, setSort] = useState("name-asc");
@@ -103,6 +106,9 @@ export default function InvestmentAssets({
   }
 
   async function submit() {
+    return mutation.run("submit", async () => {
+      try {
+
     if (submissionLock.current) return;
 
     const name = form.name.trim();
@@ -137,9 +143,14 @@ export default function InvestmentAssets({
       submissionLock.current = false;
       setSaving(false);
     }
+
+      } finally { setSaving(false); }
+    });
   }
 
   async function remove(asset: InvestmentAsset) {
+    return mutation.run("remove" + ":" + (asset).id, async () => {
+
     if (!confirm(`Excluir o ativo "${asset.name}"?`)) return;
 
     try {
@@ -150,6 +161,8 @@ export default function InvestmentAssets({
         value instanceof Error ? value.message : "Não foi possível excluir.",
       );
     }
+
+    });
   }
 
   return (
@@ -178,7 +191,7 @@ export default function InvestmentAssets({
           <option value="type">Tipo</option>
           <option value="currency">Moeda</option>
         </select>
-        <InvestmentAddButton onClick={() => show()}>
+        <InvestmentAddButton disabled={mutation.isPending} onClick={() => show()}>
           Novo ativo
         </InvestmentAddButton>
       </InvestmentToolbar>
@@ -198,7 +211,7 @@ export default function InvestmentAssets({
                 <InvestmentStatus active={asset.active} />
               </InvestmentTd>
               <InvestmentTd>
-                <InvestmentActions
+                <InvestmentActions disabled={mutation.isPending} busy={mutation.pending === ("remove" + ":" + (asset).id)}
                   onEdit={() => show(asset)}
                   onDelete={() => void remove(asset)}
                 />
@@ -222,10 +235,10 @@ export default function InvestmentAssets({
       )}
 
       {open && (
-        <InvestmentModal
+        <InvestmentModal isLocked={mutation.isLocked}
           title={editing ? "Editar ativo" : "Novo ativo"}
           close={close}
-          saving={saving}
+          saving={mutation.isPending || (saving)}
           submit={submit}
         >
           <InvestmentInput label="Nome">

@@ -1,5 +1,8 @@
 "use client";
 
+
+import { useMutation } from "@/src/hooks/useMutation";
+import { ProcessingButton } from "@/src/components/ui/Mutation";
 import { useState } from "react";
 import AppShell from "../components/layout/AppShell";
 import { getCurrentUserId, supabase } from "@/src/lib/supabase";
@@ -36,6 +39,7 @@ type ImportLog = {
 };
 
 export default function ImportAccessPage() {
+  const mutation = useMutation();
   const [pagamentoFile, setPagamentoFile] = useState<File | null>(null);
   const [tipoGastoFile, setTipoGastoFile] = useState<File | null>(null);
   const [transacaoFile, setTransacaoFile] = useState<File | null>(null);
@@ -86,6 +90,8 @@ export default function ImportAccessPage() {
   }
 
   async function clearDatabase() {
+    return mutation.run("clearDatabase", async () => {
+
     const confirmed = window.confirm(
       "Atenção: isso vai apagar lançamentos, competências, categorias e contas do banco atual. Confirma?"
     );
@@ -127,9 +133,13 @@ export default function ImportAccessPage() {
     } finally {
       setIsImporting(false);
     }
+
+    });
   }
 
   async function importAccessData() {
+    return mutation.run("importAccessData", async () => {
+
     if (!pagamentoFile || !tipoGastoFile || !transacaoFile) {
       alert("Selecione os três arquivos: PAGAMENTO, TIPOGASTO e TRANSACAO.");
       return;
@@ -327,6 +337,8 @@ export default function ImportAccessPage() {
     } finally {
       setIsImporting(false);
     }
+
+    });
   }
 
   return (
@@ -350,7 +362,7 @@ export default function ImportAccessPage() {
             <p className="mb-3 mt-1 text-xs text-slate-400">
               Contas e cartões
             </p>
-            <input
+            <input disabled={mutation.isPending}
               type="file"
               accept=".xlsx,.xls"
               onChange={(event) =>
@@ -363,7 +375,7 @@ export default function ImportAccessPage() {
           <label className="rounded-2xl border border-white/10 bg-slate-950/60 p-5">
             <p className="font-semibold text-white">TIPOGASTO.xlsx</p>
             <p className="mb-3 mt-1 text-xs text-slate-400">Categorias</p>
-            <input
+            <input disabled={mutation.isPending}
               type="file"
               accept=".xlsx,.xls"
               onChange={(event) =>
@@ -376,7 +388,7 @@ export default function ImportAccessPage() {
           <label className="rounded-2xl border border-white/10 bg-slate-950/60 p-5">
             <p className="font-semibold text-white">TRANSACAO.xlsx</p>
             <p className="mb-3 mt-1 text-xs text-slate-400">Lançamentos</p>
-            <input
+            <input disabled={mutation.isPending}
               type="file"
               accept=".xlsx,.xls"
               onChange={(event) =>
@@ -388,21 +400,21 @@ export default function ImportAccessPage() {
         </div>
 
         <div className="flex flex-col gap-3 md:flex-row">
-          <button
+          <ProcessingButton busy={mutation.pending === ("clearDatabase")}
             onClick={clearDatabase}
-            disabled={isImporting}
+            disabled={mutation.isPending || (isImporting)}
             className="rounded-xl border border-red-500/30 px-5 py-3 font-semibold text-red-300 hover:bg-red-500/10 disabled:cursor-not-allowed disabled:opacity-50"
           >
             Limpar base
-          </button>
+          </ProcessingButton>
 
-          <button
+          <ProcessingButton busy={mutation.pending === ("importAccessData")}
             onClick={importAccessData}
-            disabled={isImporting}
+            disabled={mutation.isPending || (isImporting)}
             className="rounded-xl bg-blue-600 px-5 py-3 font-semibold text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {isImporting ? "Processando..." : "Importar dados"}
-          </button>
+          </ProcessingButton>
         </div>
 
         <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-5">

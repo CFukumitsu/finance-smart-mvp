@@ -1,5 +1,6 @@
 "use client";
 
+import { useMutation } from "@/src/hooks/useMutation";
 import { useCallback, useMemo, useRef, useState } from "react";
 import {
   deleteInvestmentAccountEvent,
@@ -48,6 +49,7 @@ export default function InvestmentAccountEvents({
   data: InvestmentData;
   reload: () => Promise<void>;
 }) {
+  const mutation = useMutation();
   const balanceAccounts = data.accounts.filter(
     (account) => account.investment_account_kind === "BALANCE",
   );
@@ -127,6 +129,9 @@ export default function InvestmentAccountEvents({
   }
 
   async function submit() {
+    return mutation.run("submit", async () => {
+      try {
+
     if (submissionLock.current) return;
     const amount = parseInvestmentMoney(form.amount);
     if (!form.date) return alert("Informe a data.");
@@ -166,9 +171,14 @@ export default function InvestmentAccountEvents({
       submissionLock.current = false;
       setSaving(false);
     }
+
+      } finally { setSaving(false); }
+    });
   }
 
   async function remove(event: InvestmentAccountEvent) {
+    return mutation.run("remove" + ":" + (event).id, async () => {
+
     if (!confirm(`Excluir ${eventLabels[event.event_type].toLowerCase()}?`)) return;
     try {
       await deleteInvestmentAccountEvent(event.id);
@@ -180,6 +190,8 @@ export default function InvestmentAccountEvents({
           : "Não foi possível excluir a movimentação.",
       );
     }
+
+    });
   }
 
   const selectedInvestmentAccount = accountsById.get(form.investmentAccountId);
@@ -197,7 +209,7 @@ export default function InvestmentAccountEvents({
           </p>
         </div>
         {balanceAccounts.length > 0 && (
-          <InvestmentAddButton onClick={() => show()}>
+          <InvestmentAddButton disabled={mutation.isPending} onClick={() => show()}>
             Nova movimentação
           </InvestmentAddButton>
         )}
@@ -253,7 +265,7 @@ export default function InvestmentAccountEvents({
                   </span>
                 </InvestmentTd>
                 <InvestmentTd>
-                  <InvestmentActions
+                  <InvestmentActions disabled={mutation.isPending} busy={mutation.pending === ("remove" + ":" + (event).id)}
                     onEdit={() => show(event)}
                     onDelete={() => void remove(event)}
                   />
@@ -276,10 +288,10 @@ export default function InvestmentAccountEvents({
       )}
 
       {open && (
-        <InvestmentModal
+        <InvestmentModal isLocked={mutation.isLocked}
           title={editing ? "Editar movimentação" : "Nova movimentação"}
           close={close}
-          saving={saving}
+          saving={mutation.isPending || (saving)}
           submit={submit}
         >
           <div className="grid gap-4 sm:grid-cols-2">

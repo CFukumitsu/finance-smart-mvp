@@ -1,5 +1,7 @@
 "use client";
 
+import { useMutation } from "@/src/hooks/useMutation";
+import { ProcessingButton, MutationScope } from "@/src/components/ui/Mutation";
 import {
   loadActiveImportLayout,
   removeActiveImportLayout,
@@ -699,6 +701,7 @@ async function syncStatementItems(
 }
 
 export default function ReconciliationPage() {
+  const mutation = useMutation();
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [selectedAccountId, setSelectedAccountId] = useState("");
   const [competences, setCompetences] = useState<
@@ -1271,6 +1274,8 @@ export default function ReconciliationPage() {
   }
 
   async function loadSelectedReconciliation() {
+    return mutation.run("loadSelectedReconciliation", async () => {
+
     if (!selectedAccountId || !selectedCompetenceId) {
       alert("Selecione conta/cartão e competência.");
       return;
@@ -1304,6 +1309,8 @@ export default function ReconciliationPage() {
     } finally {
       setIsProcessing(false);
     }
+
+    });
   }
 
   function extractHeaderOptions(rows: unknown[][], headerRowIndex: number) {
@@ -1741,6 +1748,8 @@ export default function ReconciliationPage() {
   }
 
   async function removeCurrentLayout() {
+    return mutation.run("removeCurrentLayout", async () => {
+
     if (!activeLayout || !selectedAccountId) return;
     const confirmed = window.confirm(
       "O layout deixará de ser utilizado nas próximas importações. Os dados já importados permanecerão inalterados."
@@ -1759,9 +1768,13 @@ export default function ReconciliationPage() {
     } finally {
       setIsManagingLayout(false);
     }
+
+    });
   }
 
   async function saveImportLayout() {
+    return mutation.run("saveImportLayout", async () => {
+
     if (!selectedAccountId) {
       alert("Selecione uma conta/cartão.");
       return;
@@ -1803,6 +1816,8 @@ export default function ReconciliationPage() {
     } finally {
       setIsManagingLayout(false);
     }
+
+    });
   }
 
   function openCreateTransactionDrawer(item: ImportedItem) {
@@ -1819,6 +1834,8 @@ export default function ReconciliationPage() {
   }
 
   async function createTransactionFromImportedItem() {
+    return mutation.run("createTransactionFromImportedItem", async () => {
+
     if (!itemToCreateTransaction) return;
 
     const ownerId = await getCurrentUserId();
@@ -1893,6 +1910,8 @@ export default function ReconciliationPage() {
     );
 
     setItemToCreateTransaction(null);
+
+    });
   }
 
   function openEditTransactionDrawer(item: ImportedItem) {
@@ -1911,6 +1930,8 @@ export default function ReconciliationPage() {
   }
 
   async function updateTransactionFromReconciliation() {
+    return mutation.run("updateTransactionFromReconciliation", async () => {
+
     if (!itemToEditTransaction?.matchedTransaction) return;
 
     const ownerId = await getCurrentUserId();
@@ -1955,6 +1976,8 @@ export default function ReconciliationPage() {
     );
 
     setItemToEditTransaction(null);
+
+    });
   }
 
   function getCandidateTransactions(item: ImportedItem) {
@@ -2049,6 +2072,8 @@ export default function ReconciliationPage() {
   }
 
   async function manuallyReconcile(item: ImportedItem, transactionId: string) {
+    return mutation.run("manuallyReconcile:" + item.id + ":" + transactionId, async () => {
+
     if (!selectedAccountId || !selectedCompetenceId) {
       alert("Selecione conta/cartão e competência.");
       return;
@@ -2117,12 +2142,16 @@ export default function ReconciliationPage() {
     );
 
     setItemToReconcile(null);
+
+    });
   }
 
   async function reconcileAndAdjustLinkedTotal(
     item: ImportedItem,
     transaction: Transaction & { alreadyReconciled: number }
   ) {
+    return mutation.run("reconcileAndAdjustLinkedTotal:" + item.id + ":" + transaction.id, async () => {
+
     const adjustedValue = calculateAdjustedTransactionValue(transaction.alreadyReconciled, item.value);
 
     const confirmed = window.confirm(
@@ -2204,9 +2233,13 @@ export default function ReconciliationPage() {
     );
 
     setItemToReconcile(null);
+
+    });
   }
 
   async function unlinkReconciliation(item: ImportedItem) {
+    return mutation.run("unlinkReconciliation" + ":" + (item).id, async () => {
+
     if (!item.id) return;
 
     try {
@@ -2230,9 +2263,13 @@ export default function ReconciliationPage() {
           : currentItem
       )
     );
+
+    });
   }
 
   async function ignoreStatementItem(item: ImportedItem) {
+    return mutation.run("ignoreStatementItem" + ":" + (item).id, async () => {
+
     if (!item.id) return;
 
     try {
@@ -2246,6 +2283,8 @@ export default function ReconciliationPage() {
     setItems((previousItems) =>
       previousItems.filter((currentItem) => currentItem.id !== item.id)
     );
+
+    });
   }
 
   function resetImportedStatement() {
@@ -2263,6 +2302,8 @@ export default function ReconciliationPage() {
   }
 
   async function reopenStatement() {
+    return mutation.run("reopenStatement", async () => {
+
     const ownerId = await getCurrentUserId();
     if (!closedStatement?.id) {
       alert("Nenhuma fatura fechada encontrada.");
@@ -2307,9 +2348,13 @@ export default function ReconciliationPage() {
       console.error("Erro ao reabrir fatura:", error);
       alert("Erro ao reabrir fatura.");
     }
+
+    });
   }
 
   async function closeStatementAndCreatePayment() {
+    return mutation.run("closeStatementAndCreatePayment", async () => {
+
     if (isClosingStatementRef.current) return;
 
     isClosingStatementRef.current = true;
@@ -2504,6 +2549,8 @@ export default function ReconciliationPage() {
       isClosingStatementRef.current = false;
       setIsClosingStatement(false);
     }
+
+    });
   }
 
   const visibleCandidateTransactions = itemToReconcile
@@ -2511,6 +2558,85 @@ export default function ReconciliationPage() {
         normalizeText(transaction.description).includes(normalizeText(candidateSearch))
       )
     : [];
+
+  async function unlinkAllReconciliations() {
+    return mutation.run("unlinkAllReconciliations", async () => {
+
+                  if (!confirm("Deseja realmente desfazer TODAS as conciliações desta competência?")) {
+                    return;
+                  }
+
+                  const statementItemIds = items
+                    .map((item) => item.id)
+                    .filter(Boolean) as string[];
+
+                  if (statementItemIds.length === 0) {
+                    return;
+                  }
+
+                  const ownerId = await getCurrentUserId();
+
+                  const { error: deleteLinksError } = await supabase
+                    .from("credit_card_statement_item_transactions")
+                    .delete()
+                    .eq("owner_id", ownerId)
+                    .in("statement_item_id", statementItemIds);
+
+                  if (deleteLinksError) {
+                    alert("Erro ao desfazer as conciliações.");
+                    return;
+                  }
+
+                  const { error } = await supabase
+                    .from("credit_card_statement_items")
+                    .update({
+                      status: "Pendente",
+                      ignored_reason: null,
+                      updated_at: new Date().toISOString(),
+                    })
+                    .eq("owner_id", ownerId)
+                    .in("id", statementItemIds);
+
+                  if (error) {
+                    alert("Erro ao desfazer as conciliações.");
+                    return;
+                  }
+
+                  setItems((items) =>
+                    items.map((item) => ({
+                      ...item,
+                      status: "Pendente",
+                      matched: false,
+                      matchedTransactionId: undefined,
+                      matchedTransaction: undefined,
+                    }))
+                  );
+
+                  alert("Conciliações removidas com sucesso.");
+
+    });
+  }
+
+  async function reloadReconciliation() {
+    return mutation.run("reloadReconciliation", async () => {
+
+                  if (selectedFile) {
+                    await handleFileUpload(selectedFile);
+                    return;
+                  }
+
+                  if (!selectedAccountId || !selectedCompetenceId) {
+                    alert("Selecione conta/cartão e competência.");
+                    return;
+                  }
+
+                  await loadPersistedStatement(selectedAccountId, selectedCompetenceId).catch((error) => {
+                    console.error("Erro ao recarregar conferência:", error);
+                    alert("Erro ao recarregar conferência.");
+                  });
+
+    });
+  }
 
   return (
     <AppShell>
@@ -2523,7 +2649,7 @@ export default function ReconciliationPage() {
         </div>
 
         <div className="grid gap-4 rounded-2xl border border-white/10 bg-slate-950/60 p-6 md:grid-cols-2">
-          <select
+          <select disabled={mutation.isPending}
             value={selectedAccountId}
             onChange={async (event) => {
               const accountId = event.target.value;
@@ -2555,7 +2681,7 @@ export default function ReconciliationPage() {
             ))}
           </select>
 
-          <select
+          <select disabled={mutation.isPending}
             value={selectedCompetenceId}
             onChange={(event) => {
               setSelectedCompetenceId(event.target.value);
@@ -2580,7 +2706,7 @@ export default function ReconciliationPage() {
           <input
             type="file"
             accept=".xls,.xlsx"
-            disabled={!selectedAccountId || !selectedCompetenceId || isProcessing}
+            disabled={mutation.isPending || (!selectedAccountId || !selectedCompetenceId || isProcessing)}
             onChange={(event) => {
               const file = event.target.files?.[0];
 
@@ -2591,14 +2717,14 @@ export default function ReconciliationPage() {
             }}
             className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-slate-300 outline-none file:mr-4 file:rounded-lg file:border-0 file:bg-blue-600 file:px-4 file:py-2 file:text-sm file:font-semibold file:text-white disabled:cursor-not-allowed disabled:opacity-50"
           />
-          <button
+          <ProcessingButton busy={mutation.pending === ("loadSelectedReconciliation")}
             type="button"
             onClick={loadSelectedReconciliation}
-            disabled={!selectedAccountId || !selectedCompetenceId || isProcessing}
+            disabled={mutation.isPending || (!selectedAccountId || !selectedCompetenceId || isProcessing)}
             className="rounded-xl bg-blue-600 px-4 py-3 font-bold text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50 md:col-span-2"
           >
             {isProcessing ? "Carregando..." : "Carregar conferência"}
-          </button>
+          </ProcessingButton>
         </div>
 
         {selectedAccountId && (
@@ -2613,12 +2739,12 @@ export default function ReconciliationPage() {
             </div>
             {activeLayout && (
               <div className="flex flex-wrap gap-2">
-                <button type="button" onClick={beginReplaceLayout} disabled={isManagingLayout} className="rounded-lg border border-amber-400/30 px-3 py-2 text-sm font-semibold text-amber-200 hover:bg-amber-500/10 disabled:opacity-50">
+                <button type="button" onClick={beginReplaceLayout} disabled={mutation.isPending || (isManagingLayout)} className="rounded-lg border border-amber-400/30 px-3 py-2 text-sm font-semibold text-amber-200 hover:bg-amber-500/10 disabled:opacity-50">
                   Substituir layout
                 </button>
-                <button type="button" onClick={removeCurrentLayout} disabled={isManagingLayout} className="rounded-lg border border-rose-400/30 px-3 py-2 text-sm font-semibold text-rose-200 hover:bg-rose-500/10 disabled:opacity-50">
+                <ProcessingButton busy={mutation.pending === ("removeCurrentLayout")} type="button" onClick={removeCurrentLayout} disabled={mutation.isPending || (isManagingLayout)} className="rounded-lg border border-rose-400/30 px-3 py-2 text-sm font-semibold text-rose-200 hover:bg-rose-500/10 disabled:opacity-50">
                   Remover layout
-                </button>
+                </ProcessingButton>
               </div>
             )}
           </section>
@@ -2679,7 +2805,7 @@ export default function ReconciliationPage() {
                 {formatCurrency(totalFinanceOnly)}
               </p>
             </div>
-            <button
+            <button disabled={mutation.isPending}
               type="button"
               onClick={() => {
                 setViewMode("difference");
@@ -2760,7 +2886,7 @@ export default function ReconciliationPage() {
               </div>
 
               <div className="grid gap-4 md:grid-cols-4">
-                <select
+                <select disabled={mutation.isPending}
                   value={paymentAccountId}
                   onChange={(event) => setPaymentAccountId(event.target.value)}
                   className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none"
@@ -2775,16 +2901,16 @@ export default function ReconciliationPage() {
                     ))}
                 </select>
 
-                <input
+                <input disabled={mutation.isPending}
                   type="date"
                   value={paymentDueDate}
                   onChange={(event) => setPaymentDueDate(event.target.value)}
                   className="rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none"
                 />
 
-                <button
+                <ProcessingButton busy={mutation.pending === ("closeStatementAndCreatePayment")}
                   type="button"
-                  disabled={isClosingStatement || isClosingStatementRef.current}
+                  disabled={mutation.isPending || (isClosingStatement || isClosingStatementRef.current)}
                   onClick={closeStatementAndCreatePayment}
                   className="rounded-xl bg-emerald-600 px-4 py-3 font-bold text-white hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-60"
                 >
@@ -2793,15 +2919,15 @@ export default function ReconciliationPage() {
                     : closedStatement
                       ? "Atualizar pagamento"
                       : "Fechar fatura"}
-                </button>
+                </ProcessingButton>
                 {closedStatement && (
-                  <button
+                  <ProcessingButton busy={mutation.pending === ("reopenStatement")} disabled={mutation.isPending}
                     type="button"
                     onClick={reopenStatement}
                     className="rounded-xl border border-red-400/30 px-4 py-3 font-bold text-red-300 hover:bg-red-500/10"
                   >
                     Reabrir fatura
-                  </button>
+                  </ProcessingButton>
                 )}
               </div>
 
@@ -2826,88 +2952,21 @@ export default function ReconciliationPage() {
             </div>
             <div className="flex gap-2">
 
-              <button
+              <ProcessingButton busy={mutation.pending === ("reloadReconciliation")} disabled={mutation.isPending}
                 type="button"
-                onClick={() => {
-                  if (selectedFile) {
-                    handleFileUpload(selectedFile);
-                    return;
-                  }
-
-                  if (!selectedAccountId || !selectedCompetenceId) {
-                    alert("Selecione conta/cartão e competência.");
-                    return;
-                  }
-
-                  loadPersistedStatement(selectedAccountId, selectedCompetenceId).catch((error) => {
-                    console.error("Erro ao recarregar conferência:", error);
-                    alert("Erro ao recarregar conferência.");
-                  });
-                }}
+                onClick={reloadReconciliation}
                 className="rounded-xl border border-white/10 px-4 py-2 text-sm font-semibold text-white hover:bg-white/10"
               >
                 Recarregar
-              </button>
-              <button
-                onClick={async () => {
-                  if (!confirm("Deseja realmente desfazer TODAS as conciliações desta competência?")) {
-                    return;
-                  }
-
-                  const statementItemIds = items
-                    .map((item) => item.id)
-                    .filter(Boolean) as string[];
-
-                  if (statementItemIds.length === 0) {
-                    return;
-                  }
-
-                  const ownerId = await getCurrentUserId();
-
-                  const { error: deleteLinksError } = await supabase
-                    .from("credit_card_statement_item_transactions")
-                    .delete()
-                    .eq("owner_id", ownerId)
-                    .in("statement_item_id", statementItemIds);
-
-                  if (deleteLinksError) {
-                    alert("Erro ao desfazer as conciliações.");
-                    return;
-                  }
-
-                  const { error } = await supabase
-                    .from("credit_card_statement_items")
-                    .update({
-                      status: "Pendente",
-                      ignored_reason: null,
-                      updated_at: new Date().toISOString(),
-                    })
-                    .eq("owner_id", ownerId)
-                    .in("id", statementItemIds);
-
-                  if (error) {
-                    alert("Erro ao desfazer as conciliações.");
-                    return;
-                  }
-
-                  setItems((items) =>
-                    items.map((item) => ({
-                      ...item,
-                      status: "Pendente",
-                      matched: false,
-                      matchedTransactionId: undefined,
-                      matchedTransaction: undefined,
-                    }))
-                  );
-
-                  alert("Conciliações removidas com sucesso.");
-                }}
+              </ProcessingButton>
+              <ProcessingButton busy={mutation.pending === ("unlinkAllReconciliations")} disabled={mutation.isPending}
+                onClick={unlinkAllReconciliations}
                 className="rounded-xl bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-500"
               >
                 Desvincular tudo
-              </button>
+              </ProcessingButton>
 
-              <button
+              <button disabled={mutation.isPending}
                 onClick={() => {
                   if (viewMode === "difference") {
                     setViewMode("all");
@@ -3033,50 +3092,50 @@ export default function ReconciliationPage() {
                     <td className="px-5 py-4 text-right">
                       {!item.matched ? (
                         <>
-                          <button
+                          <button disabled={mutation.isPending}
                             onClick={() => { setReconciledValues({}); setItemToReconcile(item); }}
                             className="rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white hover:bg-blue-500"
                           >
                             Conciliar
                           </button>
 
-                          <button
+                          <button disabled={mutation.isPending}
                             onClick={() => openCreateTransactionDrawer(item)}
                             className="ml-2 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-500"
                           >
                             Criar
                           </button>
 
-                          <button
+                          <ProcessingButton busy={mutation.pending === ("ignoreStatementItem" + ":" + (item).id)} disabled={mutation.isPending}
                             onClick={() => ignoreStatementItem(item)}
                             className="ml-2 rounded-lg border border-white/10 px-3 py-2 text-xs font-semibold text-slate-300 hover:bg-white/10"
                           >
                             Ignorar
-                          </button>
+                          </ProcessingButton>
                         </>
                       ) : !isFullyReconciled(item) ? (
                         <div className="flex justify-end gap-2">
-                          <button
+                          <button disabled={mutation.isPending}
                             onClick={() => openEditTransactionDrawer(item)}
                             className="rounded-lg bg-amber-600 px-3 py-2 text-xs font-semibold text-white hover:bg-amber-500"
                           >
                             Corrigir
                           </button>
 
-                          <button
+                          <ProcessingButton busy={mutation.pending === ("unlinkReconciliation" + ":" + (item).id)} disabled={mutation.isPending}
                             onClick={() => unlinkReconciliation(item)}
                             className="rounded-lg border border-white/10 px-3 py-2 text-xs font-semibold text-slate-300 hover:bg-white/10"
                           >
                             Desvincular
-                          </button>
+                          </ProcessingButton>
                         </div>
                       ) : (
-                        <button
+                        <ProcessingButton busy={mutation.pending === ("unlinkReconciliation" + ":" + (item).id)} disabled={mutation.isPending}
                           onClick={() => unlinkReconciliation(item)}
                           className="rounded-lg border border-white/10 px-3 py-2 text-xs font-semibold text-slate-300 hover:bg-white/10"
                         >
                           Desvincular
-                        </button>
+                        </ProcessingButton>
                       )}
                     </td>
                   </tr>
@@ -3154,7 +3213,7 @@ export default function ReconciliationPage() {
 
       {
         itemToReconcile && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-6">
+          <MutationScope busy={mutation.isPending} isLocked={mutation.isLocked}><div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-6">
             <div className="w-full max-w-4xl rounded-2xl border border-white/10 bg-slate-950 p-6 shadow-2xl">
               <div className="mb-5 flex items-start justify-between gap-4">
                 <div>
@@ -3168,7 +3227,7 @@ export default function ReconciliationPage() {
                   </p>
                 </div>
 
-                <button
+                <button disabled={mutation.isPending}
                   onClick={() => setItemToReconcile(null)}
                   className="rounded-lg px-3 py-2 text-slate-400 hover:bg-white/10 hover:text-white"
                 >
@@ -3177,14 +3236,14 @@ export default function ReconciliationPage() {
               </div>
 
               <div className="max-h-[60vh] overflow-auto rounded-xl border border-white/10">
-                <input
+                <input disabled={mutation.isPending}
                   value={candidateSearch}
                   onChange={(event) => setCandidateSearch(event.target.value)}
                   placeholder="Filtrar lançamentos por descrição..."
                   className="mb-4 w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none"
                 />
                 <div className="mb-4 flex justify-end">
-                  <button
+                  <button disabled={mutation.isPending}
                     onClick={() => openCreateTransactionDrawer(itemToReconcile)}
                     className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-500"
                   >
@@ -3223,7 +3282,7 @@ export default function ReconciliationPage() {
                             <div>Valor lançado: {formatCurrency(transaction.originalValue)}</div>
                             <label className="mt-2 block text-xs">
                               Valor conciliado
-                              <input
+                              <input disabled={mutation.isPending}
                                 aria-label={"Valor conciliado de " + transaction.description}
                                 inputMode="numeric"
                                 value={reconciledValues[transaction.id] ?? formatCurrency(Number(transaction.value))}
@@ -3261,17 +3320,17 @@ export default function ReconciliationPage() {
 
                           <td className="px-4 py-3 text-right">
                             <div className="flex justify-end gap-2">
-                              <button
+                              <ProcessingButton busy={mutation.pending === ("manuallyReconcile:" + itemToReconcile.id + ":" + transaction.id)} disabled={mutation.isPending}
                                 onClick={() =>
                                   manuallyReconcile(itemToReconcile, transaction.id)
                                 }
                                 className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-500"
                               >
                                 Conciliar
-                              </button>
+                              </ProcessingButton>
 
                               {transaction.alreadyReconciled >= 0.01 && (
-                                <button
+                                <ProcessingButton busy={mutation.pending === ("reconcileAndAdjustLinkedTotal:" + itemToReconcile.id + ":" + transaction.id)} disabled={mutation.isPending}
                                   onClick={() =>
                                     reconcileAndAdjustLinkedTotal(itemToReconcile, transaction)
                                   }
@@ -3279,7 +3338,7 @@ export default function ReconciliationPage() {
                                   title="Vincula este item ao lançamento e altera o valor original do lançamento para a soma de todos os itens vinculados."
                                 >
                                   Vincular e ajustar total
-                                </button>
+                                </ProcessingButton>
                               )}
                             </div>
                           </td>
@@ -3297,13 +3356,13 @@ export default function ReconciliationPage() {
                 </table>
               </div>
             </div>
-          </div>
+          </div></MutationScope>
         )
       }
 
       {
         itemToEditTransaction && (
-          <div className="fixed inset-0 z-50 flex justify-end bg-black/70">
+          <MutationScope busy={mutation.isPending} isLocked={mutation.isLocked}><div className="fixed inset-0 z-50 flex justify-end bg-black/70">
             <div className="h-full w-full max-w-xl overflow-y-auto border-l border-white/10 bg-slate-950 p-6 shadow-2xl">
               <div className="mb-6 flex items-start justify-between gap-4">
                 <div>
@@ -3315,7 +3374,7 @@ export default function ReconciliationPage() {
                   </p>
                 </div>
 
-                <button
+                <button disabled={mutation.isPending}
                   onClick={() => setItemToEditTransaction(null)}
                   className="rounded-lg px-3 py-2 text-slate-400 hover:bg-white/10 hover:text-white"
                 >
@@ -3324,7 +3383,7 @@ export default function ReconciliationPage() {
               </div>
 
               <div className="space-y-4">
-                <input
+                <input disabled={mutation.isPending}
                   value={editForm.description}
                   onChange={(event) =>
                     setEditForm({ ...editForm, description: event.target.value })
@@ -3332,7 +3391,7 @@ export default function ReconciliationPage() {
                   className="w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none"
                 />
 
-                <input
+                <input disabled={mutation.isPending}
                   type="number"
                   value={editForm.value}
                   onChange={(event) =>
@@ -3341,7 +3400,7 @@ export default function ReconciliationPage() {
                   className="w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none"
                 />
 
-                <input
+                <input disabled={mutation.isPending}
                   type="date"
                   value={editForm.due_date}
                   onChange={(event) =>
@@ -3350,21 +3409,21 @@ export default function ReconciliationPage() {
                   className="w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none"
                 />
 
-                <button
+                <ProcessingButton busy={mutation.pending === ("updateTransactionFromReconciliation")} disabled={mutation.isPending}
                   onClick={updateTransactionFromReconciliation}
                   className="w-full rounded-xl bg-amber-600 px-4 py-3 font-bold text-white hover:bg-amber-500"
                 >
                   Salvar correção
-                </button>
+                </ProcessingButton>
               </div>
             </div>
-          </div>
+          </div></MutationScope>
         )
       }
 
       {
         itemToCreateTransaction && (
-          <div className="fixed inset-0 z-50 flex justify-end bg-black/70">
+          <MutationScope busy={mutation.isPending} isLocked={mutation.isLocked}><div className="fixed inset-0 z-50 flex justify-end bg-black/70">
             <div className="h-full w-full max-w-xl overflow-y-auto border-l border-white/10 bg-slate-950 p-6 shadow-2xl">
               <div className="mb-6 flex items-start justify-between gap-4">
                 <div>
@@ -3376,7 +3435,7 @@ export default function ReconciliationPage() {
                   </p>
                 </div>
 
-                <button
+                <button disabled={mutation.isPending}
                   onClick={() => setItemToCreateTransaction(null)}
                   className="rounded-lg px-3 py-2 text-slate-400 hover:bg-white/10 hover:text-white"
                 >
@@ -3385,7 +3444,7 @@ export default function ReconciliationPage() {
               </div>
 
               <div className="space-y-4">
-                <input
+                <input disabled={mutation.isPending}
                   value={createForm.description}
                   onChange={(event) =>
                     setCreateForm({ ...createForm, description: event.target.value })
@@ -3394,7 +3453,7 @@ export default function ReconciliationPage() {
                   className="w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none"
                 />
 
-                <input
+                <input disabled={mutation.isPending}
                   type="number"
                   value={createForm.value}
                   onChange={(event) =>
@@ -3404,7 +3463,7 @@ export default function ReconciliationPage() {
                   className="w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none"
                 />
 
-                <input
+                <input disabled={mutation.isPending}
                   type="date"
                   value={createForm.due_date}
                   onChange={(event) =>
@@ -3413,7 +3472,7 @@ export default function ReconciliationPage() {
                   className="w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none"
                 />
 
-                <select
+                <select disabled={mutation.isPending}
                   value={createForm.type}
                   onChange={(event) => {
                     const nextType = event.target.value;
@@ -3431,7 +3490,7 @@ export default function ReconciliationPage() {
                   <option value="Receita">Crédito da fatura</option>
                 </select>
 
-                <select
+                <select disabled={mutation.isPending}
                   value={createForm.category_id}
                   onChange={(event) =>
                     setCreateForm({ ...createForm, category_id: event.target.value })
@@ -3446,19 +3505,19 @@ export default function ReconciliationPage() {
                   ))}
                 </select>
 
-                <button
+                <ProcessingButton busy={mutation.pending === ("createTransactionFromImportedItem")} disabled={mutation.isPending}
                   onClick={createTransactionFromImportedItem}
                   className="w-full rounded-xl bg-emerald-600 px-4 py-3 font-bold text-white hover:bg-emerald-500"
                 >
                   Criar e conciliar
-                </button>
+                </ProcessingButton>
               </div>
             </div>
-          </div>
+          </div></MutationScope>
         )
       }
       {isClosingStatement && (
-        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/70">
+        <MutationScope busy={mutation.isPending} isLocked={mutation.isLocked}><div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/70">
           <div className="rounded-2xl border border-emerald-400/20 bg-slate-950 p-6 text-center shadow-2xl">
             <div className="mx-auto mb-4 h-10 w-10 animate-spin rounded-full border-4 border-emerald-400/30 border-t-emerald-300" />
 
@@ -3470,10 +3529,10 @@ export default function ReconciliationPage() {
               Gerando pagamento e salvando a conferência.
             </p>
           </div>
-        </div>
+        </div></MutationScope>
       )}
       {showLayoutMapping && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+        <MutationScope busy={mutation.isPending} isLocked={mutation.isLocked}><div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
           <div className="max-h-[90vh] w-full max-w-4xl overflow-y-auto rounded-2xl border border-white/10 bg-slate-950 p-6 shadow-2xl">
             <div className="mb-5">
               <h2 className="text-xl font-bold text-white">
@@ -3498,7 +3557,7 @@ export default function ReconciliationPage() {
                         Linha candidata {candidate.rowIndex + 1}
                       </p>
 
-                      <button
+                      <button disabled={mutation.isPending}
                         type="button"
                         onClick={() => chooseHeaderRow(pendingLayoutRows, candidate.rowIndex)}
                         className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-bold text-white hover:bg-blue-500"
@@ -3547,7 +3606,7 @@ export default function ReconciliationPage() {
                   ].map(([label, field]) => (
                     <label key={field} className="space-y-2">
                       <span className="text-sm text-slate-300">{label}</span>
-                      <select
+                      <select disabled={mutation.isPending}
                         value={layoutForm[field as keyof typeof layoutForm]}
                         onChange={(event) =>
                           setLayoutForm((previous) => ({
@@ -3574,7 +3633,7 @@ export default function ReconciliationPage() {
 
                   <label className="space-y-2 md:col-span-2">
                     <span className="text-sm text-slate-300">Sinal do valor</span>
-                    <select
+                    <select disabled={mutation.isPending}
                       value={layoutForm.amount_sign}
                       onChange={(event) =>
                         setLayoutForm((previous) => ({
@@ -3598,7 +3657,7 @@ export default function ReconciliationPage() {
 
             <div className="mt-6 flex justify-end gap-3">
               {selectedHeaderRowIndex !== null && (
-                <button
+                <button disabled={mutation.isPending}
                   type="button"
                   onClick={() => {
                     setSelectedHeaderRowIndex(null);
@@ -3610,7 +3669,7 @@ export default function ReconciliationPage() {
                 </button>
               )}
 
-              <button
+              <button disabled={mutation.isPending}
                 type="button"
                 onClick={() => setShowLayoutMapping(false)}
                 className="rounded-xl border border-white/10 px-4 py-3 font-bold text-slate-300 hover:bg-white/5"
@@ -3619,18 +3678,18 @@ export default function ReconciliationPage() {
               </button>
 
               {selectedHeaderRowIndex !== null && (
-                <button
+                <ProcessingButton busy={mutation.pending === ("saveImportLayout")}
                   type="button"
                   onClick={saveImportLayout}
-                  disabled={isManagingLayout}
+                  disabled={mutation.isPending || (isManagingLayout)}
                   className="rounded-xl bg-blue-600 px-4 py-3 font-bold text-white hover:bg-blue-500 disabled:opacity-50"
                 >
                   {isManagingLayout ? "Salvando..." : layoutAction === "replace" ? "Substituir layout" : "Salvar modelo"}
-                </button>
+                </ProcessingButton>
               )}
             </div>
           </div>
-        </div>
+        </div></MutationScope>
       )}
     </AppShell >
   );

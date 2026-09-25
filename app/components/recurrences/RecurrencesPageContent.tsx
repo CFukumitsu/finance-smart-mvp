@@ -1,5 +1,8 @@
 "use client";
 
+
+import { useMutation } from "@/src/hooks/useMutation";
+import { ProcessingButton, MutationScope } from "@/src/components/ui/Mutation";
 import { useEffect, useState } from "react";
 import AppShell from "../../components/layout/AppShell";
 import { getCurrentUserId, supabase } from "@/src/lib/supabase";
@@ -56,6 +59,7 @@ function parseCurrencyInput(value: string) {
 }
 
 export default function RecurrencesPageContent() {
+  const mutation = useMutation();
     const [items, setItems] = useState<RecurringTransaction[]>([]);
     const [accounts, setAccounts] = useState<SelectOption[]>([]);
 
@@ -89,7 +93,7 @@ export default function RecurrencesPageContent() {
     async function loadAuxiliaryData() {
         await ensureCompetenceExists(new Date());
         const ownerId = await getCurrentUserId();
-    
+
         const [accountsResult, categoriesResult, competencesResult] =
             await Promise.all([
                 supabase
@@ -140,7 +144,7 @@ export default function RecurrencesPageContent() {
         loadAuxiliaryData();
     }, []);
 
-    useModalShortcuts({
+    useModalShortcuts({ isBlocked: mutation.isLocked,
         enabled: isDrawerOpen,
         onEscape: closeDrawer,
     });
@@ -198,6 +202,9 @@ export default function RecurrencesPageContent() {
     }
 
     async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    return mutation.run("handleSubmit", async () => {
+
         event.preventDefault();
 
         const normalizedFormData: RecurringTransactionFormData = {
@@ -219,9 +226,13 @@ export default function RecurrencesPageContent() {
             console.error("Erro ao salvar recorrência:", error);
             alert("Não foi possível salvar a recorrência.");
         }
-    }
+
+    });
+  }
 
     async function handleCancel(id: string) {
+    return mutation.run("handleCancel" + ":" + (id), async () => {
+
         const confirmed = confirm("Deseja cancelar esta recorrência?");
         if (!confirmed) return;
 
@@ -232,9 +243,13 @@ export default function RecurrencesPageContent() {
             console.error("Erro ao cancelar recorrência:", error);
             alert("Não foi possível cancelar a recorrência.");
         }
-    }
+
+    });
+  }
 
     async function handleGenerateRecurringTransactions() {
+    return mutation.run("handleGenerateRecurringTransactions", async () => {
+
         if (!selectedCompetenceId) {
             alert("Selecione uma competência.");
             return;
@@ -260,7 +275,9 @@ export default function RecurrencesPageContent() {
         } finally {
             setIsGenerating(false);
         }
-    }
+
+    });
+  }
 
     return (
         <AppShell>
@@ -275,7 +292,7 @@ export default function RecurrencesPageContent() {
                         </p>
                     </div>
 
-                    <button
+                    <button disabled={mutation.isPending}
                         type="button"
                         onClick={openCreateDrawer}
                         className="w-full rounded-xl bg-emerald-500 px-4 py-3 text-sm font-semibold text-slate-950 transition hover:bg-emerald-400 md:w-auto"
@@ -295,6 +312,7 @@ export default function RecurrencesPageContent() {
 
                     <div className="mt-4 flex flex-col gap-3 md:flex-row">
                         <select
+                            disabled={mutation.isPending}
                             value={selectedCompetenceId}
                             onChange={(e) => setSelectedCompetenceId(e.target.value)}
                             className="flex-1 rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-white"
@@ -310,16 +328,16 @@ export default function RecurrencesPageContent() {
                             ))}
                         </select>
 
-                        <button
+                        <ProcessingButton busy={mutation.pending === ("handleGenerateRecurringTransactions")}
                             type="button"
-                            disabled={isGenerating}
+                            disabled={mutation.isPending || (isGenerating)}
                             onClick={handleGenerateRecurringTransactions}
                             className="w-full rounded-xl bg-emerald-500 px-4 py-3 text-sm font-semibold text-slate-950 hover:bg-emerald-400 disabled:opacity-50 md:w-auto"
                         >
                             {isGenerating
                                 ? "Gerando..."
                                 : "Gerar recorrências"}
-                        </button>
+                        </ProcessingButton>
                     </div>
                 </div>
 
@@ -390,7 +408,7 @@ export default function RecurrencesPageContent() {
                                 </div>
 
                                 <div className="mt-4 flex gap-2">
-                                    <button
+                                    <button disabled={mutation.isPending}
                                         type="button"
                                         onClick={() => openEditDrawer(item)}
                                         className="flex-1 rounded-xl border border-white/10 px-3 py-2 text-xs font-semibold text-slate-200 transition hover:bg-white/10"
@@ -399,13 +417,13 @@ export default function RecurrencesPageContent() {
                                     </button>
 
                                     {item.status === "active" && (
-                                        <button
+                                        <ProcessingButton busy={mutation.pending === ("handleCancel" + ":" + (item.id))} disabled={mutation.isPending}
                                             type="button"
                                             onClick={() => handleCancel(item.id)}
                                             className="flex-1 rounded-xl border border-rose-500/30 px-3 py-2 text-xs font-semibold text-rose-300 transition hover:bg-rose-500/10"
                                         >
                                             Cancelar
-                                        </button>
+                                        </ProcessingButton>
                                     )}
                                 </div>
                             </div>
@@ -509,7 +527,7 @@ export default function RecurrencesPageContent() {
 
                                         <td className="px-5 py-4">
                                             <div className="flex justify-end gap-2">
-                                                <button
+                                                <button disabled={mutation.isPending}
                                                     type="button"
                                                     onClick={() => openEditDrawer(item)}
                                                     className="rounded-lg border border-white/10 px-3 py-1.5 text-xs text-slate-200 transition hover:bg-white/10"
@@ -518,13 +536,13 @@ export default function RecurrencesPageContent() {
                                                 </button>
 
                                                 {item.status === "active" && (
-                                                    <button
+                                                    <ProcessingButton busy={mutation.pending === ("handleCancel" + ":" + (item.id))} disabled={mutation.isPending}
                                                         type="button"
                                                         onClick={() => handleCancel(item.id)}
                                                         className="rounded-lg border border-rose-500/30 px-3 py-1.5 text-xs text-rose-300 transition hover:bg-rose-500/10"
                                                     >
                                                         Cancelar
-                                                    </button>
+                                                    </ProcessingButton>
                                                 )}
                                             </div>
                                         </td>
@@ -536,7 +554,7 @@ export default function RecurrencesPageContent() {
             </div>
 
             {isDrawerOpen && (
-                <div className="fixed inset-0 z-50 flex justify-end bg-black/60">
+                <MutationScope busy={mutation.isPending} isLocked={mutation.isLocked}><div className="fixed inset-0 z-50 flex justify-end bg-black/60">
                     <div className="h-full w-full max-w-xl overflow-y-auto border-l border-white/10 bg-slate-950 p-6 shadow-2xl">
                         <div className="mb-6 flex items-start justify-between gap-4">
                             <div>
@@ -715,16 +733,16 @@ export default function RecurrencesPageContent() {
                                     Cancelar
                                 </button>
 
-                                <button
+                                <ProcessingButton busy={mutation.pending === ("handleSubmit")} disabled={mutation.isPending}
                                     type="submit"
                                     className="w-full rounded-xl bg-emerald-500 px-4 py-3 text-sm font-semibold text-slate-950 transition hover:bg-emerald-400 md:w-auto"
                                 >
                                     Salvar recorrência
-                                </button>
+                                </ProcessingButton>
                             </div>
                         </form>
                     </div>
-                </div>
+                </div></MutationScope>
             )}
         </AppShell>
     );

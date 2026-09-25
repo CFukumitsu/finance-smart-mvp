@@ -1,5 +1,8 @@
 "use client";
 
+
+import { useMutation } from "@/src/hooks/useMutation";
+import { ProcessingButton, MutationScope } from "@/src/components/ui/Mutation";
 import { useEffect, useRef, useState } from "react";
 import { useModalShortcuts } from "@/src/hooks/useModalShortcuts";
 import AppShell from "../components/layout/AppShell";
@@ -46,6 +49,8 @@ const initialForm = {
 };
 
 export default function CategoriesPage() {
+  const mutation = useMutation();
+  const isMutationLocked = mutation.isLocked;
   const [categories, setCategories] = useState<Category[]>([]);
   const [competences, setCompetences] = useState<Competence[]>([]);
   const [planningCategory, setPlanningCategory] = useState<Category | null>(
@@ -69,6 +74,7 @@ export default function CategoriesPage() {
   const [form, setForm] = useState(initialForm);
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState("Ativas");
+  const [showCompetenceSelector, setShowCompetenceSelector] = useState(false);
 
   async function loadCategories() {
     setIsLoading(true);
@@ -201,6 +207,8 @@ export default function CategoriesPage() {
   }
 
   async function savePlanning() {
+    return mutation.run("savePlanning", async () => {
+
     if (!planningCategory) return;
 
     const ownerId = await getCurrentUserId();
@@ -227,6 +235,8 @@ export default function CategoriesPage() {
     }
 
     closePlanningModal();
+
+    });
   }
 
   useEffect(() => {
@@ -272,6 +282,7 @@ export default function CategoriesPage() {
   function closeDrawer() {
     resetForm();
     setIsDrawerOpen(false);
+    setShowCompetenceSelector(false);
   }
 
   function handleCategoryTypeChange(type: CategoryFormType) {
@@ -311,6 +322,8 @@ export default function CategoriesPage() {
   }
 
   async function saveCategory() {
+    return mutation.run("saveCategory", async () => {
+
     const ownerId = await getCurrentUserId();
 
     if (!form.name || !form.type) {
@@ -355,9 +368,13 @@ export default function CategoriesPage() {
 
     closeDrawer();
     await loadCategories();
+
+    });
   }
 
   async function toggleShowOnDashboard(category: Category) {
+    return mutation.run("toggleShowOnDashboard" + ":" + (category).id, async () => {
+
     const ownerId = await getCurrentUserId();
 
     const { error } = await supabase
@@ -376,9 +393,13 @@ export default function CategoriesPage() {
     }
 
     await loadCategories();
+
+    });
   }
 
   async function toggleActive(category: Category) {
+    return mutation.run("toggleActive" + ":" + (category).id, async () => {
+
     const ownerId = await getCurrentUserId();
 
     const { error } = await supabase
@@ -397,9 +418,13 @@ export default function CategoriesPage() {
     }
 
     await loadCategories();
+
+    });
   }
 
   async function deleteCategory(category: Category) {
+    return mutation.run("deleteCategory" + ":" + (category).id, async () => {
+
     const ownerId = await getCurrentUserId();
     const confirmed = window.confirm(
       `Tem certeza que deseja excluir "${category.name}"? Se já existir lançamento usando essa categoria, o banco pode bloquear.`,
@@ -422,6 +447,8 @@ export default function CategoriesPage() {
     }
 
     await loadCategories();
+
+    });
   }
 
   function formatCurrency(value: number | null) {
@@ -439,6 +466,7 @@ export default function CategoriesPage() {
 
   useEffect(() => {
     function handleEscape(event: KeyboardEvent) {
+      if (isMutationLocked()) return;
       if (event.key !== "Escape") return;
 
       if (isPlanningOpen) {
@@ -458,13 +486,13 @@ export default function CategoriesPage() {
     };
   }, [isPlanningOpen, isDrawerOpen]);
 
-  useModalShortcuts({
+  useModalShortcuts({ isBlocked: mutation.isLocked,
     enabled: isPlanningOpen,
     onEscape: closePlanningModal,
     onEnter: savePlanning,
   });
 
-  useModalShortcuts({
+  useModalShortcuts({ isBlocked: mutation.isLocked,
     enabled: !isPlanningOpen && isDrawerOpen,
     onEscape: closeDrawer,
     onEnter: saveCategory,
@@ -481,7 +509,7 @@ export default function CategoriesPage() {
             </p>
           </div>
 
-          <button
+          <button disabled={mutation.isPending}
             onClick={openNewDrawer}
             className="w-full rounded-xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white hover:bg-blue-500 md:w-auto"
           >
@@ -548,7 +576,7 @@ export default function CategoriesPage() {
                   </div>
 
                   <div className="flex gap-2">
-                    <button
+                    <ProcessingButton busy={mutation.pending === ("toggleShowOnDashboard" + ":" + (category).id)} disabled={mutation.isPending}
                       title={
                         category.show_on_dashboard
                           ? "Ocultar do Dashboard"
@@ -562,7 +590,7 @@ export default function CategoriesPage() {
                       }`}
                     >
                       <LayoutDashboard size={16} />
-                    </button>
+                    </ProcessingButton>
                     <button
                       title="Planejamento"
                       onClick={() => openPlanningModal(category)}
@@ -570,7 +598,7 @@ export default function CategoriesPage() {
                     >
                       <TrendingUp size={16} />
                     </button>
-                    <button
+                    <button disabled={mutation.isPending}
                       title="Editar"
                       onClick={() => openEditDrawer(category)}
                       className="flex h-9 w-9 items-center justify-center rounded-xl border border-amber-500/20 bg-amber-500/10 text-amber-400"
@@ -578,21 +606,21 @@ export default function CategoriesPage() {
                       <Pencil size={16} />
                     </button>
 
-                    <button
+                    <ProcessingButton busy={mutation.pending === ("toggleActive" + ":" + (category).id)} disabled={mutation.isPending}
                       title={category.active ? "Inativar" : "Ativar"}
                       onClick={() => toggleActive(category)}
                       className="flex h-9 w-9 items-center justify-center rounded-xl border border-slate-500/20 bg-slate-500/10 text-slate-300"
                     >
                       <CircleOff size={16} />
-                    </button>
+                    </ProcessingButton>
 
-                    <button
+                    <ProcessingButton busy={mutation.pending === ("deleteCategory" + ":" + (category).id)} disabled={mutation.isPending}
                       title="Excluir"
                       onClick={() => deleteCategory(category)}
                       className="flex h-9 w-9 items-center justify-center rounded-xl border border-red-500/20 bg-red-500/10 text-red-400"
                     >
                       <Trash2 size={16} />
-                    </button>
+                    </ProcessingButton>
                   </div>
                 </div>
 
@@ -675,7 +703,7 @@ export default function CategoriesPage() {
                     </td>
                     <td className="px-5 py-4 text-right">
                       <div className="flex justify-end gap-2">
-                        <button
+                        <ProcessingButton busy={mutation.pending === ("toggleShowOnDashboard" + ":" + (category).id)} disabled={mutation.isPending}
                           title={
                             category.show_on_dashboard
                               ? "Ocultar do Dashboard"
@@ -696,7 +724,7 @@ export default function CategoriesPage() {
   `}
                         >
                           <LayoutDashboard size={18} />
-                        </button>
+                        </ProcessingButton>
                         <button
                           title="Planejamento"
                           onClick={() => openPlanningModal(category)}
@@ -715,7 +743,7 @@ export default function CategoriesPage() {
                         >
                           <TrendingUp size={18} />
                         </button>
-                        <button
+                        <button disabled={mutation.isPending}
                           title="Editar"
                           onClick={() => openEditDrawer(category)}
                           className="
@@ -734,7 +762,7 @@ export default function CategoriesPage() {
                           <Pencil size={18} />
                         </button>
 
-                        <button
+                        <ProcessingButton busy={mutation.pending === ("toggleActive" + ":" + (category).id)} disabled={mutation.isPending}
                           title={category.active ? "Inativar" : "Ativar"}
                           onClick={() => toggleActive(category)}
                           className="
@@ -751,9 +779,9 @@ export default function CategoriesPage() {
                                   "
                         >
                           <CircleOff size={18} />
-                        </button>
+                        </ProcessingButton>
 
-                        <button
+                        <ProcessingButton busy={mutation.pending === ("deleteCategory" + ":" + (category).id)} disabled={mutation.isPending}
                           title="Excluir"
                           onClick={() => deleteCategory(category)}
                           className="
@@ -770,7 +798,7 @@ export default function CategoriesPage() {
                                   "
                         >
                           <Trash2 size={18} />
-                        </button>
+                        </ProcessingButton>
                       </div>
                     </td>
                   </tr>
@@ -792,7 +820,7 @@ export default function CategoriesPage() {
       </div>
 
       {isDrawerOpen && (
-        <div className="fixed inset-0 z-50 flex justify-end bg-black/60">
+        <MutationScope busy={mutation.isPending} isLocked={mutation.isLocked}><div className="fixed inset-0 z-50 flex justify-end bg-black/60">
           <div className="h-full w-full max-w-xl overflow-y-auto border-l border-white/10 bg-slate-950 p-6 shadow-2xl">
             <div className="mb-6 flex items-center justify-between">
               <div>
@@ -960,19 +988,19 @@ export default function CategoriesPage() {
                   Cancelar
                 </button>
 
-                <button
+                <ProcessingButton busy={mutation.pending === ("saveCategory")} disabled={mutation.isPending}
                   onClick={saveCategory}
                   className="w-full rounded-xl bg-blue-600 px-5 py-3 font-semibold text-white hover:bg-blue-500"
                 >
                   {editingCategoryId ? "Atualizar" : "Salvar"}
-                </button>
+                </ProcessingButton>
               </div>
             </div>
           </div>
-        </div>
+        </div></MutationScope>
       )}
       {isPlanningOpen && planningCategory && (
-        <div className="fixed inset-0 z-50 flex justify-end bg-black/60">
+        <MutationScope busy={mutation.isPending} isLocked={mutation.isLocked}><div className="fixed inset-0 z-50 flex justify-end bg-black/60">
           <div className="flex h-full w-full max-w-xl flex-col border-l border-white/10 bg-slate-950 shadow-2xl">
             <div className="flex-1 overflow-y-auto p-6">
               <div className="mb-6 flex items-start justify-between">
@@ -1043,16 +1071,16 @@ export default function CategoriesPage() {
                   Cancelar
                 </button>
 
-                <button
+                <ProcessingButton busy={mutation.pending === ("savePlanning")} disabled={mutation.isPending}
                   onClick={savePlanning}
                   className="w-full rounded-xl bg-blue-600 px-5 py-3 font-semibold text-white hover:bg-blue-500"
                 >
                   Salvar planejamento
-                </button>
+                </ProcessingButton>
               </div>
             </div>
           </div>
-        </div>
+        </div></MutationScope>
       )}
     </AppShell>
   );

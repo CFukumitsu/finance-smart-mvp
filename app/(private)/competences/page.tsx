@@ -1,5 +1,8 @@
 "use client";
 
+
+import { useMutation } from "@/src/hooks/useMutation";
+import { ProcessingButton, MutationScope } from "@/src/components/ui/Mutation";
 import AppShell from "@/app/components/layout/AppShell";
 import { getCurrentUserId, supabase } from "@/src/lib/supabase";
 import {
@@ -22,6 +25,7 @@ function currentCompetenceKey() {
 }
 
 export default function CompetencesPage() {
+  const mutation = useMutation();
   const [competences, setCompetences] = useState<Competence[]>([]);
   const [closedIds, setClosedIds] = useState<Set<string>>(new Set());
   const [search, setSearch] = useState("");
@@ -72,6 +76,9 @@ export default function CompetencesPage() {
   }
 
   async function saveModal() {
+    return mutation.run("saveModal", async () => {
+      try {
+
     if (!modalMode || isSaving) return;
     setIsSaving(true);
     setFeedback(null);
@@ -98,15 +105,20 @@ export default function CompetencesPage() {
     } finally {
       setIsSaving(false);
     }
+
+      } finally { setIsSaving(false); }
+    });
   }
 
-  useModalShortcuts({
+  useModalShortcuts({ isBlocked: mutation.isLocked,
     enabled: modalMode !== null,
     onEscape: closeModal,
     onEnter: () => void saveModal(),
   });
 
   async function toggleClosed(competence: Competence) {
+    return mutation.run("toggleClosed" + ":" + (competence).id, async () => {
+
     const isClosed = closedIds.has(competence.id);
     if (!window.confirm(`Deseja ${isClosed ? "reabrir" : "fechar"} a competência ${competence.name}?`)) return;
 
@@ -129,6 +141,8 @@ export default function CompetencesPage() {
     } finally {
       setProcessingId(null);
     }
+
+    });
   }
 
   const filteredCompetences = useMemo(() => {
@@ -202,15 +216,15 @@ export default function CompetencesPage() {
                         {isClosed ? "Fechada" : "Aberta"}
                       </p>
                     </div>
-                    <button
+                    <ProcessingButton busy={mutation.pending === ("toggleClosed" + ":" + (competence).id)}
                       type="button"
-                      disabled={processingId === competence.id}
+                      disabled={mutation.isPending || (processingId === competence.id)}
                       onClick={() => void toggleClosed(competence)}
                       title={isClosed ? "Reabrir competência" : "Fechar competência"}
                       className="flex h-10 w-10 items-center justify-center rounded-xl border border-white/10 bg-white/5 text-slate-300 transition hover:bg-white/10 hover:text-white disabled:opacity-50"
                     >
                       {isClosed ? <LockOpen size={18} /> : <LockKeyhole size={18} />}
-                    </button>
+                    </ProcessingButton>
                   </div>
                 );
               })}
@@ -220,7 +234,7 @@ export default function CompetencesPage() {
       </div>
 
       {modalMode && (
-        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/70 p-4" onMouseDown={(event) => event.target === event.currentTarget && closeModal()}>
+        <MutationScope busy={mutation.isPending} isLocked={mutation.isLocked}><div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/70 p-4" onMouseDown={(event) => event.target === event.currentTarget && closeModal()}>
           <div className="w-full max-w-md rounded-2xl border border-white/10 bg-slate-900 p-5 shadow-2xl">
             <div className="flex items-center justify-between gap-3">
               <h2 className="text-xl font-black text-white">{modalMode === "single" ? "Criar competência" : "Criar intervalo"}</h2>
@@ -250,11 +264,11 @@ export default function CompetencesPage() {
               )}
             </div>
 
-            <button type="button" disabled={isSaving} onClick={() => void saveModal()} className="mt-6 w-full rounded-xl bg-cyan-500 px-4 py-3 font-black text-slate-950 transition hover:bg-cyan-400 disabled:opacity-50">
+            <ProcessingButton busy={mutation.pending === ("saveModal")} type="button" disabled={mutation.isPending || (isSaving)} onClick={() => void saveModal()} className="mt-6 w-full rounded-xl bg-cyan-500 px-4 py-3 font-black text-slate-950 transition hover:bg-cyan-400 disabled:opacity-50">
               {isSaving ? "Salvando..." : "Salvar"}
-            </button>
+            </ProcessingButton>
           </div>
-        </div>
+        </div></MutationScope>
       )}
     </AppShell>
   );

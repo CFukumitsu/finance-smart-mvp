@@ -1,5 +1,7 @@
 "use client";
 
+import { useMutation } from "@/src/hooks/useMutation";
+import { ProcessingButton } from "@/src/components/ui/Mutation";
 import { useState } from "react";
 import {
   refreshUsdBrlRate,
@@ -15,6 +17,7 @@ export default function InvestmentExchangeSettings({ data, exchangeContext, relo
   exchangeContext: InvestmentExchangeContext;
   reload: () => Promise<void>;
 }) {
+  const mutation = useMutation();
   const [manualRate, setManualRate] = useState("");
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -25,6 +28,9 @@ export default function InvestmentExchangeSettings({ data, exchangeContext, relo
   const stale = usdBrl ? isExchangeRateStale(usdBrl) : false;
 
   async function run(action: () => Promise<unknown>) {
+    return mutation.run("run", async () => {
+      try {
+
     try {
       setSaving(true);
       await action();
@@ -36,6 +42,9 @@ export default function InvestmentExchangeSettings({ data, exchangeContext, relo
     } finally {
       setSaving(false);
     }
+
+      } finally { setSaving(false); }
+    });
   }
 
   return (
@@ -52,7 +61,7 @@ export default function InvestmentExchangeSettings({ data, exchangeContext, relo
           <select
             className={`${investmentField} mt-2`}
             value={exchangeContext.consolidationCurrency}
-            disabled={saving}
+            disabled={mutation.isPending || (saving)}
             onChange={(event) => void run(() => saveInvestmentConsolidationCurrency(event.target.value))}
           >
             {currencies.map((currency) => <option key={currency}>{currency}</option>)}
@@ -72,21 +81,21 @@ export default function InvestmentExchangeSettings({ data, exchangeContext, relo
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
-              <button type="button" disabled={saving} onClick={() => void run(refreshUsdBrlRate)} className="rounded-lg bg-cyan-500 px-3 py-2 text-xs font-black text-slate-950 disabled:opacity-50">
+              <ProcessingButton busy={mutation.pending === ("run")} type="button" disabled={mutation.isPending || (saving)} onClick={() => void run(refreshUsdBrlRate)} className="rounded-lg bg-cyan-500 px-3 py-2 text-xs font-black text-slate-950 disabled:opacity-50">
                 Atualizar cotação
-              </button>
-              <button type="button" disabled={saving} onClick={() => { setEditing((value) => !value); setManualRate(usdBrl ? String(usdBrl.rate).replace(".", ",") : ""); }} className="rounded-lg border border-white/10 px-3 py-2 text-xs font-bold text-slate-300 disabled:opacity-50">
+              </ProcessingButton>
+              <button type="button" disabled={mutation.isPending || (saving)} onClick={() => { setEditing((value) => !value); setManualRate(usdBrl ? String(usdBrl.rate).replace(".", ",") : ""); }} className="rounded-lg border border-white/10 px-3 py-2 text-xs font-bold text-slate-300 disabled:opacity-50">
                 Editar manualmente
               </button>
             </div>
           </div>
           {editing && (
             <div className="mt-3 flex flex-col gap-2 sm:flex-row">
-              <input aria-label="Cotação manual USD/BRL" inputMode="decimal" className={investmentField} value={manualRate} onChange={(event) => setManualRate(event.target.value)} placeholder="5,43" />
-              <button type="button" disabled={saving} onClick={() => {
+              <input disabled={mutation.isPending} aria-label="Cotação manual USD/BRL" inputMode="decimal" className={investmentField} value={manualRate} onChange={(event) => setManualRate(event.target.value)} placeholder="5,43" />
+              <ProcessingButton busy={mutation.pending === ("run")} type="button" disabled={mutation.isPending || (saving)} onClick={() => {
                 const rate = parseInvestmentDecimal(manualRate);
                 void run(() => saveManualExchangeRate(rate));
-              }} className="rounded-lg bg-white/10 px-4 py-2 text-sm font-bold text-white disabled:opacity-50">Salvar</button>
+              }} className="rounded-lg bg-white/10 px-4 py-2 text-sm font-bold text-white disabled:opacity-50">Salvar</ProcessingButton>
             </div>
           )}
         </div>

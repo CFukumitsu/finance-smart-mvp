@@ -1,5 +1,8 @@
 ﻿"use client";
 
+
+import { ProcessingButton, MutationScope } from "@/src/components/ui/Mutation";
+import { useMutation } from "@/src/hooks/useMutation";
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import {
@@ -547,6 +550,7 @@ function Wallets({
   data: Data;
   reload: () => Promise<void>;
 }) {
+  const mutation = useMutation();
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("active");
   const [editing, setEditing] = useState<BankrollWallet | null>(null);
@@ -575,7 +579,7 @@ function Wallets({
   const close = useCallback(() => {
     if (!saving) setOpen(false);
   }, [saving]);
-  useModalShortcuts({ enabled: open, onEscape: close });
+  useModalShortcuts({ isBlocked: mutation.isLocked, enabled: open, onEscape: close });
   function show(wallet?: BankrollWallet) {
     setEditing(wallet ?? null);
     setForm(
@@ -600,6 +604,9 @@ function Wallets({
     setOpen(true);
   }
   async function submit() {
+    return mutation.run("submit", async () => {
+      try {
+
     if (!form.name.trim()) return alert("Informe o nome da carteira.");
     try {
       setSaving(true);
@@ -623,7 +630,26 @@ function Wallets({
     } finally {
       setSaving(false);
     }
+
+      } finally { setSaving(false); }
+    });
   }
+  async function removeWalletEntry(w: BankrollWallet) {
+    return mutation.run("removeWalletEntry" + ":" + (w).id, async () => {
+
+                  if (confirm(`Excluir a carteira ${w.name}?`))
+                    try {
+                      await deleteWallet(w.id);
+                      await reload();
+                    } catch (e) {
+                      alert(
+                        e instanceof Error ? e.message : "Erro ao excluir.",
+                      );
+                    }
+
+    });
+  }
+
   return (
     <div className="space-y-4">
       <Toolbar search={search} setSearch={setSearch}>
@@ -636,7 +662,7 @@ function Wallets({
           <option value="inactive">Inativas</option>
           <option value="all">Todas</option>
         </select>
-        <Add onClick={() => show()}>Nova carteira</Add>
+        <Add disabled={mutation.isPending} onClick={() => show()}>Nova carteira</Add>
       </Toolbar>
       <Table
         headers={["Nome", "Tipo", "Moeda", "Saldo atual", "Status", "Ações"]}
@@ -654,19 +680,9 @@ function Wallets({
             </Td>
             <Td>{w.active ? "Ativa" : "Inativa"}</Td>
             <Td>
-              <Actions
+              <Actions disabled={mutation.isPending} busy={mutation.pending === ("removeWalletEntry" + ":" + (w).id)}
                 onEdit={() => show(w)}
-                onDelete={async () => {
-                  if (confirm(`Excluir a carteira ${w.name}?`))
-                    try {
-                      await deleteWallet(w.id);
-                      await reload();
-                    } catch (e) {
-                      alert(
-                        e instanceof Error ? e.message : "Erro ao excluir.",
-                      );
-                    }
-                }}
+                onDelete={() => removeWalletEntry(w)}
               />
             </Td>
           </tr>
@@ -679,10 +695,10 @@ function Wallets({
         />
       )}
       {open && (
-        <Modal
+        <Modal isLocked={mutation.isLocked}
           title={editing ? "Editar carteira" : "Nova carteira"}
           close={close}
-          saving={saving}
+          saving={mutation.isPending || (saving)}
           submit={submit}
         >
           <Input label="Nome">
@@ -771,6 +787,7 @@ function Transactions({
   data: Data;
   reload: () => Promise<void>;
 }) {
+  const mutation = useMutation();
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [editing, setEditing] = useState<BankrollTransaction | null>(null);
@@ -794,7 +811,7 @@ function Transactions({
   const close = useCallback(() => {
     if (!saving) setOpen(false);
   }, [saving]);
-  useModalShortcuts({ enabled: open, onEscape: close });
+  useModalShortcuts({ isBlocked: mutation.isLocked, enabled: open, onEscape: close });
   const filteredTransactions = data.transactions.filter(
     (t) =>
       (!currency ||
@@ -841,6 +858,9 @@ function Transactions({
     setOpen(true);
   }
   async function submit() {
+    return mutation.run("submit", async () => {
+      try {
+
     if (!form.wallet_id) return alert("Informe a carteira.");
     try {
       setSaving(true);
@@ -887,8 +907,28 @@ function Transactions({
     } finally {
       setSaving(false);
     }
+
+      } finally { setSaving(false); }
+    });
   }
   const active = data.wallets.filter((w) => w.active);
+  async function removeBankrollEntry(t: BankrollTransaction) {
+    return mutation.run("removeBankrollEntry" + ":" + (t).id, async () => {
+
+                    if (confirm("Excluir esta movimentação?")) {
+                      try {
+                        await deleteTransaction(t);
+                        await reload();
+                      } catch (e) {
+                        alert(
+                          e instanceof Error ? e.message : "Erro ao excluir.",
+                        );
+                      }
+                    }
+
+    });
+  }
+
   return (
     <div className="space-y-4">
       <div className="grid gap-3 sm:grid-cols-3">
@@ -958,7 +998,7 @@ function Transactions({
           value={endDate}
           onChange={(e) => setEndDate(e.target.value)}
         />
-        <Add onClick={() => show()}>Nova movimentação</Add>
+        <Add disabled={mutation.isPending} onClick={() => show()}>Nova movimentação</Add>
       </Toolbar>
       <Table
         headers={["Data", "Carteira", "Tipo", "Descrição", "Valor", "Ações"]}
@@ -978,20 +1018,9 @@ function Transactions({
                 />
               </Td>
               <Td>
-                <Actions
+                <Actions disabled={mutation.isPending} busy={mutation.pending === ("removeBankrollEntry" + ":" + (t).id)}
                   onEdit={() => show(t)}
-                  onDelete={async () => {
-                    if (confirm("Excluir esta movimentação?")) {
-                      try {
-                        await deleteTransaction(t);
-                        await reload();
-                      } catch (e) {
-                        alert(
-                          e instanceof Error ? e.message : "Erro ao excluir.",
-                        );
-                      }
-                    }
-                  }}
+                  onDelete={() => removeBankrollEntry(t)}
                 />
               </Td>
             </tr>
@@ -1005,10 +1034,10 @@ function Transactions({
         />
       )}
       {open && (
-        <Modal
+        <Modal isLocked={mutation.isLocked}
           title={editing ? "Editar movimentação" : "Nova movimentação"}
           close={close}
-          saving={saving}
+          saving={mutation.isPending || (saving)}
           submit={submit}
         >
           <div className="grid gap-4 sm:grid-cols-2">
@@ -1135,6 +1164,7 @@ function Sessions({
   data: Data;
   reload: () => Promise<void>;
 }) {
+  const mutation = useMutation();
   const [open, setOpen] = useState(false),
     [saving, setSaving] = useState(false);
   const [editing, setEditing] = useState<BankrollSession | null>(null);
@@ -1167,7 +1197,7 @@ function Sessions({
   const close = useCallback(() => {
     if (!saving) setOpen(false);
   }, [saving]);
-  useModalShortcuts({ enabled: open, onEscape: close });
+  useModalShortcuts({ isBlocked: mutation.isLocked, enabled: open, onEscape: close });
   const rows = data.sessions.filter((s) => {
     const net = calculateSession(s).netResult;
     return (
@@ -1244,6 +1274,9 @@ function Sessions({
       ? [form.format, ...availableFormats]
       : availableFormats;
   async function submit() {
+    return mutation.run("submit", async () => {
+      try {
+
     if (!form.wallet_id || !form.game_type.trim())
       return alert("Informe carteira e modalidade.");
     try {
@@ -1291,7 +1324,27 @@ function Sessions({
     } finally {
       setSaving(false);
     }
+
+      } finally { setSaving(false); }
+    });
   }
+  async function removeSessionEntry(s: BankrollSession) {
+    return mutation.run("removeSessionEntry" + ":" + (s).id, async () => {
+
+                    if (confirm("Excluir esta sessão?")) {
+                      try {
+                        await deleteSession(s.id);
+                        await reload();
+                      } catch (e) {
+                        alert(
+                          e instanceof Error ? e.message : "Erro ao excluir.",
+                        );
+                      }
+                    }
+
+    });
+  }
+
   return (
     <div className="space-y-4">
       <Toolbar search={search} setSearch={setSearch}>
@@ -1352,7 +1405,7 @@ function Sessions({
           value={endDate}
           onChange={(e) => setEndDate(e.target.value)}
         />
-        <Add onClick={() => show()}>Nova sessão</Add>
+        <Add disabled={mutation.isPending} onClick={() => show()}>Nova sessão</Add>
       </Toolbar>
       <Table
         headers={[
@@ -1386,20 +1439,9 @@ function Sessions({
                 )}
               </Td>
               <Td>
-                <Actions
+                <Actions disabled={mutation.isPending} busy={mutation.pending === ("removeSessionEntry" + ":" + (s).id)}
                   onEdit={() => show(s)}
-                  onDelete={async () => {
-                    if (confirm("Excluir esta sessão?")) {
-                      try {
-                        await deleteSession(s.id);
-                        await reload();
-                      } catch (e) {
-                        alert(
-                          e instanceof Error ? e.message : "Erro ao excluir.",
-                        );
-                      }
-                    }
-                  }}
+                  onDelete={() => removeSessionEntry(s)}
                 />
               </Td>
             </tr>
@@ -1413,10 +1455,10 @@ function Sessions({
         />
       )}
       {open && (
-        <Modal
+        <Modal isLocked={mutation.isLocked}
           title={editing ? "Editar sessão" : "Nova sessão"}
           close={close}
-          saving={saving}
+          saving={mutation.isPending || (saving)}
           submit={submit}
           compact
         >
@@ -1683,15 +1725,18 @@ function Toolbar({
   );
 }
 function Add({
+  disabled = false,
   onClick,
   children,
 }: {
+  disabled?: boolean;
   onClick: () => void;
   children: React.ReactNode;
 }) {
   return (
     <button
       onClick={onClick}
+      disabled={disabled}
       className="flex items-center justify-center gap-2 rounded-xl bg-cyan-500 px-4 py-2.5 text-sm font-black text-slate-950 hover:bg-cyan-300"
     >
       <Plus size={17} />
@@ -1739,9 +1784,13 @@ function Td({
   );
 }
 function Actions({
+  busy = false,
+  disabled = false,
   onEdit,
   onDelete,
 }: {
+  busy?: boolean;
+  disabled?: boolean;
   onEdit: () => void;
   onDelete: () => void;
 }) {
@@ -1750,20 +1799,22 @@ function Actions({
       <button
         aria-label="Editar"
         onClick={onEdit}
+        disabled={disabled}
         className="rounded-lg border border-white/10 p-2 text-cyan-300"
       >
         <Pencil size={15} />
       </button>
-      <button
+      <ProcessingButton busy={busy} disabled={disabled}
         aria-label="Excluir"
         onClick={onDelete}
         className="rounded-lg border border-white/10 p-2 text-red-300"
       >
         <Trash2 size={15} />
-      </button>
+      </ProcessingButton>
     </div>
   );
 }
+
 function Result({ value, currency }: { value: number; currency: string }) {
   return (
     <span
@@ -1873,6 +1924,7 @@ function Modal({
   title,
   close,
   saving,
+  isLocked,
   submit,
   children,
   compact = false,
@@ -1880,12 +1932,13 @@ function Modal({
   title: string;
   close: () => void;
   saving: boolean;
+  isLocked: () => boolean;
   submit: () => void;
   children: React.ReactNode;
   compact?: boolean;
 }) {
   return (
-    <div
+    <MutationScope busy={saving} isLocked={isLocked}><div
       role="dialog"
       aria-modal="true"
       aria-label={title}
@@ -1929,7 +1982,7 @@ function Modal({
           >
             Cancelar
           </button>
-          <button
+          <ProcessingButton busy={saving}
             onClick={submit}
             disabled={saving}
             className={`rounded-xl bg-cyan-500 px-5 text-sm font-black text-slate-950 disabled:opacity-50 ${
@@ -1937,9 +1990,9 @@ function Modal({
             }`}
           >
             {saving ? "Salvando..." : "Salvar"}
-          </button>
+          </ProcessingButton>
         </div>
       </div>
-    </div>
+    </div></MutationScope>
   );
 }

@@ -1,6 +1,9 @@
 "use client";
 /* eslint-disable react-hooks/set-state-in-effect -- Legacy page synchronizes Supabase reference data on mount. */
 
+
+import { useMutation } from "@/src/hooks/useMutation";
+import { ProcessingButton, MutationScope } from "@/src/components/ui/Mutation";
 import { useEffect, useRef, useState } from "react";
 import AppShell from "../components/layout/AppShell";
 import { getCurrentUserId, supabase } from "@/src/lib/supabase";
@@ -44,6 +47,7 @@ const initialForm = {
 };
 
 export default function AccountsPage() {
+  const mutation = useMutation();
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [competences, setCompetences] = useState<Competence[]>([]);
   const [selectedCompetenceId, setSelectedCompetenceId] = useState("");
@@ -208,6 +212,8 @@ export default function AccountsPage() {
   }
 
   async function savePlanning() {
+    return mutation.run("savePlanning", async () => {
+
     const ownerId = await getCurrentUserId();
     if (!planningAccount) return;
 
@@ -237,6 +243,8 @@ export default function AccountsPage() {
     }
 
     closePlanningModal();
+
+    });
   }
 
   function closeDrawer() {
@@ -256,6 +264,8 @@ export default function AccountsPage() {
   }
 
   async function saveAccount() {
+    return mutation.run("saveAccount", async () => {
+
     const ownerId = await getCurrentUserId();
     if (!form.name || !form.type || !form.currency) {
       alert(
@@ -334,9 +344,13 @@ export default function AccountsPage() {
 
     closeDrawer();
     await loadAccounts();
+
+    });
   }
 
   async function toggleActive(account: Account) {
+    return mutation.run("toggleActive" + ":" + (account).id, async () => {
+
     const ownerId = await getCurrentUserId();
     const { error } = await supabase
       .from("accounts")
@@ -354,9 +368,13 @@ export default function AccountsPage() {
     }
 
     await loadAccounts();
+
+    });
   }
 
   async function deleteAccount(account: Account) {
+    return mutation.run("deleteAccount" + ":" + (account).id, async () => {
+
     const ownerId = await getCurrentUserId();
     const confirmed = window.confirm(
       `Tem certeza que deseja excluir "${account.name}"? Se já existir lançamento usando essa conta/cartão, o banco pode bloquear.`,
@@ -379,6 +397,8 @@ export default function AccountsPage() {
     }
 
     await loadAccounts();
+
+    });
   }
 
   function formatMoneyInput(value: string | number | null) {
@@ -426,7 +446,7 @@ export default function AccountsPage() {
             </p>
           </div>
 
-          <button
+          <button disabled={mutation.isPending}
             onClick={openNewDrawer}
             className="w-full rounded-xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white hover:bg-blue-500 md:w-auto"
           >
@@ -497,7 +517,7 @@ export default function AccountsPage() {
                       <TrendingUp size={16} />
                     </button>
 
-                    <button
+                    <button disabled={mutation.isPending}
                       title="Editar"
                       onClick={() => openEditDrawer(account)}
                       className="flex h-9 w-9 items-center justify-center rounded-xl border border-amber-500/20 bg-amber-500/10 text-amber-400"
@@ -505,21 +525,21 @@ export default function AccountsPage() {
                       <Pencil size={16} />
                     </button>
 
-                    <button
+                    <ProcessingButton busy={mutation.pending === ("toggleActive" + ":" + (account).id)} disabled={mutation.isPending}
                       title={account.active ? "Inativar" : "Ativar"}
                       onClick={() => toggleActive(account)}
                       className="flex h-9 w-9 items-center justify-center rounded-xl border border-slate-500/20 bg-slate-500/10 text-slate-300"
                     >
                       <Power size={16} />
-                    </button>
+                    </ProcessingButton>
 
-                    <button
+                    <ProcessingButton busy={mutation.pending === ("deleteAccount" + ":" + (account).id)} disabled={mutation.isPending}
                       title="Excluir"
                       onClick={() => deleteAccount(account)}
                       className="flex h-9 w-9 items-center justify-center rounded-xl border border-red-500/20 bg-red-500/10 text-red-400"
                     >
                       <Trash2 size={16} />
-                    </button>
+                    </ProcessingButton>
                   </div>
                 </div>
 
@@ -631,7 +651,7 @@ export default function AccountsPage() {
                           <TrendingUp size={18} />
                         </button>
 
-                        <button
+                        <button disabled={mutation.isPending}
                           title="Editar"
                           onClick={() => openEditDrawer(account)}
                           className="
@@ -650,7 +670,7 @@ export default function AccountsPage() {
                           <Pencil size={18} />
                         </button>
 
-                        <button
+                        <ProcessingButton busy={mutation.pending === ("toggleActive" + ":" + (account).id)} disabled={mutation.isPending}
                           title={account.active ? "Inativar" : "Ativar"}
                           onClick={() => toggleActive(account)}
                           className="
@@ -667,9 +687,9 @@ export default function AccountsPage() {
       "
                         >
                           <Power size={18} />
-                        </button>
+                        </ProcessingButton>
 
-                        <button
+                        <ProcessingButton busy={mutation.pending === ("deleteAccount" + ":" + (account).id)} disabled={mutation.isPending}
                           title="Excluir"
                           onClick={() => deleteAccount(account)}
                           className="
@@ -686,7 +706,7 @@ export default function AccountsPage() {
       "
                         >
                           <Trash2 size={18} />
-                        </button>
+                        </ProcessingButton>
                       </div>
                     </td>
                   </tr>
@@ -708,7 +728,7 @@ export default function AccountsPage() {
       </div>
 
       {isDrawerOpen && (
-        <div className="fixed inset-0 z-50 flex justify-end bg-black/60">
+        <MutationScope busy={mutation.isPending} isLocked={mutation.isLocked}><div className="fixed inset-0 z-50 flex justify-end bg-black/60">
           <div className="flex h-full w-full max-w-xl flex-col border-l border-white/10 bg-slate-950 shadow-2xl">
             <div className="mb-6 flex items-center justify-between">
               <div>
@@ -907,19 +927,19 @@ export default function AccountsPage() {
                   Cancelar
                 </button>
 
-                <button
+                <ProcessingButton busy={mutation.pending === ("saveAccount")} disabled={mutation.isPending}
                   onClick={saveAccount}
                   className="w-full rounded-xl bg-blue-600 px-5 py-3 font-semibold text-white hover:bg-blue-500"
                 >
                   {editingAccountId ? "Atualizar" : "Salvar"}
-                </button>
+                </ProcessingButton>
               </div>
             </div>
           </div>
-        </div>
+        </div></MutationScope>
       )}
       {isPlanningOpen && planningAccount && (
-        <div className="fixed inset-0 z-50 flex justify-end bg-black/60">
+        <MutationScope busy={mutation.isPending} isLocked={mutation.isLocked}><div className="fixed inset-0 z-50 flex justify-end bg-black/60">
           <div className="flex h-full w-full max-w-xl flex-col border-l border-white/10 bg-slate-950 shadow-2xl">
             <div className="flex-1 overflow-y-auto p-6">
               <div className="mb-6 flex items-start justify-between">
@@ -990,16 +1010,16 @@ export default function AccountsPage() {
                   Cancelar
                 </button>
 
-                <button
+                <ProcessingButton busy={mutation.pending === ("savePlanning")} disabled={mutation.isPending}
                   onClick={savePlanning}
                   className="w-full rounded-xl bg-blue-600 px-5 py-3 font-semibold text-white hover:bg-blue-500"
                 >
                   Salvar planejamento
-                </button>
+                </ProcessingButton>
               </div>
             </div>
           </div>
-        </div>
+        </div></MutationScope>
       )}
     </AppShell>
   );

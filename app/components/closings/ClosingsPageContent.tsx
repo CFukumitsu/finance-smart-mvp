@@ -1,5 +1,8 @@
 "use client";
 
+
+import { useMutation } from "@/src/hooks/useMutation";
+import { ProcessingButton } from "@/src/components/ui/Mutation";
 import { useEffect, useMemo, useState } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import {
@@ -88,6 +91,7 @@ function getCurrentCompetenceName() {
 }
 
 export default function ClosingsPageContent() {
+  const mutation = useMutation();
   const [competences, setCompetences] = useState<Competence[]>([]);
   const [selectedCompetenceId, setSelectedCompetenceId] = useState("");
   const [accounts, setAccounts] = useState<Account[]>([]);
@@ -332,6 +336,8 @@ export default function ClosingsPageContent() {
   }
 
   async function closeAccount(account: Account) {
+    return mutation.run("closeAccount" + ":" + (account).id, async () => {
+
     if (!selectedCompetenceId) return;
 
     const ownerId = await getCurrentUserId();
@@ -372,8 +378,12 @@ export default function ClosingsPageContent() {
     } finally {
       setIsProcessingId(null);
     }
+
+    });
   }
   async function closeCardStatement(account: Account) {
+    return mutation.run("closeCardStatement" + ":" + (account).id, async () => {
+
     if (!selectedCompetenceId) return;
 
     const ownerId = await getCurrentUserId();
@@ -467,9 +477,13 @@ export default function ClosingsPageContent() {
     } finally {
       setIsProcessingId(null);
     }
+
+    });
   }
 
   async function reopenCardStatement(statementId: string) {
+    return mutation.run("reopenCardStatement" + ":" + (statementId), async () => {
+
     if (!selectedCompetenceId) return;
 
     const ownerId = await getCurrentUserId();
@@ -494,8 +508,12 @@ export default function ClosingsPageContent() {
     } finally {
       setIsProcessingId(null);
     }
+
+    });
   }
   async function reopenAccount(accountId: string) {
+    return mutation.run("reopenAccount" + ":" + (accountId), async () => {
+
     if (!selectedCompetenceId) return;
 
     const ownerId = await getCurrentUserId();
@@ -521,9 +539,13 @@ export default function ClosingsPageContent() {
     } finally {
       setIsProcessingId(null);
     }
+
+    });
   }
 
   async function handleCloseCompetence() {
+    return mutation.run("handleCloseCompetence", async () => {
+
     if (!selectedCompetenceId) return;
 
     if (!canCloseCompetence) {
@@ -545,9 +567,13 @@ export default function ClosingsPageContent() {
     } finally {
       setIsProcessingId(null);
     }
+
+    });
   }
 
   async function handleReopenCompetence() {
+    return mutation.run("handleReopenCompetence", async () => {
+
     if (!selectedCompetenceId) return;
 
     if (!confirm("Deseja reabrir esta competência?")) return;
@@ -563,6 +589,8 @@ export default function ClosingsPageContent() {
     } finally {
       setIsProcessingId(null);
     }
+
+    });
   }
 
   function moveCompetence(direction: "previous" | "next") {
@@ -617,7 +645,7 @@ export default function ClosingsPageContent() {
       </div>
 
       <div className="flex items-center justify-between rounded-2xl border border-white/10 bg-slate-950/60 p-4">
-        <button
+        <button disabled={mutation.isPending}
           type="button"
           onClick={() => moveCompetence("previous")}
           className="rounded-xl border border-white/10 p-3 text-slate-300 hover:bg-white/10"
@@ -632,7 +660,7 @@ export default function ClosingsPageContent() {
           </h2>
         </div>
 
-        <button
+        <button disabled={mutation.isPending}
           type="button"
           onClick={() => moveCompetence("next")}
           className="rounded-xl border border-white/10 p-3 text-slate-300 hover:bg-white/10"
@@ -710,7 +738,7 @@ export default function ClosingsPageContent() {
                         <input
                           type="text"
                           inputMode="decimal"
-                          disabled={isClosed || isCompetenceClosed}
+                          disabled={mutation.isPending || (isClosed || isCompetenceClosed)}
                           value={formatInputCurrency(
                             accountBalanceInputs[account.id]?.openingBalance ?? 0
                           )}
@@ -756,7 +784,7 @@ export default function ClosingsPageContent() {
                         <input
                           type="text"
                           inputMode="decimal"
-                          disabled={isClosed || isCompetenceClosed}
+                          disabled={mutation.isPending || (isClosed || isCompetenceClosed)}
                           value={formatInputCurrency(
                             accountBalanceInputs[account.id]?.closingBalance ??
                             getAccountFinalBalance(account.id)
@@ -776,23 +804,23 @@ export default function ClosingsPageContent() {
 
                   <div className="flex justify-end lg:min-w-[96px]">
                     {isClosed ? (
-                      <button
+                      <ProcessingButton busy={mutation.pending === ("reopenAccount" + ":" + (account.id))}
                         type="button"
-                        disabled={isProcessing || isCompetenceClosed}
+                        disabled={mutation.isPending || (isProcessing || isCompetenceClosed)}
                         onClick={() => reopenAccount(account.id)}
                         className="rounded-xl border border-white/10 px-4 py-2 text-xs font-semibold text-slate-200 hover:bg-white/10 disabled:opacity-50"
                       >
                         Reabrir
-                      </button>
+                      </ProcessingButton>
                     ) : (
-                      <button
+                      <ProcessingButton busy={mutation.pending === ("closeAccount" + ":" + (account).id)}
                         type="button"
-                        disabled={isProcessing || isCompetenceClosed}
+                        disabled={mutation.isPending || (isProcessing || isCompetenceClosed)}
                         onClick={() => closeAccount(account)}
                         className="rounded-xl bg-emerald-500 px-4 py-2 text-xs font-bold text-slate-950 hover:bg-emerald-400 disabled:opacity-50"
                       >
                         {isProcessing ? "Fechando..." : "Fechar"}
-                      </button>
+                      </ProcessingButton>
                     )}
                   </div>
                 </div>
@@ -851,7 +879,7 @@ export default function ClosingsPageContent() {
                       <label className="text-xs text-slate-400">
                         Conta de pagamento opcional
                         <select
-                          disabled={isClosed || isCompetenceClosed}
+                          disabled={mutation.isPending || (isClosed || isCompetenceClosed)}
                           value={cardPaymentInputs[account.id]?.paymentAccountId ?? ""}
                           onChange={(event) =>
                             setCardPaymentInputs((current) => ({
@@ -878,7 +906,7 @@ export default function ClosingsPageContent() {
                         Data de pagamento opcional
                         <input
                           type="date"
-                          disabled={isClosed || isCompetenceClosed}
+                          disabled={mutation.isPending || (isClosed || isCompetenceClosed)}
                           value={cardPaymentInputs[account.id]?.paymentDueDate ?? ""}
                           onChange={(event) =>
                             setCardPaymentInputs((current) => ({
@@ -907,18 +935,18 @@ export default function ClosingsPageContent() {
 
                   <div className="flex justify-end lg:min-w-[128px]">
                     {isClosed && statement ? (
-                      <button
+                      <ProcessingButton busy={mutation.pending === ("reopenCardStatement" + ":" + (statement.id))}
                         type="button"
-                        disabled={isProcessing || isCompetenceClosed}
+                        disabled={mutation.isPending || (isProcessing || isCompetenceClosed)}
                         onClick={() => reopenCardStatement(statement.id)}
                         className="rounded-xl border border-white/10 px-4 py-2 text-xs font-semibold text-slate-200 hover:bg-white/10 disabled:opacity-50"
                       >
                         Reabrir
-                      </button>
+                      </ProcessingButton>
                     ) : (
-                      <button
+                      <ProcessingButton busy={mutation.pending === ("closeCardStatement" + ":" + (account).id)}
                         type="button"
-                        disabled={isProcessing || isCompetenceClosed}
+                        disabled={mutation.isPending || (isProcessing || isCompetenceClosed)}
                         onClick={() => closeCardStatement(account)}
                         className="rounded-xl bg-emerald-500 px-4 py-2 text-xs font-bold text-slate-950 hover:bg-emerald-400 disabled:opacity-50"
                       >
@@ -927,7 +955,7 @@ export default function ClosingsPageContent() {
                           : hasPaymentData
                             ? "Fechar e lançar"
                             : "Fechar fatura"}
-                      </button>
+                      </ProcessingButton>
                     )}
                   </div>
                 </div>
@@ -939,25 +967,25 @@ export default function ClosingsPageContent() {
 
       <div className="flex justify-end">
         {isCompetenceClosed ? (
-          <button
+          <ProcessingButton busy={mutation.pending === ("handleReopenCompetence")}
             type="button"
-            disabled={isProcessingId === selectedCompetenceId}
+            disabled={mutation.isPending || (isProcessingId === selectedCompetenceId)}
             onClick={handleReopenCompetence}
             className="rounded-xl border border-white/10 px-6 py-3 font-bold text-white hover:bg-white/10 disabled:opacity-50"
           >
             Reabrir competência
-          </button>
+          </ProcessingButton>
         ) : (
-          <button
+          <ProcessingButton busy={mutation.pending === ("handleCloseCompetence")}
             type="button"
             disabled={
-              !canCloseCompetence || isProcessingId === selectedCompetenceId
+              mutation.isPending || (!canCloseCompetence || isProcessingId === selectedCompetenceId)
             }
             onClick={handleCloseCompetence}
             className="rounded-xl bg-emerald-500 px-6 py-3 font-bold text-slate-950 hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-50"
           >
             Fechar competência
-          </button>
+          </ProcessingButton>
         )}
       </div>
     </div>

@@ -1,5 +1,8 @@
 "use client";
 
+
+import { useMutation } from "@/src/hooks/useMutation";
+import { ProcessingButton, MutationScope } from "@/src/components/ui/Mutation";
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
@@ -57,6 +60,7 @@ const emptyForm = {
 };
 
 export default function VehiclesPage() {
+  const mutation = useMutation();
   const router = useRouter();
 
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
@@ -79,17 +83,17 @@ export default function VehiclesPage() {
   async function loadVehicles() {
     try {
       setIsLoading(true);
-  
+
       const {
         data: { user },
         error: userError,
       } = await supabase.auth.getUser();
-  
+
       if (userError || !user) {
         router.replace("/login?next=/vehicles");
         return;
       }
-  
+
       const { data, error } = await supabase
         .from("vehicles")
         .select(`
@@ -109,15 +113,15 @@ export default function VehiclesPage() {
         .eq("owner_id", user.id)
         .order("is_default", { ascending: false })
         .order("name", { ascending: true });
-  
+
       if (error) {
         throw error;
       }
-  
+
       setVehicles((data ?? []) as Vehicle[]);
     } catch (error) {
       console.error("Erro ao carregar veículos:", error);
-  
+
       alert(
         error instanceof Error
           ? error.message
@@ -238,6 +242,9 @@ export default function VehiclesPage() {
   }
 
   async function saveVehicle() {
+    return mutation.run("saveVehicle", async () => {
+      try {
+
     const name = form.name.trim();
     const modelYear = form.model_year
       ? Number(form.model_year)
@@ -333,9 +340,14 @@ export default function VehiclesPage() {
     } finally {
       setIsSaving(false);
     }
+
+      } finally { setIsSaving(false); }
+    });
   }
 
   async function setDefaultVehicle(vehicle: Vehicle) {
+    return mutation.run("setDefaultVehicle" + ":" + (vehicle).id, async () => {
+
     if (!vehicle.active) {
       alert("Ative o veículo antes de defini-lo como padrão.");
       return;
@@ -365,9 +377,13 @@ export default function VehiclesPage() {
       console.error("Erro ao definir veículo padrão:", error);
       alert("Erro ao definir veículo padrão.");
     }
+
+    });
   }
 
   async function toggleVehicleStatus(vehicle: Vehicle) {
+    return mutation.run("toggleVehicleStatus" + ":" + (vehicle).id, async () => {
+
     const action = vehicle.active ? "inativar" : "ativar";
 
     const confirmed = window.confirm(
@@ -399,6 +415,8 @@ export default function VehiclesPage() {
       console.error("Erro ao alterar status do veículo:", error);
       alert("Erro ao alterar status do veículo.");
     }
+
+    });
   }
 
   const totalActiveVehicles = vehicles.filter(
@@ -600,7 +618,7 @@ export default function VehiclesPage() {
                       <div className="flex justify-end gap-1">
                         {vehicle.active &&
                           !vehicle.is_default && (
-                            <button
+                            <ProcessingButton busy={mutation.pending === ("setDefaultVehicle" + ":" + (vehicle).id)} disabled={mutation.isPending}
                               type="button"
                               onClick={() =>
                                 setDefaultVehicle(vehicle)
@@ -609,7 +627,7 @@ export default function VehiclesPage() {
                               className="rounded-lg p-2 text-amber-300 hover:bg-amber-500/10"
                             >
                               <Star size={18} />
-                            </button>
+                            </ProcessingButton>
                           )}
 
                         <button
@@ -623,7 +641,7 @@ export default function VehiclesPage() {
                           <Pencil size={18} />
                         </button>
 
-                        <button
+                        <ProcessingButton busy={mutation.pending === ("toggleVehicleStatus" + ":" + (vehicle).id)} disabled={mutation.isPending}
                           type="button"
                           onClick={() =>
                             toggleVehicleStatus(vehicle)
@@ -644,7 +662,7 @@ export default function VehiclesPage() {
                           ) : (
                             <Power size={18} />
                           )}
-                        </button>
+                        </ProcessingButton>
                       </div>
                     </td>
                   </tr>
@@ -667,7 +685,7 @@ export default function VehiclesPage() {
       </div>
 
       {isDrawerOpen && (
-        <div className="fixed inset-0 z-50 flex justify-end bg-black/60">
+        <MutationScope busy={mutation.isPending} isLocked={mutation.isLocked}><div className="fixed inset-0 z-50 flex justify-end bg-black/60">
           <div className="h-full w-full max-w-xl overflow-y-auto border-l border-white/10 bg-slate-950 p-6 shadow-2xl">
             <div className="mb-6 flex items-center justify-between gap-4">
               <div>
@@ -967,10 +985,10 @@ export default function VehiclesPage() {
                   Cancelar
                 </button>
 
-                <button
+                <ProcessingButton busy={mutation.pending === ("saveVehicle")}
                   type="button"
                   onClick={saveVehicle}
-                  disabled={isSaving}
+                  disabled={mutation.isPending || (isSaving)}
                   className="flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 py-3 font-semibold text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   <Check size={18} />
@@ -980,11 +998,11 @@ export default function VehiclesPage() {
                     : editingVehicleId
                       ? "Atualizar veículo"
                       : "Salvar veículo"}
-                </button>
+                </ProcessingButton>
               </div>
             </div>
           </div>
-        </div>
+        </div></MutationScope>
       )}
     </AppShell>
   );

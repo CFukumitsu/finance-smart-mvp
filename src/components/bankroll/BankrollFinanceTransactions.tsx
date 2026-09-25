@@ -1,5 +1,8 @@
 "use client";
 
+
+import { useMutation } from "@/src/hooks/useMutation";
+import { ProcessingButton, MutationScope } from "@/src/components/ui/Mutation";
 import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Pencil, Plus, Trash2, X } from "lucide-react";
@@ -59,6 +62,7 @@ function blank(type: "deposit" | "withdrawal" = "deposit"): FormState {
 }
 
 export default function BankrollFinanceTransactions({ data, reload }: { data: Data; reload: () => Promise<void> }) {
+  const mutation = useMutation();
   const searchParams = useSearchParams();
   const quickActionOpened = useRef(false);
   const [open, setOpen] = useState(false);
@@ -75,7 +79,7 @@ export default function BankrollFinanceTransactions({ data, reload }: { data: Da
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const close = useCallback(() => { if (!saving) setOpen(false); }, [saving]);
-  useModalShortcuts({ enabled: open, onEscape: close });
+  useModalShortcuts({ isBlocked: mutation.isLocked, enabled: open, onEscape: close });
 
   const show = useCallback((transaction?: BankrollTransaction, quickType?: "deposit" | "withdrawal") => {
     setEditing(transaction ?? null);
@@ -160,6 +164,9 @@ export default function BankrollFinanceTransactions({ data, reload }: { data: Da
   const activeWallets = data.wallets.filter((wallet) => wallet.active || wallet.id === form.walletId);
 
   async function submit() {
+    return mutation.run("submit", async () => {
+      try {
+
     if (saving) return;
     try {
       setSaving(true);
@@ -190,13 +197,20 @@ export default function BankrollFinanceTransactions({ data, reload }: { data: Da
     } finally {
       setSaving(false);
     }
+
+      } finally { setSaving(false); }
+    });
   }
 
   async function remove(transaction: BankrollTransaction) {
+    return mutation.run("remove" + ":" + (transaction).id, async () => {
+
     const question = transaction.finance_link ? "Excluir a operação integrada nos dois módulos?" : "Excluir esta movimentação?";
     if (!confirm(question)) return;
     try { await deleteTransaction(transaction); await reload(); }
     catch (error) { alert(error instanceof Error ? error.message : "Erro ao excluir."); }
+
+    });
   }
 
   function integrationStatus(transaction: BankrollTransaction) {
@@ -226,15 +240,15 @@ export default function BankrollFinanceTransactions({ data, reload }: { data: Da
       <select aria-label="Moeda" className={field} value={currency} onChange={(event) => { setCurrency(event.target.value); setWalletFilter(""); }}><option value="">Todas as moedas</option>{[...new Set(data.wallets.map((wallet) => wallet.currency))].map((value) => <option value={value} key={value}>{value}</option>)}</select>
       <input aria-label="Data inicial" type="date" className={field} value={startDate} onChange={(event) => setStartDate(event.target.value)} />
       <input aria-label="Data final" type="date" className={field} value={endDate} onChange={(event) => setEndDate(event.target.value)} />
-      <button onClick={() => show()} className="flex items-center justify-center gap-2 rounded-xl bg-cyan-500 px-4 py-2.5 text-sm font-black text-slate-950 hover:bg-cyan-300"><Plus size={17}/>Nova movimentação</button>
+      <button disabled={mutation.isPending} onClick={() => show()} className="flex items-center justify-center gap-2 rounded-xl bg-cyan-500 px-4 py-2.5 text-sm font-black text-slate-950 hover:bg-cyan-300"><Plus size={17}/>Nova movimentação</button>
     </div>
 
-    <div className="grid gap-3 md:hidden">{view.rows.map((transaction) => { const wallet = data.wallets.find((item) => item.id === transaction.wallet_id); return <article key={transaction.id} className="rounded-2xl border border-white/10 bg-slate-950/60 p-4"><div className="flex justify-between gap-3"><div><p className="text-xs text-slate-500">{displayDate(transaction.transaction_date)}</p><h3 className="font-bold text-white">{labels[transaction.transaction_type]}</h3><p className="text-sm text-slate-400">{wallet?.name}</p></div><strong className={transaction.direction === "in" ? "text-emerald-300" : "text-red-300"}>{money(getTransactionEffect(transaction), wallet?.currency ?? "BRL")}</strong></div><div className="mt-3 flex items-center justify-between"><span className="rounded-full bg-cyan-500/10 px-2 py-1 text-xs text-cyan-300">{integrationStatus(transaction)}</span><div className="flex gap-2"><button aria-label="Editar" onClick={() => show(transaction)} className="rounded-lg border border-white/10 p-2 text-cyan-300"><Pencil size={15}/></button><button aria-label="Excluir" onClick={() => void remove(transaction)} className="rounded-lg border border-white/10 p-2 text-red-300"><Trash2 size={15}/></button></div></div></article>; })}</div>
+    <div className="grid gap-3 md:hidden">{view.rows.map((transaction) => { const wallet = data.wallets.find((item) => item.id === transaction.wallet_id); return <article key={transaction.id} className="rounded-2xl border border-white/10 bg-slate-950/60 p-4"><div className="flex justify-between gap-3"><div><p className="text-xs text-slate-500">{displayDate(transaction.transaction_date)}</p><h3 className="font-bold text-white">{labels[transaction.transaction_type]}</h3><p className="text-sm text-slate-400">{wallet?.name}</p></div><strong className={transaction.direction === "in" ? "text-emerald-300" : "text-red-300"}>{money(getTransactionEffect(transaction), wallet?.currency ?? "BRL")}</strong></div><div className="mt-3 flex items-center justify-between"><span className="rounded-full bg-cyan-500/10 px-2 py-1 text-xs text-cyan-300">{integrationStatus(transaction)}</span><div className="flex gap-2"><button disabled={mutation.isPending} aria-label="Editar" onClick={() => show(transaction)} className="rounded-lg border border-white/10 p-2 text-cyan-300"><Pencil size={15}/></button><ProcessingButton busy={mutation.pending === ("remove" + ":" + (transaction).id)} disabled={mutation.isPending} aria-label="Excluir" onClick={() => void remove(transaction)} className="rounded-lg border border-white/10 p-2 text-red-300"><Trash2 size={15}/></ProcessingButton></div></div></article>; })}</div>
 
-    <div className="hidden overflow-x-auto rounded-2xl border border-white/10 bg-slate-950/60 md:block"><table className="w-full min-w-[980px] text-left text-sm"><thead className="bg-slate-900 text-xs uppercase text-slate-400"><tr>{["Data", "Carteira", "Conta financeira", "Tipo", "Modo", "Valor", "Ações"].map((header) => <th className="px-4 py-3" key={header}>{header}</th>)}</tr></thead><tbody>{view.rows.map((transaction) => { const wallet = data.wallets.find((item) => item.id === transaction.wallet_id); const account = data.financeAccounts.find((item) => item.id === transaction.finance_link?.finance_transaction?.account_id); return <tr key={transaction.id} className="border-t border-white/10"><td className="px-4 py-3">{displayDate(transaction.transaction_date)}</td><td className="px-4 py-3">{wallet?.name ?? "—"}</td><td className="px-4 py-3">{account?.name ?? "—"}</td><td className="px-4 py-3">{labels[transaction.transaction_type]}</td><td className="px-4 py-3 text-cyan-300">{integrationStatus(transaction)}</td><td className={transaction.direction === "in" ? "px-4 py-3 font-bold text-emerald-300" : "px-4 py-3 font-bold text-red-300"}>{money(getTransactionEffect(transaction), wallet?.currency ?? "BRL")}</td><td className="px-4 py-3"><div className="flex gap-2"><button aria-label="Editar" onClick={() => show(transaction)} className="rounded-lg border border-white/10 p-2 text-cyan-300"><Pencil size={15}/></button><button aria-label="Excluir" onClick={() => void remove(transaction)} className="rounded-lg border border-white/10 p-2 text-red-300"><Trash2 size={15}/></button></div></td></tr>; })}</tbody></table></div>
+    <div className="hidden overflow-x-auto rounded-2xl border border-white/10 bg-slate-950/60 md:block"><table className="w-full min-w-[980px] text-left text-sm"><thead className="bg-slate-900 text-xs uppercase text-slate-400"><tr>{["Data", "Carteira", "Conta financeira", "Tipo", "Modo", "Valor", "Ações"].map((header) => <th className="px-4 py-3" key={header}>{header}</th>)}</tr></thead><tbody>{view.rows.map((transaction) => { const wallet = data.wallets.find((item) => item.id === transaction.wallet_id); const account = data.financeAccounts.find((item) => item.id === transaction.finance_link?.finance_transaction?.account_id); return <tr key={transaction.id} className="border-t border-white/10"><td className="px-4 py-3">{displayDate(transaction.transaction_date)}</td><td className="px-4 py-3">{wallet?.name ?? "—"}</td><td className="px-4 py-3">{account?.name ?? "—"}</td><td className="px-4 py-3">{labels[transaction.transaction_type]}</td><td className="px-4 py-3 text-cyan-300">{integrationStatus(transaction)}</td><td className={transaction.direction === "in" ? "px-4 py-3 font-bold text-emerald-300" : "px-4 py-3 font-bold text-red-300"}>{money(getTransactionEffect(transaction), wallet?.currency ?? "BRL")}</td><td className="px-4 py-3"><div className="flex gap-2"><button disabled={mutation.isPending} aria-label="Editar" onClick={() => show(transaction)} className="rounded-lg border border-white/10 p-2 text-cyan-300"><Pencil size={15}/></button><ProcessingButton busy={mutation.pending === ("remove" + ":" + (transaction).id)} disabled={mutation.isPending} aria-label="Excluir" onClick={() => void remove(transaction)} className="rounded-lg border border-white/10 p-2 text-red-300"><Trash2 size={15}/></ProcessingButton></div></td></tr>; })}</tbody></table></div>
     {!view.rows.length && <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-8 text-center text-slate-400">Nenhuma movimentação encontrada.</div>}
 
-    {open && <div role="dialog" aria-modal="true" aria-label={editing ? "Editar movimentação" : "Nova movimentação"} className="fixed inset-0 z-[80] flex items-end justify-center bg-black/70 sm:items-center sm:p-4"><div className="max-h-[92vh] w-full max-w-2xl overflow-y-auto rounded-t-3xl border border-white/10 bg-slate-950 p-5 sm:rounded-3xl"><div className="mb-5 flex items-center justify-between"><h2 className="text-xl font-black text-white">{editing ? "Editar movimentação" : "Nova movimentação"}</h2><button aria-label="Fechar" onClick={close} className="rounded-lg p-2 text-slate-400"><X/></button></div><div className="space-y-4">
+    {open && <MutationScope busy={mutation.isPending} isLocked={mutation.isLocked}><div role="dialog" aria-modal="true" aria-label={editing ? "Editar movimentação" : "Nova movimentação"} className="fixed inset-0 z-[80] flex items-end justify-center bg-black/70 sm:items-center sm:p-4"><div className="max-h-[92vh] w-full max-w-2xl overflow-y-auto rounded-t-3xl border border-white/10 bg-slate-950 p-5 sm:rounded-3xl"><div className="mb-5 flex items-center justify-between"><h2 className="text-xl font-black text-white">{editing ? "Editar movimentação" : "Nova movimentação"}</h2><button aria-label="Fechar" onClick={close} className="rounded-lg p-2 text-slate-400"><X/></button></div><div className="space-y-4">
       <div className="grid gap-4 sm:grid-cols-2"><Field label="Data"><input type="date" max={today()} className={field} value={form.date} onChange={(event) => setForm({ ...form, date: event.target.value })}/></Field><Field label="Tipo"><select disabled={Boolean(editing?.finance_link)} className={field} value={form.type} onChange={(event) => setForm({ ...form, type: event.target.value as FormState["type"] })}>{["deposit", "withdrawal", "transfer", "bonus", "adjustment", "staking_received", "staking_paid"].map((type) => <option value={type} key={type}>{labels[type]}</option>)}</select></Field></div>
       {["deposit", "withdrawal"].includes(form.type) && <Field label="Modo de registro"><select disabled={Boolean(editing)} className={field} value={form.mode} onChange={(event) => setForm({ ...form, mode: event.target.value as BankrollFinanceIntegrationMode, financeAccountId: "" })}><option value="integrated">Integrado ao Financeiro</option><option value="bankroll_only">Somente no Bankroll</option></select>{editing && <span className="block text-xs font-normal text-slate-500">O modo de uma movimentação existente não pode ser convertido.</span>}</Field>}
       <Field label={form.type === "transfer" || form.type === "withdrawal" ? "Carteira de origem" : "Carteira de destino"}><select className={field} value={form.walletId} onChange={(event) => setForm({ ...form, walletId: event.target.value, financeAccountId: "" })}><option value="">Selecione</option>{activeWallets.map((wallet) => <option value={wallet.id} key={wallet.id}>{wallet.name} ({wallet.currency})</option>)}</select></Field>
@@ -267,7 +281,7 @@ export default function BankrollFinanceTransactions({ data, reload }: { data: Da
       {integrated ? <div className="rounded-xl border border-cyan-400/20 bg-cyan-500/10 p-4 text-sm text-cyan-100">{form.type === "deposit" ? `Saída na conta financeira e entrada na carteira ${selectedWallet?.name ?? "selecionada"}.` : `Saída na carteira ${selectedWallet?.name ?? "selecionada"} e entrada na conta financeira.`}<span className="mt-1 block text-xs text-cyan-300">Não será contabilizada como receita ou despesa.</span></div> : (["deposit", "withdrawal"].includes(form.type) && <div className="rounded-xl border border-amber-400/20 bg-amber-500/10 p-3 text-sm text-amber-200">Nenhum lançamento será criado no Financeiro.</div>)}
       {!integrated && <Field label="Descrição"><input className={field} value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })}/></Field>}
       <Field label="Observações"><textarea className={field} value={form.notes} onChange={(event) => setForm({ ...form, notes: event.target.value })}/></Field>
-    </div><div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end"><button onClick={close} disabled={saving} className="rounded-xl border border-white/10 px-4 py-2.5 text-sm font-bold text-slate-300">Cancelar</button><button onClick={() => void submit()} disabled={saving} className="rounded-xl bg-cyan-500 px-5 py-2.5 text-sm font-black text-slate-950 disabled:opacity-50">{saving ? "Salvando..." : "Salvar"}</button></div></div></div>}
+    </div><div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end"><button onClick={close} disabled={saving} className="rounded-xl border border-white/10 px-4 py-2.5 text-sm font-bold text-slate-300">Cancelar</button><ProcessingButton busy={mutation.pending === ("submit")} onClick={() => void submit()} disabled={mutation.isPending || (saving)} className="rounded-xl bg-cyan-500 px-5 py-2.5 text-sm font-black text-slate-950 disabled:opacity-50">{saving ? "Salvando..." : "Salvar"}</ProcessingButton></div></div></div></MutationScope>}
   </div>;
 }
 

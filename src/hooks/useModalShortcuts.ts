@@ -2,12 +2,14 @@ import { useEffect } from "react";
 
 type ModalShortcutOptions = {
   enabled: boolean;
+  isBlocked?: () => boolean;
   onEscape?: () => void;
   onEnter?: () => void;
 };
 
 export function useModalShortcuts({
   enabled,
+  isBlocked,
   onEscape,
   onEnter,
 }: ModalShortcutOptions) {
@@ -15,6 +17,7 @@ export function useModalShortcuts({
     if (!enabled) return;
 
     function handleKeyDown(event: KeyboardEvent) {
+      if (isBlocked?.()) return;
       const target = event.target as HTMLElement | null;
       const tagName = target?.tagName?.toLowerCase();
 
@@ -37,5 +40,5 @@ export function useModalShortcuts({
     return () => {
       window.removeEventListener("keydown", handleKeyDown);
     };
-  }, [enabled, onEscape, onEnter]);
+  }, [enabled, isBlocked, onEscape, onEnter]);
 }

@@ -1,5 +1,7 @@
 "use client";
 
+
+import { useMutation } from "@/src/hooks/useMutation";
 import { useCallback, useMemo, useRef, useState } from "react";
 import {
   deleteInvestmentOperation,
@@ -41,6 +43,7 @@ export default function InvestmentOperations({
   data: InvestmentData;
   reload: () => Promise<void>;
 }) {
+  const mutation = useMutation();
   const [search, setSearch] = useState("");
   const [assetFilter, setAssetFilter] = useState("");
   const [accountFilter, setAccountFilter] = useState("");
@@ -188,6 +191,9 @@ export default function InvestmentOperations({
   }
 
   async function submit() {
+    return mutation.run("submit", async () => {
+      try {
+
     if (submissionLock.current) return;
 
     const quantity = parseInvestmentDecimal(form.quantity);
@@ -233,9 +239,14 @@ export default function InvestmentOperations({
       submissionLock.current = false;
       setSaving(false);
     }
+
+      } finally { setSaving(false); }
+    });
   }
 
   async function remove(operation: InvestmentOperation) {
+    return mutation.run("remove" + ":" + (operation).id, async () => {
+
     if (!confirm("Excluir esta operação? A posição será recalculada.")) return;
 
     try {
@@ -246,6 +257,8 @@ export default function InvestmentOperations({
         value instanceof Error ? value.message : "Não foi possível excluir.",
       );
     }
+
+    });
   }
 
   const selectedAsset = assetsById.get(form.assetId);
@@ -339,7 +352,7 @@ export default function InvestmentOperations({
           <option value="asset">Ativo</option>
           <option value="account">Conta</option>
         </select>
-        <InvestmentAddButton onClick={() => show()}>
+        <InvestmentAddButton disabled={mutation.isPending} onClick={() => show()}>
           Nova operação
         </InvestmentAddButton>
       </InvestmentToolbar>
@@ -402,7 +415,7 @@ export default function InvestmentOperations({
                   {formatInvestmentMoney(operation.fees, currency)}
                 </InvestmentTd>
                 <InvestmentTd>
-                  <InvestmentActions
+                  <InvestmentActions disabled={mutation.isPending} busy={mutation.pending === ("remove" + ":" + (operation).id)}
                     onEdit={() => show(operation)}
                     onDelete={() => void remove(operation)}
                   />
@@ -429,10 +442,10 @@ export default function InvestmentOperations({
       )}
 
       {open && (
-        <InvestmentModal
+        <InvestmentModal isLocked={mutation.isLocked}
           title={editing ? "Editar operação" : "Nova operação"}
           close={close}
-          saving={saving}
+          saving={mutation.isPending || (saving)}
           submit={submit}
         >
           <div className="grid gap-4 sm:grid-cols-2">
