@@ -102,6 +102,11 @@ export default function FuelStationsPage() {
     null,
   );
   const [locationMessage, setLocationMessage] = useState("");
+  const [deviceCoordinates, setDeviceCoordinates] = useState<{
+    latitude: string;
+    longitude: string;
+    accuracy: number;
+  } | null>(null);
   const { getPosition, cancelPosition, isLocating, diagnostics } =
     useGeolocation();
 
@@ -264,12 +269,16 @@ export default function FuelStationsPage() {
     setNearbyOrigin(null);
     setHighlightedPlaceId(null);
     setLocationMessage("");
+    setDeviceCoordinates(null);
     setSelectingPlaceId(null);
   }
 
   function openNewStationDrawer() {
     resetForm();
     setIsDrawerOpen(true);
+    // O cadastro normalmente acontece no próprio posto: a localização já é
+    // buscada ao abrir, sem depender de um clique extra.
+    void searchNearbyStations();
   }
 
   function openEditStationDrawer(station: FuelStation) {
@@ -454,6 +463,29 @@ export default function FuelStationsPage() {
         accuracy: position.coords.accuracy,
       });
       setNearbyOrigin({ latitude, longitude });
+
+      // Sem coordenadas o posto nunca poderá ser sugerido no abastecimento.
+      // Uma leitura precisa preenche os campos vazios; selecionar um posto do
+      // Google depois substitui pelas coordenadas oficiais do estabelecimento.
+      if (
+        position.coords.accuracy <= PREFERRED_NEARBY_LOCATION_ACCURACY_METERS
+      ) {
+        const coordinates = {
+          latitude: latitude.toFixed(7),
+          longitude: longitude.toFixed(7),
+        };
+        setDeviceCoordinates({
+          ...coordinates,
+          accuracy: Math.round(position.coords.accuracy),
+        });
+        setForm((current) =>
+          current.google_place_id ||
+          current.latitude.trim() ||
+          current.longitude.trim()
+            ? current
+            : { ...current, ...coordinates },
+        );
+      }
 
       if (
         position.coords.accuracy > PREFERRED_NEARBY_LOCATION_ACCURACY_METERS
@@ -1364,6 +1396,16 @@ export default function FuelStationsPage() {
                     />
                   </div>
                 </div>
+
+                {deviceCoordinates &&
+                  form.latitude === deviceCoordinates.latitude &&
+                  form.longitude === deviceCoordinates.longitude && (
+                    <p className="mt-3 text-xs text-amber-200">
+                      Coordenadas preenchidas com sua localização atual (±
+                      {deviceCoordinates.accuracy} m). Se você não está no
+                      posto, selecione-o na lista acima ou corrija os campos.
+                    </p>
+                  )}
               </div>
 
               {editingStationId && (

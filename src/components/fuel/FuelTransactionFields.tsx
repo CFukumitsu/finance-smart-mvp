@@ -8,13 +8,16 @@ import {
   loadActiveFuelStations,
 } from "@/src/services/fuelService";
 import { useGeolocation } from "@/src/hooks/useGeolocation";
-import { PreciseGeolocationError } from "@/src/utils/preciseGeolocation";
+import {
+  PreciseGeolocationError,
+  type PreciseGeolocationOptions,
+} from "@/src/utils/preciseGeolocation";
 import { logFuelGeolocationDev } from "@/src/utils/fuelGeolocationDiagnostics";
 import type { FuelStationOption } from "@/src/types/fuel";
 import { parsePtBrNumber } from "@/src/utils/fuelCalculations";
 import {
-  findNearestRegisteredStation,
-  NEARBY_REGISTERED_STATION_RADIUS_METERS,
+  suggestNearestFuelStation,
+  type FuelStationSuggestion,
 } from "@/src/utils/fuelStationProximity";
 import {
   DEFAULT_NEW_FUEL_TYPE,
@@ -70,6 +73,36 @@ const fuelRecordTypeForVehicle = (fuelType?: string) =>
   fuelType ??
   "Gasolina comum";
 
+// Evita aceitar a primeira leitura grosseira ou uma posição em cache anterior
+// à chegada no posto. Leituras de até 100 m continuam sendo aceitas na hora.
+const FUEL_TRANSACTION_LOCATION_OPTIONS = {
+  maximumAgeMs: 10_000,
+  minimumSampleCount: 2,
+  minimumWaitMs: 3_000,
+} satisfies PreciseGeolocationOptions;
+
+function describeStationSuggestion(
+  suggestion: FuelStationSuggestion<FuelStationOption>,
+  hasGenericStation: boolean
+) {
+  const fallback = hasGenericStation
+    ? "Selecionamos Outros postos."
+    : "Escolha um posto manualmente.";
+
+  switch (suggestion.status) {
+    case "matched":
+      return `Posto sugerido automaticamente: ${suggestion.station.name} (a ${Math.round(suggestion.distanceMeters)} m).`;
+    case "none-nearby":
+      return `Nenhum posto cadastrado a até ${suggestion.radiusMeters} m. ${fallback}`;
+    case "no-stations-with-location":
+      return `Nenhum posto cadastrado possui localização. Cadastre o posto pelo Google ou com sua localização para receber sugestões. ${fallback}`;
+    case "inaccurate":
+      return `Localização imprecisa (±${suggestion.accuracyMeters} m) para identificar o posto. Toque em Atualizar localização ou escolha manualmente.`;
+    case "invalid-origin":
+      return `O dispositivo retornou coordenadas inválidas. ${fallback}`;
+  }
+}
+
 export default function FuelTransactionFields({
   value,
   onChange,
@@ -99,18 +132,24 @@ export default function FuelTransactionFields({
     onChangeRef.current(nextValue);
   }
 
-  async function captureLocationAndSuggest(
+  function startLocationRequest() {
+    applyChange({ latitude: "", longitude: "" });
+    setMessage("Obtendo localização precisa...");
+    return getPosition({
+      ...FUEL_TRANSACTION_LOCATION_OPTIONS,
+      onAccuracyChange(accuracyMeters) {
+        setMessage(`Precisão aproximada: ${Math.round(accuracyMeters)} metros`);
+      },
+    });
+  }
+
+  async function suggestStationFromLocation(
+    positionRequest: Promise<GeolocationPosition>,
     availableStations: FuelStationOption[],
     genericStation: FuelStationOption | null
   ) {
     try {
-      applyChange({ latitude: "", longitude: "" });
-      setMessage("Obtendo localização precisa...");
-      const position = await getPosition({
-        onAccuracyChange(accuracyMeters) {
-          setMessage(`Precisão aproximada: ${Math.round(accuracyMeters)} metros`);
-        },
-      });
+      const position = await positionRequest;
       const coordinates = {
         latitude: position.coords.latitude,
         longitude: position.coords.longitude,
@@ -120,22 +159,24 @@ export default function FuelTransactionFields({
         ...coordinates,
         accuracy: position.coords.accuracy,
       });
-      logFuelGeolocationDev("registered_stations_search_started", {
-        flow: "fuel-transaction",
-        availableStationCount: availableStations.length,
-      });
-      const nearest = findNearestRegisteredStation(
+      const suggestion = suggestNearestFuelStation(
         coordinates,
+        position.coords.accuracy,
         availableStations
       );
       logFuelGeolocationDev("registered_stations_search_completed", {
         flow: "fuel-transaction",
         availableStationCount: availableStations.length,
-        foundStation: Boolean(nearest),
+        status: suggestion.status,
+        radiusMeters: "radiusMeters" in suggestion ? suggestion.radiusMeters : null,
+        distanceMeters:
+          suggestion.status === "matched" ? suggestion.distanceMeters : null,
       });
       const stationId = manualStationSelectionRef.current
         ? valueRef.current.fuel_station_id
-        : nearest?.station.id ?? genericStation?.id ?? "";
+        : suggestion.status === "matched"
+          ? suggestion.station.id
+          : genericStation?.id ?? "";
 
       applyChange({
         latitude: String(coordinates.latitude),
@@ -143,19 +184,11 @@ export default function FuelTransactionFields({
         fuel_station_id: stationId,
       });
 
-      if (manualStationSelectionRef.current) {
-        setMessage("Localização atualizada. Sua escolha manual de posto foi preservada.");
-      } else if (nearest) {
-        setMessage(
-          `Posto sugerido automaticamente a ${Math.round(nearest.distanceMeters)} m.`
-        );
-      } else if (genericStation) {
-        setMessage(
-          `Nenhum posto cadastrado foi encontrado em até ${NEARBY_REGISTERED_STATION_RADIUS_METERS} m. Selecionamos Outros postos.`
-        );
-      } else {
-        setMessage("Não foi possível determinar um posto automaticamente. Escolha um posto manualmente.");
-      }
+      setMessage(
+        manualStationSelectionRef.current
+          ? "Localização atualizada. Sua escolha manual de posto foi preservada."
+          : describeStationSuggestion(suggestion, genericStation !== null)
+      );
     } catch (error) {
       if (error instanceof PreciseGeolocationError && error.code === "CANCELLED") {
         return;
@@ -171,6 +204,15 @@ export default function FuelTransactionFields({
     let cancelled = false;
 
     async function initialize() {
+      // A localização começa junto com o carregamento dos dados para que o
+      // GPS já esteja estabilizando enquanto os postos são consultados.
+      const positionRequest =
+        !isEditing && !valueRef.current.fuel_station_id
+          ? startLocationRequest()
+          : null;
+      // Evita rejeição não tratada se o carregamento falhar antes do await.
+      positionRequest?.catch(() => undefined);
+
       try {
         const ownerId = await getCurrentUserId();
         const vehiclesResponse = await supabase
@@ -186,7 +228,8 @@ export default function FuelTransactionFields({
         try {
           genericStation = await ensureGenericFuelStation();
         } catch (error) {
-          console.error("Erro ao preparar posto genérico:", error);
+          // Recurso opcional: a falha não pode bloquear o lançamento.
+          console.warn("Posto genérico indisponível:", error);
         }
 
         const availableStations = await loadActiveFuelStations();
@@ -206,8 +249,12 @@ export default function FuelTransactionFields({
         );
         if (automaticVehiclePatch) applyChange(automaticVehiclePatch);
 
-        if (!isEditing && !valueRef.current.fuel_station_id) {
-          await captureLocationAndSuggest(availableStations, genericStation);
+        if (positionRequest) {
+          await suggestStationFromLocation(
+            positionRequest,
+            availableStations,
+            genericStation
+          );
         }
       } catch (error) {
         console.error("Erro ao preparar dados do abastecimento:", error);
@@ -246,18 +293,24 @@ export default function FuelTransactionFields({
       availableStationCount: stations.length,
     });
     let genericStation = stations.find((station) => station.station_type === "generic") ?? null;
+    let availableStations = stations;
     if (!genericStation) {
       try {
         genericStation = await ensureGenericFuelStation();
-        const refreshedStations = await loadActiveFuelStations();
-        setStations(refreshedStations);
-        await captureLocationAndSuggest(refreshedStations, genericStation);
-        return;
-      } catch {
+        if (genericStation) {
+          availableStations = await loadActiveFuelStations();
+          setStations(availableStations);
+        }
+      } catch (error) {
         // A captura ainda pode atualizar as coordenadas sem o fallback genérico.
+        console.warn("Posto genérico indisponível:", error);
       }
     }
-    await captureLocationAndSuggest(stations, genericStation);
+    await suggestStationFromLocation(
+      startLocationRequest(),
+      availableStations,
+      genericStation
+    );
   }
 
   return (

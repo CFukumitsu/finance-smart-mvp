@@ -26,3 +26,16 @@ export function withCompatibleFuelStationType<T extends object>(station: T) {
     station_type: normalizedType,
   };
 }
+
+// A RPC ensure_generic_fuel_station vem de uma migration opcional. Sem ela o
+// PostgREST responde PGRST202 (fora do schema cache) ou o Postgres 42883.
+export function isMissingGenericFuelStationFunction(error: unknown) {
+  if (!error || typeof error !== "object") return false;
+
+  const { code, message } = error as DatabaseError;
+  return (
+    (code === "PGRST202" || code === "42883") &&
+    typeof message === "string" &&
+    message.includes("ensure_generic_fuel_station")
+  );
+}

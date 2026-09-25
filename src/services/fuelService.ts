@@ -7,11 +7,13 @@ import type {
 } from "@/src/types/fuel";
 import {
   isMissingFuelStationTypeColumn,
+  isMissingGenericFuelStationFunction,
   withCompatibleFuelStationType,
 } from "@/src/utils/fuelStationCompatibility";
 import {
   buildNearbyFuelStationSearchParams,
   sortFuelStationsByDistance,
+  toCoordinate,
 } from "@/src/utils/fuelStationProximity";
 import { logFuelGeolocationDev } from "@/src/utils/fuelGeolocationDiagnostics";
 
@@ -40,11 +42,25 @@ export async function loadActiveFuelStations(): Promise<FuelStationOption[]> {
   }
 
   if (error) throw new Error(error.message);
-  return (data ?? []).map(withCompatibleFuelStationType) as FuelStationOption[];
+  return (data ?? []).map((station) => ({
+    ...withCompatibleFuelStationType(station),
+    latitude: toCoordinate(station.latitude),
+    longitude: toCoordinate(station.longitude),
+  })) as FuelStationOption[];
 }
 
-export async function ensureGenericFuelStation(): Promise<FuelStationOption> {
+// O posto genérico "Outros postos" é um recurso opcional: sem a migration que
+// cria a RPC, o abastecimento segue funcionando com "Sem posto" ou escolha manual.
+export async function ensureGenericFuelStation(): Promise<FuelStationOption | null> {
   const { data, error } = await supabase.rpc("ensure_generic_fuel_station");
+
+  if (isMissingGenericFuelStationFunction(error)) {
+    logFuelGeolocationDev("generic_station_unavailable", {
+      reason: "rpc-missing",
+      code: error?.code,
+    });
+    return null;
+  }
 
   if (error) throw new Error(error.message);
 

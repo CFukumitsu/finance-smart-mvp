@@ -1,6 +1,11 @@
-export const NEARBY_REGISTERED_STATION_RADIUS_METERS = 100;
+// Raio base cobre o terreno do posto e a diferença entre o pino do Google
+// (normalmente na loja) e as bombas. A precisão reportada pelo GPS é somada
+// para que um posto real não seja descartado apenas pela incerteza da leitura.
+export const FUEL_STATION_MATCH_BASE_RADIUS_METERS = 150;
+export const FUEL_STATION_MATCH_MAXIMUM_RADIUS_METERS = 400;
+// Acima desta imprecisão a posição não identifica um posto com segurança.
+export const FUEL_STATION_MATCH_MAXIMUM_ACCURACY_METERS = 250;
 export const PREFERRED_NEARBY_LOCATION_ACCURACY_METERS = 100;
-export const MAXIMUM_NEARBY_LOCATION_ACCURACY_METERS = 500;
 export const MAXIMUM_NEARBY_FUEL_STATION_RADIUS_METERS = 5_000;
 export const NEARBY_HIGH_ACCURACY_TIMEOUT_MS = 60_000;
 export type Coordinates = {
@@ -28,6 +33,15 @@ export function sortFuelStationsByDistance<T extends { distanceMeters: number | 
 
 function isValidCoordinate(value: number, minimum: number, maximum: number) {
   return Number.isFinite(value) && value >= minimum && value <= maximum;
+}
+
+// Colunas numeric podem chegar como string conforme o cliente/serialização.
+export function toCoordinate(value: unknown): number | null {
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+  if (typeof value !== "string" || !value.trim()) return null;
+
+  const parsed = Number(value.trim().replace(",", "."));
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 export function hasValidCoordinates(
@@ -101,7 +115,7 @@ export function calculateDistanceMeters(
 export function findNearestRegisteredStation<T extends StationWithCoordinates>(
   origin: Coordinates,
   stations: T[],
-  maximumDistanceMeters = NEARBY_REGISTERED_STATION_RADIUS_METERS
+  maximumDistanceMeters = FUEL_STATION_MATCH_BASE_RADIUS_METERS
 ) {
   if (!hasValidCoordinates(origin) || maximumDistanceMeters < 0) {
     return null;
@@ -129,4 +143,52 @@ export function findNearestRegisteredStation<T extends StationWithCoordinates>(
   }
 
   return nearest;
+}
+
+export function calculateStationMatchRadius(accuracyMeters: number) {
+  if (
+    !Number.isFinite(accuracyMeters) ||
+    accuracyMeters < 0 ||
+    accuracyMeters > FUEL_STATION_MATCH_MAXIMUM_ACCURACY_METERS
+  ) {
+    return null;
+  }
+
+  return Math.min(
+    Math.ceil(FUEL_STATION_MATCH_BASE_RADIUS_METERS + accuracyMeters),
+    FUEL_STATION_MATCH_MAXIMUM_RADIUS_METERS
+  );
+}
+
+export type FuelStationSuggestion<T> =
+  | { status: "matched"; station: T; distanceMeters: number; radiusMeters: number }
+  | { status: "none-nearby"; radiusMeters: number }
+  | { status: "no-stations-with-location" }
+  | { status: "inaccurate"; accuracyMeters: number }
+  | { status: "invalid-origin" };
+
+export function suggestNearestFuelStation<T extends StationWithCoordinates>(
+  origin: Coordinates,
+  accuracyMeters: number,
+  stations: T[]
+): FuelStationSuggestion<T> {
+  if (!hasValidCoordinates(origin)) return { status: "invalid-origin" };
+
+  const radiusMeters = calculateStationMatchRadius(accuracyMeters);
+  if (radiusMeters === null) {
+    return { status: "inaccurate", accuracyMeters: Math.round(accuracyMeters) };
+  }
+
+  const hasLocatableStation = stations.some(
+    (station) =>
+      station.active &&
+      station.station_type === "registered" &&
+      hasValidCoordinates(station)
+  );
+  if (!hasLocatableStation) return { status: "no-stations-with-location" };
+
+  const nearest = findNearestRegisteredStation(origin, stations, radiusMeters);
+  return nearest
+    ? { status: "matched", ...nearest, radiusMeters }
+    : { status: "none-nearby", radiusMeters };
 }
