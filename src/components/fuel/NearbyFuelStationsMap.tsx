@@ -3,6 +3,12 @@
 import Script from "next/script";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { NearbyFuelStation } from "@/src/types/fuel";
+import {
+  calculateViewportSearchArea,
+  type FuelStationSearchArea,
+  hasSearchAreaChangedRelevantly,
+  isSearchAreaCovered,
+} from "@/src/utils/fuelStationProximity";
 
 type Coordinates = { lat: number; lng: number };
 
@@ -19,6 +25,7 @@ type GoogleMap = {
   fitBounds: (bounds: unknown, padding?: number) => void;
   panTo: (position: Coordinates) => void;
   getCenter: () => GoogleLatLng | undefined;
+  getBounds: () => { getNorthEast: () => GoogleLatLng } | undefined;
   getZoom: () => number | undefined;
   setZoom: (zoom: number) => void;
   addListener: (event: string, handler: () => void) => GoogleMapsEventListener;
@@ -66,10 +73,22 @@ type Props = {
   registeredPlaceIds: Set<string>;
   onHighlight: (googlePlaceId: string) => void;
   onSelect: (place: NearbyFuelStation) => void;
-  onSearchArea: (coordinates: Coordinates) => void | Promise<void>;
+  searchedAreas: FuelStationSearchArea[];
+  onSearchArea: (area: FuelStationSearchArea) => Promise<boolean>;
   selectingPlaceId: string | null;
   isSearchingArea: boolean;
 };
+
+function readViewportArea(map: GoogleMap) {
+  const center = map.getCenter();
+  const northEast = map.getBounds()?.getNorthEast();
+  if (!center || !northEast) return null;
+
+  return calculateViewportSearchArea(
+    { latitude: center.lat(), longitude: center.lng() },
+    { latitude: northEast.lat(), longitude: northEast.lng() },
+  );
+}
 
 function formatDistance(distanceMeters: number | null) {
   if (distanceMeters === null) return "Distância não informada";
@@ -86,6 +105,7 @@ export default function NearbyFuelStationsMap({
   registeredPlaceIds,
   onHighlight,
   onSelect,
+  searchedAreas,
   onSearchArea,
   selectingPlaceId,
   isSearchingArea,
@@ -95,13 +115,20 @@ export default function NearbyFuelStationsMap({
   const markersRef = useRef<GoogleMarker[]>([]);
   const mapListenersRef = useRef<GoogleMapsEventListener[]>([]);
   const hasInitialViewportRef = useRef(false);
-  const userDraggedMapRef = useRef(false);
+  // Movimentos feitos pelo código (enquadramento inicial, destaque de posto)
+  // não devem oferecer "Buscar nesta área".
+  const programmaticMoveRef = useRef(true);
 
   const [apiKey, setApiKey] = useState("");
   const [mapError, setMapError] = useState("");
   const [isScriptReady, setIsScriptReady] = useState(false);
-  const [searchCenter, setSearchCenter] = useState<Coordinates | null>(null);
-  const [hasMovedMap, setHasMovedMap] = useState(false);
+  // Área visível após o último movimento do usuário.
+  const [viewportArea, setViewportArea] =
+    useState<FuelStationSearchArea | null>(null);
+  // Enquadramentos já pesquisados (inicial + cada "Buscar nesta área").
+  const [referenceAreas, setReferenceAreas] = useState<
+    FuelStationSearchArea[]
+  >([]);
 
   const highlightedPlace = useMemo(
     () =>
@@ -109,6 +136,26 @@ export default function NearbyFuelStationsMap({
       null,
     [highlightedPlaceId, places],
   );
+
+  const showSearchAreaButton =
+    viewportArea !== null &&
+    // Sem áreas pesquisadas (erro na busca inicial ou posto já selecionado),
+    // qualquer movimento volta a oferecer a busca.
+    (searchedAreas.length === 0 ||
+      referenceAreas.every((reference) =>
+        hasSearchAreaChangedRelevantly(reference, viewportArea),
+      )) &&
+    !isSearchAreaCovered(viewportArea, searchedAreas);
+
+  async function handleSearchArea() {
+    const map = mapRef.current;
+    const area = (map && readViewportArea(map)) ?? viewportArea;
+    if (!area || isSearchingArea) return;
+
+    if (await onSearchArea(area)) {
+      setReferenceAreas((current) => [...current, area]);
+    }
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -160,29 +207,32 @@ export default function NearbyFuelStationsMap({
 
     mapListenersRef.current.push(
       map.addListener("dragstart", () => {
-        userDraggedMapRef.current = true;
+        programmaticMoveRef.current = false;
       }),
     );
 
+    // "idle" dispara uma única vez quando o mapa para de se mover (arrasto,
+    // zoom por botão, pinça ou roda do mouse), então não há consulta por pixel.
+    // Aqui só se lê a área visível; a API é chamada apenas pelo botão.
     mapListenersRef.current.push(
       map.addListener("idle", () => {
-        if (!userDraggedMapRef.current) {
+        const area = readViewportArea(map);
+        if (!area) return;
+
+        if (programmaticMoveRef.current) {
+          programmaticMoveRef.current = false;
+          if (hasInitialViewportRef.current) {
+            setReferenceAreas((current) =>
+              current.length === 0 ? [area] : current,
+            );
+          }
+          // Após o destaque de um posto, reavalia o botão na área realmente
+          // exibida, sem fazê-lo surgir se o usuário ainda não moveu o mapa.
+          setViewportArea((current) => current && area);
           return;
         }
 
-        const center = map.getCenter();
-
-        if (!center) {
-          return;
-        }
-
-        setSearchCenter({
-          lat: center.lat(),
-          lng: center.lng(),
-        });
-
-        setHasMovedMap(true);
-        userDraggedMapRef.current = false;
+        setViewportArea(area);
       }),
     );
 
@@ -288,6 +338,7 @@ export default function NearbyFuelStationsMap({
       return;
     }
 
+    programmaticMoveRef.current = true;
     mapRef.current.panTo({
       lat: highlightedPlace.latitude,
       lng: highlightedPlace.longitude,
@@ -324,23 +375,21 @@ export default function NearbyFuelStationsMap({
             <div className="h-3 w-0.5 bg-white shadow" />
           </div>
         </div>
+
+        {/* Topo central: livre dos controles do Google (tela cheia no canto
+            superior direito, zoom no inferior direito) e do pino central. */}
+        {showSearchAreaButton && (
+          <button
+            type="button"
+            onClick={handleSearchArea}
+            disabled={isSearchingArea}
+            className="absolute left-1/2 top-3 z-20 -translate-x-1/2 whitespace-nowrap rounded-full bg-cyan-600 px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-black/40 hover:bg-cyan-500 disabled:cursor-not-allowed disabled:opacity-80"
+          >
+            {isSearchingArea ? "Buscando..." : "Buscar nesta área"}
+          </button>
+        )}
       </div>
 
-      {hasMovedMap && searchCenter && (
-        <button
-          type="button"
-          onClick={async () => {
-            await onSearchArea(searchCenter);
-            setHasMovedMap(false);
-          }}
-          disabled={isSearchingArea}
-          className="flex w-full items-center justify-center rounded-xl bg-cyan-600 px-4 py-3 text-sm font-semibold text-white hover:bg-cyan-500 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          {isSearchingArea
-            ? "Buscando postos nesta área..."
-            : "Buscar postos nesta área"}
-        </button>
-      )}
       {!isScriptReady && (
         <p className="text-sm text-slate-400">Carregando mapa...</p>
       )}

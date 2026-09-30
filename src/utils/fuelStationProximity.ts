@@ -240,3 +240,104 @@ export function markRegisteredGooglePlaces<
     registeredStationId: stationIdByPlaceId.get(place.googlePlaceId) ?? null,
   }));
 }
+
+// Deve acompanhar o maxResultCount usado em /api/maps/nearby-fuel-stations.
+export const NEARBY_FUEL_STATION_RESULT_LIMIT = 10;
+const MINIMUM_NEARBY_FUEL_STATION_RADIUS_METERS = 50;
+
+// Área circular pesquisada/visível no mapa: centro + raio em metros.
+export type FuelStationSearchArea = Coordinates & { radiusMeters: number };
+
+export function clampNearbyFuelStationSearchRadius(radiusMeters: number) {
+  return Math.min(
+    Math.max(Math.ceil(radiusMeters), MINIMUM_NEARBY_FUEL_STATION_RADIUS_METERS),
+    MAXIMUM_NEARBY_FUEL_STATION_RADIUS_METERS
+  );
+}
+
+// O Nearby Search aceita apenas círculo: o raio é a distância do centro até o
+// canto do mapa, para que o círculo cubra toda a área visível (limitado a 5 km).
+export function calculateViewportSearchArea(
+  center: Coordinates,
+  northEast: Coordinates
+): FuelStationSearchArea | null {
+  if (!hasValidCoordinates(center) || !hasValidCoordinates(northEast)) {
+    return null;
+  }
+
+  return {
+    ...center,
+    radiusMeters: clampNearbyFuelStationSearchRadius(
+      calculateDistanceMeters(center, northEast)
+    ),
+  };
+}
+
+// Com o limite de resultados atingido, só é garantido que não existem outros
+// postos até a distância do resultado mais distante; abaixo do limite, o raio
+// pesquisado inteiro está coberto.
+export function calculateCoveredSearchArea(
+  requested: FuelStationSearchArea,
+  places: { distanceMeters: number | null }[],
+  resultLimit = NEARBY_FUEL_STATION_RESULT_LIMIT
+): FuelStationSearchArea {
+  if (places.length < resultLimit) return requested;
+
+  const farthest = places.reduce(
+    (maximum, place) => Math.max(maximum, place.distanceMeters ?? 0),
+    0
+  );
+  return { ...requested, radiusMeters: Math.min(farthest, requested.radiusMeters) };
+}
+
+export function isSearchAreaCovered(
+  area: FuelStationSearchArea,
+  coveredAreas: FuelStationSearchArea[]
+) {
+  return coveredAreas.some(
+    (covered) =>
+      calculateDistanceMeters(covered, area) + area.radiusMeters <=
+      covered.radiusMeters
+  );
+}
+
+// Pequenos ajustes de enquadramento não justificam nova consulta: exige
+// deslocamento de 25% do raio visível ou zoom que mude o raio em 50%.
+export function hasSearchAreaChangedRelevantly(
+  previous: FuelStationSearchArea,
+  next: FuelStationSearchArea
+) {
+  const radiusRatio = next.radiusMeters / previous.radiusMeters;
+  return (
+    calculateDistanceMeters(previous, next) >
+      0.25 * Math.min(previous.radiusMeters, next.radiusMeters) ||
+    radiusRatio > 1.5 ||
+    radiusRatio < 1 / 1.5
+  );
+}
+
+// Junta resultados de buscas diferentes sem duplicar o mesmo Place ID e
+// recalcula a distância a partir do centro da busca mais recente.
+export function mergeNearbyFuelStations<
+  T extends {
+    googlePlaceId: string;
+    latitude: number | null;
+    longitude: number | null;
+    distanceMeters: number | null;
+  },
+>(existing: T[], incoming: T[], reference: Coordinates) {
+  const byPlaceId = new Map<string, T>();
+
+  for (const place of [...existing, ...incoming]) {
+    byPlaceId.set(place.googlePlaceId, place);
+  }
+
+  return sortFuelStationsByDistance(
+    [...byPlaceId.values()].map((place) => ({
+      ...place,
+      distanceMeters: hasValidCoordinates(place)
+        ? Math.round(calculateDistanceMeters(reference, place))
+        : null,
+    }))
+  );
+}

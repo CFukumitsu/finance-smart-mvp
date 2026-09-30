@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 // @ts-expect-error Node's native TypeScript test runner requires the extension.
-import { buildNearbyFuelStationSearchParams, calculateDistanceMeters, calculateNearbyFuelStationSearchRadius, calculateStationMatchRadius, decideGoogleStationSearch, findNearestRegisteredStation, GOOGLE_STATION_SUGGESTION_LIMIT, markRegisteredGooglePlaces, FUEL_STATION_MATCH_BASE_RADIUS_METERS, FUEL_STATION_MATCH_MAXIMUM_ACCURACY_METERS, FUEL_STATION_MATCH_MAXIMUM_RADIUS_METERS, MAXIMUM_NEARBY_FUEL_STATION_RADIUS_METERS, NEARBY_HIGH_ACCURACY_TIMEOUT_MS, PREFERRED_NEARBY_LOCATION_ACCURACY_METERS, sortFuelStationsByDistance, suggestNearestFuelStation, toCoordinate, type StationWithCoordinates } from "./fuelStationProximity.ts";
+import { buildNearbyFuelStationSearchParams, calculateCoveredSearchArea, calculateDistanceMeters, calculateNearbyFuelStationSearchRadius, calculateStationMatchRadius, calculateViewportSearchArea, decideGoogleStationSearch, findNearestRegisteredStation, hasSearchAreaChangedRelevantly, isSearchAreaCovered, GOOGLE_STATION_SUGGESTION_LIMIT, markRegisteredGooglePlaces, mergeNearbyFuelStations, FUEL_STATION_MATCH_BASE_RADIUS_METERS, FUEL_STATION_MATCH_MAXIMUM_ACCURACY_METERS, FUEL_STATION_MATCH_MAXIMUM_RADIUS_METERS, MAXIMUM_NEARBY_FUEL_STATION_RADIUS_METERS, NEARBY_HIGH_ACCURACY_TIMEOUT_MS, PREFERRED_NEARBY_LOCATION_ACCURACY_METERS, sortFuelStationsByDistance, suggestNearestFuelStation, toCoordinate, type StationWithCoordinates } from "./fuelStationProximity.ts";
 
 const origin = { latitude: -23.55052, longitude: -46.633308 };
 
@@ -231,4 +231,47 @@ test("marca postos do Google já cadastrados e limita as sugestões", () => {
   assert.equal(marked.length, GOOGLE_STATION_SUGGESTION_LIMIT);
   assert.equal(marked[0].registeredStationId, null);
   assert.equal(marked[1].registeredStationId, "station-2");
+});
+
+test("área visível do mapa vira círculo centro + raio até o canto, limitado a 5 km", () => {
+  const area = calculateViewportSearchArea(origin, { latitude: origin.latitude + 0.01, longitude: origin.longitude + 0.01 });
+  assert.ok(area);
+  assert.ok(area.radiusMeters > 1400 && area.radiusMeters < 1600);
+  assert.equal(calculateViewportSearchArea(origin, { latitude: origin.latitude + 1, longitude: origin.longitude + 1 })?.radiusMeters, MAXIMUM_NEARBY_FUEL_STATION_RADIUS_METERS);
+  assert.equal(calculateViewportSearchArea(origin, origin)?.radiusMeters, 50);
+  assert.equal(calculateViewportSearchArea({ latitude: Number.NaN, longitude: 0 }, origin), null);
+});
+
+test("cobertura de uma busca encolhe até o posto mais distante quando o limite é atingido", () => {
+  const requested = { ...origin, radiusMeters: 3000 };
+  assert.equal(calculateCoveredSearchArea(requested, [{ distanceMeters: 100 }], 10).radiusMeters, 3000);
+  const full = Array.from({ length: 10 }, (_, index) => ({ distanceMeters: (index + 1) * 100 }));
+  assert.equal(calculateCoveredSearchArea(requested, full, 10).radiusMeters, 1000);
+});
+
+test("não sugere nova busca para área já coberta ou praticamente igual", () => {
+  const searched = { ...origin, radiusMeters: 2000 };
+  const inside = { latitude: origin.latitude + 0.005, longitude: origin.longitude, radiusMeters: 500 };
+  const outside = { latitude: origin.latitude + 0.03, longitude: origin.longitude, radiusMeters: 500 };
+  assert.equal(isSearchAreaCovered(inside, [searched]), true);
+  assert.equal(isSearchAreaCovered(outside, [searched]), false);
+  assert.equal(isSearchAreaCovered(outside, []), false);
+
+  const viewport = { ...origin, radiusMeters: 1000 };
+  assert.equal(hasSearchAreaChangedRelevantly(viewport, { latitude: origin.latitude + 0.001, longitude: origin.longitude, radiusMeters: 1100 }), false);
+  assert.equal(hasSearchAreaChangedRelevantly(viewport, { latitude: origin.latitude + 0.01, longitude: origin.longitude, radiusMeters: 1000 }), true);
+  assert.equal(hasSearchAreaChangedRelevantly(viewport, { ...origin, radiusMeters: 400 }), true);
+  assert.equal(hasSearchAreaChangedRelevantly(viewport, { ...origin, radiusMeters: 2000 }), true);
+});
+
+test("junta postos de buscas diferentes sem duplicar Place ID e ordena pela busca mais recente", () => {
+  const place = (googlePlaceId: string, latitude: number | null, longitude: number | null) => ({ googlePlaceId, latitude, longitude, distanceMeters: 1 });
+  const merged = mergeNearbyFuelStations(
+    [place("a", origin.latitude, origin.longitude), place("b", origin.latitude + 0.02, origin.longitude)],
+    [place("b", origin.latitude + 0.02, origin.longitude), place("c", origin.latitude + 0.021, origin.longitude), place("d", null, null)],
+    { latitude: origin.latitude + 0.02, longitude: origin.longitude }
+  );
+  assert.deepEqual(merged.map((item) => item.googlePlaceId), ["b", "c", "a", "d"]);
+  assert.equal(merged[0].distanceMeters, 0);
+  assert.equal(merged[3].distanceMeters, null);
 });

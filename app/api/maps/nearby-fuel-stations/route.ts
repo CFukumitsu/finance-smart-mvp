@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthenticatedServerUser } from "@/src/lib/supabaseServer";
+import { NEARBY_FUEL_STATION_RESULT_LIMIT } from "@/src/utils/fuelStationProximity";
 
 type GooglePlace = {
   id?: string;
@@ -156,7 +157,7 @@ export async function GET(request: NextRequest) {
         },
         body: JSON.stringify({
           includedTypes: ["gas_station"],
-          maxResultCount: 10,
+          maxResultCount: NEARBY_FUEL_STATION_RESULT_LIMIT,
           rankPreference: "DISTANCE",
           locationRestriction: {
             circle: {
