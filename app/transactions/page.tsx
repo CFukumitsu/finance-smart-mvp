@@ -76,6 +76,10 @@ import {
   parseMoneyInput,
 } from "@/src/utils/currencies";
 import { summarizeTransactionTotalsByCurrency } from "@/src/utils/transactionCurrencyTotals";
+import {
+  getAutomaticTransactionStatus,
+  getStatusAfterDateChange,
+} from "@/src/utils/transactionStatus";
 
 type Account = {
   id: string;
@@ -353,17 +357,7 @@ function TransactionsPageContent() {
   const transactionDefaultsKey = "finance-smart-transaction-defaults";
 
   function getAutomaticStatus(type: string, dueDate: string) {
-    const today = new Date().toISOString().split("T")[0];
-
-    if (dueDate > today) {
-      return "Pendente";
-    }
-
-    if (type === "Receita") {
-      return "Recebido";
-    }
-
-    return "Pago";
+    return getAutomaticTransactionStatus(type, dueDate);
   }
 
   function getStoredTransactionDefaults() {
@@ -3292,10 +3286,14 @@ function TransactionsPageContent() {
                       onChange={(event) => {
                         const newDate = event.target.value;
                         const newCompetenceId = getCompetenceIdByDate(newDate);
-                        const newStatus = getAutomaticStatus(
-                          form.type,
-                          newDate,
-                        );
+                        // Editar a data de uma ponta de transferência não
+                        // pode trocar Recebido/Pago (inverteria o saldo).
+                        const newStatus = getStatusAfterDateChange({
+                          type: form.type,
+                          currentStatus: form.status,
+                          newDueDate: newDate,
+                          isEditing: editingTransactionId !== null,
+                        });
 
                         setForm({
                           ...form,
@@ -3304,10 +3302,12 @@ function TransactionsPageContent() {
                           status: newStatus,
                         });
 
+                        // Os padrões de novos lançamentos mantêm o status
+                        // automático; o preservado vale só para esta edição.
                         updateTransactionDefaults({
                           due_date: newDate,
                           competence_id: newCompetenceId,
-                          status: newStatus,
+                          status: getAutomaticStatus(form.type, newDate),
                         });
                       }}
                       type="date"
