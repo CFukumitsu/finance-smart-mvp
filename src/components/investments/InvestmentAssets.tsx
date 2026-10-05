@@ -11,6 +11,7 @@ import type {
   InvestmentAsset,
   InvestmentData,
 } from "@/src/types/investments";
+import { SUPPORTED_CURRENCIES } from "@/src/utils/currencies";
 import {
   InvestmentActions,
   InvestmentAddButton,
@@ -283,9 +284,11 @@ export default function InvestmentAssets({
                 placeholder="BRL"
               />
               <datalist id="investment-currencies">
-                <option value="BRL" />
-                <option value="USD" />
-                <option value="EUR" />
+                {SUPPORTED_CURRENCIES.map((currency) => (
+                  <option key={currency.code} value={currency.code}>
+                    {currency.label}
+                  </option>
+                ))}
               </datalist>
             </InvestmentInput>
           </div>

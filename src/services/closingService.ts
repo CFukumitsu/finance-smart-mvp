@@ -4,6 +4,10 @@ import {
   areRequiredClosuresComplete,
   type ClosingAccountClassification,
 } from "@/src/utils/closingAccounts";
+import {
+  buildClosingSnapshot,
+  type ClosingSnapshotTransaction,
+} from "@/src/utils/closingSnapshot";
 
 export async function getClosureByCompetenceId(
   competenceId: string
@@ -31,7 +35,9 @@ export async function calculateClosingSnapshot(
 
   const { data, error } = await supabase
     .from("transactions")
-    .select("type, status, value")
+    .select(
+      "type, status, value, account:accounts!transactions_account_id_fkey(currency)",
+    )
     .eq("owner_id", ownerId)
     .eq("competence_id", competenceId);
 
@@ -39,47 +45,9 @@ export async function calculateClosingSnapshot(
     throw new Error(error.message);
   }
 
-  const snapshot: ClosingSnapshot = {
-    totalIncome: 0,
-    totalExpense: 0,
-    balance: 0,
-    pendingIncome: 0,
-    pendingExpense: 0,
-    paidIncome: 0,
-    paidExpense: 0,
-  };
-
-  for (const item of data ?? []) {
-    const value = Number(item.value ?? 0);
-
-    if (item.type === "Receita") {
-      snapshot.totalIncome += value;
-
-      if (item.status === "Recebido") {
-        snapshot.paidIncome += value;
-      }
-
-      if (item.status === "Pendente") {
-        snapshot.pendingIncome += value;
-      }
-    }
-
-    if (item.type === "Despesa") {
-      snapshot.totalExpense += value;
-
-      if (item.status === "Pago") {
-        snapshot.paidExpense += value;
-      }
-
-      if (item.status === "Pendente") {
-        snapshot.pendingExpense += value;
-      }
-    }
-  }
-
-  snapshot.balance = snapshot.totalIncome - snapshot.totalExpense;
-
-  return snapshot;
+  return buildClosingSnapshot(
+    (data ?? []) as unknown as ClosingSnapshotTransaction[],
+  );
 }
 
 export async function validateCompetenceClosureRequirements(

@@ -10,6 +10,11 @@ import type {
   AnalyticsTransaction,
 } from "@/src/types/analytics";
 import { requiresTraditionalAccountClosure } from "@/src/utils/closingAccounts";
+import {
+  filterAnalyticsTransactionsByCurrency,
+  hasAnalyticsCategoryTargets,
+  isAnalyticsAccountInCurrency,
+} from "@/src/utils/analyticsFilters";
 
 export async function loadAnalyticsReferenceData(
   ownerId: string
@@ -18,7 +23,7 @@ export async function loadAnalyticsReferenceData(
     await Promise.all([
       supabase
         .from("accounts")
-        .select("id, name, type, active, show_on_investments_dashboard, investment_account_kind")
+        .select("id, name, type, currency, active, show_on_investments_dashboard, investment_account_kind")
         .eq("owner_id", ownerId)
         .order("active", { ascending: false })
         .order("name", { ascending: true }),
@@ -84,7 +89,7 @@ export async function loadAnalyticsDataset(
         type,
         value,
         status,
-        account:accounts!transactions_account_id_fkey(name, type),
+        account:accounts!transactions_account_id_fkey(name, type, currency),
         category:categories!transactions_category_id_fkey(name, type)
       `)
       .eq("owner_id", ownerId)
@@ -121,13 +126,15 @@ export async function loadAnalyticsDataset(
   const closingAccountsResponse = await supabase
     .from("accounts")
     .select(
-      "id, type, show_on_investments_dashboard, investment_account_kind",
+      "id, type, currency, show_on_investments_dashboard, investment_account_kind",
     )
     .eq("owner_id", ownerId);
+  // Saldo inicial soma apenas contas da moeda analisada.
   const closingAccountIds = (
     (closingAccountsResponse.data ?? []) as AnalyticsAccount[]
   )
     .filter(requiresTraditionalAccountClosure)
+    .filter((account) => isAnalyticsAccountInCurrency(account, filters.currency))
     .map((account) => account.id);
   const selectedClosingAccountIds = filters.accountId
     ? closingAccountIds.filter((accountId) => accountId === filters.accountId)
@@ -149,7 +156,10 @@ export async function loadAnalyticsDataset(
   }
 
   let targetsResponse: { data: unknown[] | null; error: { message: string } | null } = { data: [], error: null };
-  if (selectedCompetenceIds.length === 1) {
+  if (
+    selectedCompetenceIds.length === 1 &&
+    hasAnalyticsCategoryTargets(filters.currency)
+  ) {
     let targetsQuery = supabase
       .from("financial_targets")
       .select("competence_id, target_id, planned_value")
@@ -168,7 +178,10 @@ export async function loadAnalyticsDataset(
   if (error) throw new Error(error.message);
 
   return {
-    transactions,
+    transactions: filterAnalyticsTransactionsByCurrency(
+      transactions,
+      filters.currency
+    ),
     financialTargets: (targetsResponse.data ?? []) as AnalyticsFinancialTarget[],
     openingBalance: (openingBalanceResponse.data ?? []).reduce(
       (sum, closure) => sum + Number(closure.opening_balance ?? 0),

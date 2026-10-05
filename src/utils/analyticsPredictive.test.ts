@@ -19,7 +19,7 @@ function transaction(id: string, dueDate: string, value: number, type: Analytics
     type,
     value,
     status,
-    account: { name: "Conta", type: "Conta" },
+    account: { name: "Conta", type: "Conta", currency: "BRL" },
     category: { name: category.name, type: category.type },
   };
 }

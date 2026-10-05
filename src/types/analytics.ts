@@ -2,6 +2,7 @@ export type AnalyticsAccount = {
   id: string;
   name: string;
   type: "Conta" | "Cartão";
+  currency: string | null;
   active: boolean;
   show_on_investments_dashboard: boolean;
   investment_account_kind: "BALANCE" | null;
@@ -37,11 +38,13 @@ export type AnalyticsTransaction = {
   type: "Receita" | "Despesa" | "Transferência" | "Pagamento de Fatura";
   value: number;
   status: "Pendente" | "Pago" | "Recebido";
-  account: Pick<AnalyticsAccount, "name" | "type"> | null;
+  account: Pick<AnalyticsAccount, "name" | "type" | "currency"> | null;
   category: Pick<AnalyticsCategory, "name" | "type"> | null;
 };
 
 export type AnalyticsFilters = {
+  /** Moeda analisada; as Análises nunca agregam moedas diferentes. */
+  currency: string;
   competenceId: string;
   accountId: string;
   categoryId: string;

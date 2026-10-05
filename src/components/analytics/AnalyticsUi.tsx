@@ -3,12 +3,17 @@
 import type { ReactNode } from "react";
 import { Download } from "lucide-react";
 import { buildCsvContent } from "@/src/utils/csvExport";
+import { formatMoney } from "@/src/utils/currencies";
+import { useAnalytics } from "./AnalyticsProvider";
 
-export function formatAnalyticsCurrency(value: number) {
-  return new Intl.NumberFormat("pt-BR", {
-    style: "currency",
-    currency: "BRL",
-  }).format(value);
+export function formatAnalyticsCurrency(value: number, currency: string) {
+  return formatMoney(value, currency);
+}
+
+/** Formata na moeda selecionada no filtro das Análises (sem conversão). */
+export function useAnalyticsMoneyFormatter() {
+  const { filters } = useAnalytics();
+  return (value: number) => formatAnalyticsCurrency(value, filters.currency);
 }
 
 export function AnalyticsHeader({

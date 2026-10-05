@@ -12,7 +12,11 @@ import type {
   AnalyticsFinancialTarget,
   AnalyticsTransaction,
 } from "@/src/types/analytics";
-import { resolveAnalyticsDatasetFilters } from "@/src/utils/analyticsFilters";
+import {
+  isAnalyticsAccountInCurrency,
+  resolveAnalyticsDatasetFilters,
+} from "@/src/utils/analyticsFilters";
+import { PRIMARY_CURRENCY } from "@/src/utils/currencies";
 import { getComparisonDateRange, normalizeAnalyticsDateRange } from "@/src/utils/analyticsPredictive";
 
 type AnalyticsContextValue = {
@@ -35,6 +39,7 @@ type AnalyticsContextValue = {
 const AnalyticsContext = createContext<AnalyticsContextValue | null>(null);
 
 const emptyFilters: AnalyticsFilters = {
+  currency: PRIMARY_CURRENCY,
   competenceId: "",
   accountId: "",
   categoryId: "",
@@ -175,6 +180,12 @@ export function AnalyticsProvider({ children }: { children: React.ReactNode }) {
 
   function setFilter(name: keyof AnalyticsFilters, value: string) {
     setFilters((current) => {
+      if (name === "currency") {
+        // Uma conta de outra moeda não pode permanecer selecionada.
+        const selectedAccount = accounts.find((account) => account.id === current.accountId);
+        const keepsAccount = selectedAccount ? isAnalyticsAccountInCurrency(selectedAccount, value) : false;
+        return { ...current, currency: value, accountId: keepsAccount ? current.accountId : "" };
+      }
       if (name !== "competenceId") return { ...current, [name]: value };
       const trailing = getTrailingCompetences(competences, value);
       return {

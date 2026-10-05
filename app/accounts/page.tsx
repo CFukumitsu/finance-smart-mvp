@@ -12,6 +12,13 @@ import {
   getAccountCardFields,
   type AccountFormType,
 } from "@/src/utils/accountForm";
+import {
+  formatMoney,
+  getMoneyInputPlaceholder,
+  isSupportedCurrency,
+  parseMoneyInput,
+  SUPPORTED_CURRENCIES,
+} from "@/src/utils/currencies";
 
 type Competence = {
   id: string;
@@ -190,7 +197,10 @@ export default function AccountsPage() {
     const mappedValues: Record<string, string> = {};
 
     (data ?? []).forEach((item) => {
-      mappedValues[item.competence_id] = formatMoneyInput(item.planned_value);
+      mappedValues[item.competence_id] = formatPlannedValue(
+        item.planned_value,
+        account.currency,
+      );
     });
 
     setPlanningValues(mappedValues);
@@ -401,19 +411,16 @@ export default function AccountsPage() {
     });
   }
 
-  function formatMoneyInput(value: string | number | null) {
+  // O planejamento de uma conta é expresso na moeda nativa dessa conta.
+  function formatPlannedValue(
+    value: string | number | null,
+    currency: string | null | undefined,
+  ) {
     const numberValue = Number(value ?? 0);
 
     if (!numberValue) return "";
 
-    return numberValue.toLocaleString("pt-BR", {
-      style: "currency",
-      currency: "BRL",
-    });
-  }
-
-  function parseMoneyInput(value: string) {
-    return Number(value.replace(/\D/g, "")) / 100;
+    return formatMoney(numberValue, currency);
   }
 
   function handlePlanningValueChange(competenceId: string, value: string) {
@@ -421,7 +428,9 @@ export default function AccountsPage() {
 
     setPlanningValues({
       ...planningValues,
-      [competenceId]: numericValue ? formatMoneyInput(numericValue) : "",
+      [competenceId]: numericValue
+        ? formatPlannedValue(numericValue, planningAccount?.currency)
+        : "",
     });
   }
 
@@ -787,9 +796,14 @@ export default function AccountsPage() {
                   className="w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none"
                 >
                   <option value="">Selecione e confirme</option>
-                  <option value="BRL">BRL — Real</option>
-                  <option value="USD">USD — Dólar</option>
-                  <option value="EUR">EUR — Euro</option>
+                  {SUPPORTED_CURRENCIES.map((currency) => (
+                    <option key={currency.code} value={currency.code}>
+                      {currency.code} — {currency.label}
+                    </option>
+                  ))}
+                  {form.currency && !isSupportedCurrency(form.currency) && (
+                    <option value={form.currency}>{form.currency}</option>
+                  )}
                 </select>
                 {!form.currency && (
                   <span className="block text-xs text-amber-200">
@@ -993,7 +1007,9 @@ export default function AccountsPage() {
                       }
                       type="text"
                       inputMode="numeric"
-                      placeholder="R$ 0,00"
+                      placeholder={getMoneyInputPlaceholder(
+                        planningAccount.currency,
+                      )}
                       className="w-full rounded-xl border border-white/10 bg-slate-950 px-4 py-3 text-right text-white outline-none focus:border-cyan-400/50"
                     />
                   </div>

@@ -10,8 +10,15 @@ import {
   calculateCardRealizedValue,
   calculateCashFlowTotals,
   calculateCategoryRealizedValue,
+  calculateCashFlowTotalsByCurrency,
   calculateComparisonPending,
 } from "@/src/utils/balanceCalculations";
+import {
+  formatMoney,
+  isPrimaryCurrency,
+  partitionByPrimaryCurrency,
+  PRIMARY_CURRENCY,
+} from "@/src/utils/currencies";
 import {
   Bar,
   BarChart,
@@ -34,7 +41,12 @@ type Transaction = {
   account_id: string | null;
   category_id: string | null;
   account:
-  | { name?: string | null; type?: string | null; limit_amount?: number | null }
+  | {
+    name?: string | null;
+    type?: string | null;
+    limit_amount?: number | null;
+    currency?: string | null;
+  }
   | null;
   category:
   | {
@@ -83,6 +95,12 @@ export default function DashboardPage() {
   const [accountTargets, setAccountTargets] = useState<Record<string, number>>({});
   const [categoryTargets, setCategoryTargets] = useState<Record<string, number>>({});
   const [cardAccountIds, setCardAccountIds] = useState<string[]>([]);
+  // Lançamentos de contas em moeda diferente da principal (BRL). Ficam fora dos
+  // cards e gráficos, que representam somente BRL, e nunca são somados a eles.
+  const [otherCurrencyCashFlowTransactions, setOtherCurrencyCashFlowTransactions] =
+    useState<Transaction[]>([]);
+  const [otherCurrencyCardTransactions, setOtherCurrencyCardTransactions] =
+    useState<Transaction[]>([]);
 
   function getNextMonth(month: number, year: number) {
     if (month === 12) {
@@ -133,8 +151,10 @@ export default function DashboardPage() {
       setCurrentCompetence(null);
       setCashFlowCompetence(null);
       setCashFlowTransactions([]);
+      setOtherCurrencyCashFlowTransactions([]);
       setReferenceTransactions([]);
       setPreviousCardTransactions([]);
+      setOtherCurrencyCardTransactions([]);
       setAccountTargets({});
       setCategoryTargets({});
       setCardAccountIds([]);
@@ -146,7 +166,7 @@ export default function DashboardPage() {
 
     const { data: cardAccountsData, error: cardAccountsError } = await supabase
       .from("accounts")
-      .select("id")
+      .select("id, currency")
       .eq("owner_id", ownerId)
       .eq("type", "Cartão")
       .eq("active", true);
@@ -156,7 +176,9 @@ export default function DashboardPage() {
       setCardAccountIds([]);
     } else {
       setCardAccountIds(
-        (cardAccountsData ?? []).map((account) => String(account.id))
+        (cardAccountsData ?? [])
+          .filter((account) => isPrimaryCurrency(account.currency))
+          .map((account) => String(account.id))
       );
     }
 
@@ -177,7 +199,9 @@ export default function DashboardPage() {
         cashFlowCompetenceError
       );
       setCashFlowTransactions([]);
+      setOtherCurrencyCashFlowTransactions([]);
       setPreviousCardTransactions([]);
+      setOtherCurrencyCardTransactions([]);
       setAccountTargets({});
       setCategoryTargets({});
       setIsLoading(false);
@@ -235,7 +259,7 @@ export default function DashboardPage() {
     status,
     account_id,
     category_id,
-    account:accounts!transactions_account_id_fkey(name, type, limit_amount),
+    account:accounts!transactions_account_id_fkey(name, type, limit_amount, currency),
     category:categories!transactions_category_id_fkey(name, monthly_limit, monthly_goal, show_on_dashboard, dashboard_order, active),
     competence:competences!transactions_competence_id_fkey(name)
   `)
@@ -247,8 +271,14 @@ export default function DashboardPage() {
     if (cashFlowError) {
       console.error("Erro ao carregar fluxo de caixa:", cashFlowError);
       setCashFlowTransactions([]);
+      setOtherCurrencyCashFlowTransactions([]);
     } else {
-      setCashFlowTransactions((cashFlowData ?? []) as unknown as Transaction[]);
+      const { primary, others } = partitionByPrimaryCurrency(
+        (cashFlowData ?? []) as unknown as Transaction[],
+        (transaction) => transaction.account?.currency,
+      );
+      setCashFlowTransactions(primary);
+      setOtherCurrencyCashFlowTransactions(others);
     }
     const { data: referenceCardData, error: referenceCardError } = await supabase
       .from("transactions")
@@ -261,7 +291,7 @@ export default function DashboardPage() {
       status,
       account_id,
       category_id,
-      account:accounts!transactions_account_id_fkey(name, type, limit_amount),
+      account:accounts!transactions_account_id_fkey(name, type, limit_amount, currency),
       category:categories!transactions_category_id_fkey(name, monthly_limit, monthly_goal, show_on_dashboard, dashboard_order, active),
       competence:competences!transactions_competence_id_fkey(name)
     `)
@@ -271,9 +301,19 @@ export default function DashboardPage() {
     if (referenceCardError) {
       console.error("Erro ao carregar faturas da competência de referência:", referenceCardError);
       setPreviousCardTransactions([]);
+      setOtherCurrencyCardTransactions([]);
     } else {
-      const referenceTransactionsData =
-        (referenceCardData ?? []) as unknown as Transaction[];
+      const { primary: referenceTransactionsData, others: otherReferenceData } =
+        partitionByPrimaryCurrency(
+          (referenceCardData ?? []) as unknown as Transaction[],
+          (transaction) => transaction.account?.currency,
+        );
+
+      setOtherCurrencyCardTransactions(
+        otherReferenceData.filter(
+          (transaction) => transaction.account?.type === "Cartão"
+        )
+      );
 
       setReferenceTransactions(referenceTransactionsData);
 
@@ -310,6 +350,22 @@ export default function DashboardPage() {
         previousCardTransactions
       ),
     [cashFlowAccountTransactions, previousCardTransactions]
+  );
+
+  const otherCurrencyCashFlowTotals = useMemo(
+    () =>
+      calculateCashFlowTotalsByCurrency(
+        otherCurrencyCashFlowTransactions.filter(
+          (transaction) => transaction.account?.type !== "Cartão"
+        ),
+        otherCurrencyCardTransactions
+      ).filter(
+        (totals) =>
+          totals.income !== 0 ||
+          totals.accountExpenses !== 0 ||
+          totals.creditCardInvoices !== 0
+      ),
+    [otherCurrencyCashFlowTransactions, otherCurrencyCardTransactions]
   );
 
   const plannedCreditCardTotal = useMemo(() => {
@@ -485,10 +541,7 @@ export default function DashboardPage() {
   }
 
   function formatCurrency(value: number) {
-    return value.toLocaleString("pt-BR", {
-      style: "currency",
-      currency: "BRL",
-    });
+    return formatMoney(value, PRIMARY_CURRENCY);
   }
 
   const referenceMonthName = currentCompetence
@@ -676,6 +729,25 @@ export default function DashboardPage() {
             </p>
           </div>
         </div>
+
+        {otherCurrencyCashFlowTotals.length > 0 && (
+          <div className="rounded-2xl border border-white/10 bg-slate-950/60 px-5 py-4 text-sm text-slate-400">
+            <p>
+              Valores acima somente em {PRIMARY_CURRENCY}. Outras moedas, não
+              somadas:
+            </p>
+            <ul className="mt-2 space-y-1">
+              {otherCurrencyCashFlowTotals.map((totals) => (
+                <li key={totals.currency} className="tabular-nums">
+                  <span className="font-semibold text-slate-200">
+                    {totals.currency}
+                  </span>
+                  {`: receitas ${formatMoney(totals.income, totals.currency)} · despesas ${formatMoney(totals.accountExpenses, totals.currency)} · faturas ${formatMoney(totals.creditCardInvoices, totals.currency)}`}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
 
         <div className="grid gap-6 xl:grid-cols-2">
           <ComparisonBarChart

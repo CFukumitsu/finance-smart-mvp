@@ -16,6 +16,7 @@ const competences: AnalyticsCompetence[] = [
 ];
 
 const filters: AnalyticsFilters = {
+  currency: "BRL",
   competenceId: "july",
   accountId: "",
   categoryId: "",
@@ -36,7 +37,7 @@ function transaction(
     description: values.id,
     due_date: "2026-06-10",
     status: "Pago",
-    account: { name: "Conta", type: "Conta" },
+    account: { name: "Conta", type: "Conta", currency: "BRL" },
     category: { name: "Categoria", type: "Despesa" },
     ...values,
   };
@@ -49,7 +50,7 @@ test("não duplica pagamento de fatura nem transferência nas despesas", () => {
     openingBalance: 1000,
     transactions: [
       transaction({ id: "income", competence_id: "june", type: "Receita", value: 3000, status: "Recebido" }),
-      transaction({ id: "purchase", competence_id: "june", type: "Despesa", value: 500, account: { name: "Cartão", type: "Cartão" } }),
+      transaction({ id: "purchase", competence_id: "june", type: "Despesa", value: 500, account: { name: "Cartão", type: "Cartão", currency: "BRL" } }),
       transaction({ id: "invoice", competence_id: "june", type: "Pagamento de Fatura", value: 500 }),
       transaction({ id: "transfer", competence_id: "june", type: "Transferência", value: 200 }),
     ],

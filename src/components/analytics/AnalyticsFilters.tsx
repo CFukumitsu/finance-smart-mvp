@@ -1,6 +1,11 @@
 "use client";
 
+import {
+  isAnalyticsAccountInCurrency,
+  listAnalyticsCurrencies,
+} from "@/src/utils/analyticsFilters";
 import { getAnalyticsQuickRange } from "@/src/utils/analyticsPredictive";
+import { getCurrencyLabel } from "@/src/utils/currencies";
 import { useAnalytics } from "./AnalyticsProvider";
 
 type AnalyticsFiltersProps = {
@@ -55,10 +60,19 @@ export default function AnalyticsFilters({
       </label>
 
       <label className="grid min-w-0 gap-1.5 text-xs font-medium text-slate-400">
+        Moeda · sem conversão
+        <select value={filters.currency} onChange={(event) => setFilter("currency", event.target.value)} className={fieldClass}>
+          {listAnalyticsCurrencies(accounts).map((currency) => <option key={currency} value={currency}>{getCurrencyLabel(currency)}</option>)}
+        </select>
+      </label>
+
+      <label className="grid min-w-0 gap-1.5 text-xs font-medium text-slate-400">
         Conta ou cartão
         <select value={filters.accountId} onChange={(event) => setFilter("accountId", event.target.value)} className={fieldClass}>
-          <option value="">Todas as contas</option>
-          {accounts.map((account) => <option key={account.id} value={account.id}>{account.name}{account.active ? "" : " (inativa)"}</option>)}
+          <option value="">{`Todas as contas em ${filters.currency}`}</option>
+          {accounts
+            .filter((account) => isAnalyticsAccountInCurrency(account, filters.currency))
+            .map((account) => <option key={account.id} value={account.id}>{`${account.name}${account.active ? "" : " (inativa)"}`}</option>)}
         </select>
       </label>
 

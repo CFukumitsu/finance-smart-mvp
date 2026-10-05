@@ -22,11 +22,16 @@ import {
   calculateAccountFinalBalance,
 } from "@/src/utils/balanceCalculations";
 import { requiresTraditionalAccountClosure } from "@/src/utils/closingAccounts";
+import {
+  checkCardPaymentCurrencies,
+  formatMoney,
+} from "@/src/utils/currencies";
 
 type Account = {
   id: string;
   name: string;
   type: "Conta" | "Cartão";
+  currency: string | null;
   show_on_investments_dashboard: boolean;
   investment_account_kind: "BALANCE" | null;
 };
@@ -63,11 +68,9 @@ type CardStatement = {
   payment_transaction_id?: string | null;
 };
 
-function formatCurrency(value: number) {
-  return new Intl.NumberFormat("pt-BR", {
-    style: "currency",
-    currency: "BRL",
-  }).format(value);
+// Fechamento de conta/cartão é sempre de uma única conta: usa a moeda dela.
+function formatCurrency(value: number, currency: string | null) {
+  return formatMoney(value, currency);
 }
 
 function formatInputCurrency(value: number | string) {
@@ -155,7 +158,7 @@ export default function ClosingsPageContent() {
 
     const { data: accountsData, error: accountsError } = await supabase
       .from("accounts")
-      .select("id, name, type, show_on_investments_dashboard, investment_account_kind")
+      .select("id, name, type, currency, show_on_investments_dashboard, investment_account_kind")
       .eq("owner_id", ownerId)
       .eq("active", true)
 
@@ -385,6 +388,19 @@ export default function ClosingsPageContent() {
     return mutation.run("closeCardStatement" + ":" + (account).id, async () => {
 
     if (!selectedCompetenceId) return;
+
+    const selectedPaymentAccountId =
+      cardPaymentInputs[account.id]?.paymentAccountId;
+    const paymentCurrencyCheck = selectedPaymentAccountId
+      ? checkCardPaymentCurrencies(
+          account.currency,
+          accounts.find((item) => item.id === selectedPaymentAccountId)?.currency
+        )
+      : null;
+    if (paymentCurrencyCheck && !paymentCurrencyCheck.allowed) {
+      alert(paymentCurrencyCheck.message);
+      return;
+    }
 
     const ownerId = await getCurrentUserId();
 
@@ -721,6 +737,9 @@ export default function ClosingsPageContent() {
                   <div className="w-full">
                     <div className="mb-3 flex items-center gap-3">
                       <p className="font-semibold text-white">{account.name}</p>
+                      <span className="text-xs font-semibold text-slate-400">
+                        {account.currency ?? "Moeda não confirmada"}
+                      </span>
 
                       <span
                         className={`rounded-full px-3 py-1 text-xs font-semibold ${isClosed
@@ -768,14 +787,20 @@ export default function ClosingsPageContent() {
                       <div className="text-xs text-slate-400">
                         Créditos
                         <p className="mt-3 text-sm font-semibold text-emerald-300">
-                          {formatCurrency(getAccountCredits(account.id))}
+                          {formatCurrency(
+                            getAccountCredits(account.id),
+                            account.currency
+                          )}
                         </p>
                       </div>
 
                       <div className="text-xs text-slate-400">
                         Débitos
                         <p className="mt-3 text-sm font-semibold text-red-300">
-                          {formatCurrency(getAccountDebits(account.id))}
+                          {formatCurrency(
+                            getAccountDebits(account.id),
+                            account.currency
+                          )}
                         </p>
                       </div>
 
@@ -857,6 +882,9 @@ export default function ClosingsPageContent() {
                   <div className="w-full">
                     <div className="mb-3 flex items-center gap-3">
                       <p className="font-semibold text-white">{account.name}</p>
+                      <span className="text-xs font-semibold text-slate-400">
+                        {account.currency ?? "Moeda não confirmada"}
+                      </span>
 
                       <span
                         className={`rounded-full px-3 py-1 text-xs font-semibold ${isClosed
@@ -872,7 +900,7 @@ export default function ClosingsPageContent() {
                       <div className="text-xs text-slate-400">
                         {isClosed ? "Fatura fechada" : "Fatura calculada"}
                         <p className="mt-3 text-sm font-semibold text-slate-200">
-                          {formatCurrency(statementTotal)}
+                          {formatCurrency(statementTotal, account.currency)}
                         </p>
                       </div>
 

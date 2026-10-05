@@ -68,6 +68,14 @@ import {
   isFinancialAccount,
   isFinancialLedgerAccount,
 } from "@/src/utils/closingAccounts";
+import {
+  checkTransferCurrencies,
+  formatMoney,
+  formatMoneyInput,
+  getMoneyInputPlaceholder,
+  parseMoneyInput,
+} from "@/src/utils/currencies";
+import { summarizeTransactionTotalsByCurrency } from "@/src/utils/transactionCurrencyTotals";
 
 type Account = {
   id: string;
@@ -77,6 +85,7 @@ type Account = {
   due_day: number | null;
   limit_amount: number | null;
   current_balance: number | null;
+  currency: string | null;
   show_on_investments_dashboard: boolean;
   investment_account_kind: "BALANCE" | null;
 };
@@ -108,7 +117,11 @@ type Transaction = {
   account_id: string;
   category_id: string;
   competence_id: string;
-  account: { name: string; type: "Conta" | "Cartão" } | null;
+  account: {
+    name: string;
+    type: "Conta" | "Cartão";
+    currency: string | null;
+  } | null;
   category: { name: string } | null;
   competence: { name: string } | null;
   origin_account_id?: string | null;
@@ -482,40 +495,22 @@ function TransactionsPageContent() {
     return false;
   }
 
-  function onlyDigits(value: string) {
-    return value.replace(/\D/g, "");
+  // A máscara acompanha a moeda da conta do formulário; o valor salvo continua
+  // sendo o número nativo da conta, sem conversão.
+  function getAccountCurrency(accountId: string) {
+    return accounts.find((account) => account.id === accountId)?.currency ?? null;
   }
 
-  function formatCurrencyFromNumber(value: number) {
-    return Number(value).toLocaleString("pt-BR", {
-      style: "currency",
-      currency: "BRL",
-    });
+  function formatCurrencyFromNumber(value: number, accountId: string) {
+    return formatMoney(value, getAccountCurrency(accountId));
   }
 
-  function formatCurrencyInput(value: string) {
-    const digits = onlyDigits(value);
-
-    if (!digits) {
-      return "";
-    }
-
-    const numericValue = Number(digits) / 100;
-
-    return numericValue.toLocaleString("pt-BR", {
-      style: "currency",
-      currency: "BRL",
-    });
+  function formatCurrencyInput(value: string, accountId: string) {
+    return formatMoneyInput(value, getAccountCurrency(accountId));
   }
 
   function parseCurrencyInput(value: string) {
-    const digits = onlyDigits(value);
-
-    if (!digits) {
-      return 0;
-    }
-
-    return Number(digits) / 100;
+    return parseMoneyInput(value);
   }
 
   function addMonths(date: string, months: number) {
@@ -717,7 +712,7 @@ function TransactionsPageContent() {
           bankroll_operation_type,
           investment_integration_group_id,
           investment_event_type,
-          account:accounts!transactions_account_id_fkey(name, type),
+          account:accounts!transactions_account_id_fkey(name, type, currency),
           category:categories!transactions_category_id_fkey(name),
           competence:competences!transactions_competence_id_fkey(name)
         `,
@@ -810,7 +805,7 @@ function TransactionsPageContent() {
         supabase
           .from("accounts")
           .select(
-            "id, name, type, closing_day, due_day, limit_amount, current_balance, show_on_investments_dashboard, investment_account_kind",
+            "id, name, type, closing_day, due_day, limit_amount, current_balance, currency, show_on_investments_dashboard, investment_account_kind",
           )
           .eq("owner_id", ownerId)
           .eq("active", true)
@@ -1056,7 +1051,10 @@ function TransactionsPageContent() {
 
     setForm({
       description: transaction.description ?? "",
-      value: formatCurrencyFromNumber(Number(transaction.value ?? 0)),
+      value: formatCurrencyFromNumber(
+        Number(transaction.value ?? 0),
+        transaction.account_id ?? "",
+      ),
       due_date: transaction.due_date ?? new Date().toISOString().split("T")[0],
       type: transaction.type ?? "Despesa",
       mode: transaction.mode ?? "unico",
@@ -1140,6 +1138,38 @@ function TransactionsPageContent() {
       ) {
         alert("Preencha todos os campos obrigatórios.");
         return;
+      }
+
+      // Bloqueio temporário até existir conversão cambial: sem ele, a ponta de
+      // destino receberia o valor nativo da origem em outra moeda. Pontas
+      // históricas continuam editáveis enquanto as contas não mudarem.
+      if (form.type === "Transferência") {
+        const originalTransaction = editingTransactionId
+          ? transactions.find(
+              (transaction) => transaction.id === editingTransactionId,
+            )
+          : undefined;
+        const transferAccountsChanged =
+          !originalTransaction ||
+          originalTransaction.type !== "Transferência" ||
+          originalTransaction.account_id !== form.account_id ||
+          (originalTransaction.destination_account_id ?? "") !==
+            form.destination_account_id;
+        const counterpartAccountId =
+          editingTransactionId && form.account_id === form.destination_account_id
+            ? form.origin_account_id
+            : form.destination_account_id;
+        const currencyCheck = transferAccountsChanged
+          ? checkTransferCurrencies(
+              selectedAccount.currency,
+              getAccountCurrency(counterpartAccountId),
+            )
+          : null;
+
+        if (currencyCheck && !currencyCheck.allowed) {
+          alert(currencyCheck.message);
+          return;
+        }
       }
 
       if (
@@ -1697,13 +1727,6 @@ function TransactionsPageContent() {
     return new Date(date + "T00:00:00").toLocaleDateString("pt-BR");
   }
 
-  function formatCurrency(value: number) {
-    return Number(value).toLocaleString("pt-BR", {
-      style: "currency",
-      currency: "BRL",
-    });
-  }
-
   function formatCompetenceLabel(value: string) {
     const match = /^(\d{4})-(\d{2})$/.exec(value);
 
@@ -1813,30 +1836,24 @@ function TransactionsPageContent() {
       })
     : 0;
 
-  const totalIncome = transactions
-    .filter((transaction) => transaction.type === "Receita")
-    .reduce((sum, transaction) => sum + Number(transaction.value), 0);
+  // Sem conta selecionada, os cards mostram somente a moeda principal (BRL);
+  // as demais moedas são listadas à parte e nunca somadas aos cards.
+  const [primaryCurrencyTotals, ...otherCurrencyTotals] =
+    summarizeTransactionTotalsByCurrency(transactions);
+  const {
+    income: totalIncome,
+    directExpenses: totalDirectExpenses,
+    invoicePayments: totalInvoicePayments,
+    cashFlowResult,
+  } = primaryCurrencyTotals.totals;
+  const selectedAccountCurrency = selectedAccount?.currency ?? null;
 
-  const totalDirectExpenses = transactions
-    .filter((transaction) => transaction.type === "Despesa")
-    .reduce((sum, transaction) => sum + Number(transaction.value), 0);
-
-  const totalCashExpenses = transactions
-    .filter(
-      (transaction) =>
-        transaction.type === "Despesa" && transaction.account?.type === "Conta",
-    )
-    .reduce((sum, transaction) => sum + Number(transaction.value), 0);
-
-  const totalInvoicePayments = transactions
-    .filter((transaction) => transaction.type === "Pagamento de Fatura")
-    .reduce((sum, transaction) => sum + Number(transaction.value), 0);
-
-  const cashFlowResult = totalIncome - totalCashExpenses - totalInvoicePayments;
-
-  const totalTransfers = transactions
-    .filter((transaction) => transaction.type === "Transferência")
-    .reduce((sum, transaction) => sum + Number(transaction.value), 0);
+  function formatSummaryCurrency(value: number) {
+    return formatMoney(
+      value,
+      selectedAccount ? selectedAccountCurrency : primaryCurrencyTotals.currency,
+    );
+  }
 
   const cardLimit = plannedCardLimit;
 
@@ -2207,24 +2224,24 @@ function TransactionsPageContent() {
             <>
               <SummaryCard
                 label="Saldo do mês"
-                value={formatCurrency(cashFlowResult)}
+                value={formatSummaryCurrency(cashFlowResult)}
                 tone={cashFlowResult >= 0 ? "positive" : "negative"}
                 hint="Receitas − despesas em conta − pagamentos de fatura"
                 primary
               />
               <SummaryCard
                 label="Receitas"
-                value={formatCurrency(totalIncome)}
+                value={formatSummaryCurrency(totalIncome)}
                 tone="positive"
               />
               <SummaryCard
                 label="Despesas diretas"
-                value={formatCurrency(totalDirectExpenses)}
+                value={formatSummaryCurrency(totalDirectExpenses)}
                 tone="negative"
               />
               <SummaryCard
                 label="Pagamentos de fatura"
-                value={formatCurrency(totalInvoicePayments)}
+                value={formatSummaryCurrency(totalInvoicePayments)}
                 tone="warning"
               />
             </>
@@ -2239,17 +2256,17 @@ function TransactionsPageContent() {
               />
               <SummaryCard
                 label="Saldo anterior"
-                value={formatCurrency(openingBalance)}
+                value={formatSummaryCurrency(openingBalance)}
                 tone={openingBalance >= 0 ? "info" : "negative"}
               />
               <SummaryCard
                 label="Saldo atual"
-                value={formatCurrency(currentBalance)}
+                value={formatSummaryCurrency(currentBalance)}
                 tone={currentBalance >= 0 ? "positive" : "negative"}
               />
               <SummaryCard
                 label="Futuro"
-                value={formatCurrency(futureBalance)}
+                value={formatSummaryCurrency(futureBalance)}
                 tone={futureBalance >= 0 ? "positive" : "negative"}
               />
             </>
@@ -2264,12 +2281,12 @@ function TransactionsPageContent() {
               />
               <SummaryCard
                 label="Total da fatura"
-                value={formatCurrency(cardUsedLimit)}
+                value={formatSummaryCurrency(cardUsedLimit)}
                 tone="negative"
               />
               <SummaryCard
                 label="Limite disponível"
-                value={formatCurrency(cardAvailableLimit)}
+                value={formatSummaryCurrency(cardAvailableLimit)}
                 tone={cardAvailableLimit >= 0 ? "positive" : "negative"}
               />
               <SummaryCard
@@ -2289,6 +2306,25 @@ function TransactionsPageContent() {
             </>
           )}
         </div>
+
+        {!selectedAccount && otherCurrencyTotals.length > 0 && (
+          <div className="theme-muted -mt-1 rounded-xl border border-white/10 px-4 py-3 text-xs">
+            <p>
+              Totais acima somente em {primaryCurrencyTotals.currency}. Outras
+              moedas, não somadas:
+            </p>
+            <ul className="mt-1 space-y-0.5">
+              {otherCurrencyTotals.map(({ currency, totals }) => (
+                <li key={currency} className="tabular-nums">
+                  <span className="font-semibold">{currency}</span>: receitas{" "}
+                  {formatMoney(totals.income, currency)} · despesas diretas{" "}
+                  {formatMoney(totals.directExpenses, currency)} · pagamentos de
+                  fatura {formatMoney(totals.invoicePayments, currency)}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
 
         <div
           className={
@@ -2475,7 +2511,10 @@ function TransactionsPageContent() {
                             transaction.type,
                           )}`}
                         >
-                          {formatCurrency(transaction.value)}
+                          {formatMoney(
+                            transaction.value,
+                            transaction.account?.currency,
+                          )}
                         </td>
 
                         <td className="hidden w-[116px] px-3 py-4 md:table-cell">
@@ -2618,7 +2657,10 @@ function TransactionsPageContent() {
                               detailTransaction.type,
                             )}`}
                           >
-                            {formatCurrency(detailTransaction.value)}
+                            {formatMoney(
+                              detailTransaction.value,
+                              detailTransaction.account?.currency,
+                            )}
                           </p>
                         </div>
                       </div>
@@ -3006,9 +3048,12 @@ function TransactionsPageContent() {
                   </label>
 
                   <input
-                    value={form.value}
+                    value={formatCurrencyInput(form.value, form.account_id)}
                     onChange={(event) => {
-                      const value = formatCurrencyInput(event.target.value);
+                      const value = formatCurrencyInput(
+                        event.target.value,
+                        form.account_id,
+                      );
 
                       setForm({
                         ...form,
@@ -3029,7 +3074,9 @@ function TransactionsPageContent() {
                         }
                       }
                     }}
-                    placeholder="R$ 0,00"
+                    placeholder={getMoneyInputPlaceholder(
+                      getAccountCurrency(form.account_id),
+                    )}
                     inputMode="numeric"
                     className="theme-field w-full rounded-xl border px-4 py-3 text-sm outline-none"
                   />
@@ -3066,7 +3113,7 @@ function TransactionsPageContent() {
 
                         {financialAccounts.map((account) => (
                           <option key={account.id} value={account.id}>
-                            {account.name}
+                            {`${account.name}${account.currency ? ` (${account.currency})` : ""}`}
                           </option>
                         ))}
                       </select>
@@ -3093,7 +3140,7 @@ function TransactionsPageContent() {
                           .filter((account) => account.id !== form.account_id)
                           .map((account) => (
                             <option key={account.id} value={account.id}>
-                              {account.name}
+                              {`${account.name}${account.currency ? ` (${account.currency})` : ""}`}
                             </option>
                           ))}
                       </select>
@@ -3224,7 +3271,10 @@ function TransactionsPageContent() {
                     onTotalChange={(total) =>
                       setForm((current) => ({
                         ...current,
-                        value: formatCurrencyFromNumber(total),
+                        value: formatCurrencyFromNumber(
+                          total,
+                          current.account_id,
+                        ),
                       }))
                     }
                     isEditing={editingTransactionId !== null}

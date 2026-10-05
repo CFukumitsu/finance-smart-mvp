@@ -19,6 +19,7 @@ import {
   getCategoryMonthlyPayload,
   type CategoryFormType,
 } from "@/src/utils/categoryForm";
+import { formatMoney, PRIMARY_CURRENCY } from "@/src/utils/currencies";
 
 type Competence = {
   id: string;
@@ -144,10 +145,8 @@ export default function CategoriesPage() {
 
     if (!numberValue) return "";
 
-    return numberValue.toLocaleString("pt-BR", {
-      style: "currency",
-      currency: "BRL",
-    });
+    // Metas e limites de categoria são definidos na moeda principal (BRL).
+    return formatMoney(numberValue, PRIMARY_CURRENCY);
   }
 
   function parseMoneyInput(value: string) {
@@ -452,10 +451,7 @@ export default function CategoriesPage() {
   }
 
   function formatCurrency(value: number | null) {
-    return Number(value ?? 0).toLocaleString("pt-BR", {
-      style: "currency",
-      currency: "BRL",
-    });
+    return formatMoney(Number(value ?? 0), PRIMARY_CURRENCY);
   }
 
   function getTypeBadgeClass(type: string) {

@@ -18,6 +18,10 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx";
 import AppShell from "../components/layout/AppShell";
 import { getCurrentUserId, supabase } from "@/src/lib/supabase";
+import {
+  checkCardPaymentCurrencies,
+  formatMoney,
+} from "@/src/utils/currencies";
 import { ensureCompetenceExists } from "@/src/services/competenceService";
 
 type Account = {
@@ -25,6 +29,7 @@ type Account = {
   name: string;
   type: "Conta" | "Cartão";
   due_day?: number | null;
+  currency: string | null;
 };
 
 type ImportedItem = {
@@ -153,13 +158,6 @@ function parseValue(value: unknown) {
   }
 
   return Number(text || 0);
-}
-
-function formatCurrency(value: number) {
-  return Number(value).toLocaleString("pt-BR", {
-    style: "currency",
-    currency: "BRL",
-  });
 }
 
 function getCellColumnIndex(cellReference: string) {
@@ -782,6 +780,11 @@ export default function ReconciliationPage() {
     [accounts, selectedAccountId]
   );
 
+  // A conferência é sempre de uma única conta/cartão: valores na moeda dela.
+  function formatCurrency(value: number) {
+    return formatMoney(Number(value), selectedAccount?.currency);
+  }
+
   function getSignedTransactionValue(transaction: Transaction) {
     return transaction.type === "Receita"
       ? Number(transaction.value) * -1
@@ -911,7 +914,7 @@ export default function ReconciliationPage() {
     async function loadAccounts(ownerId: string) {
       const { data, error } = await supabase
         .from("accounts")
-        .select("id, name, type, due_day")
+        .select("id, name, type, due_day, currency")
         .eq("owner_id", ownerId)
         .eq("active", true)
         .order("name", { ascending: true });
@@ -2369,6 +2372,16 @@ export default function ReconciliationPage() {
 
     if (!paymentAccountId) {
       alert("Selecione a conta de pagamento.");
+      return;
+    }
+
+    const paymentCurrencyCheck = checkCardPaymentCurrencies(
+      selectedAccount?.currency,
+      accounts.find((account) => account.id === paymentAccountId)?.currency
+    );
+
+    if (!paymentCurrencyCheck.allowed) {
+      alert(paymentCurrencyCheck.message);
       return;
     }
 

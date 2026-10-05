@@ -1,3 +1,6 @@
+// @ts-expect-error Node's native TypeScript test runner requires the extension.
+import { filterByCurrency, listCurrencies } from "./currencies.ts";
+
 export type BalanceTransaction = {
   account_id: string | null;
   destination_account_id?: string | null;
@@ -11,6 +14,7 @@ export type BalanceTransaction = {
     name?: string | null;
     type?: string | null;
     limit_amount?: number | null;
+    currency?: string | null;
   } | null;
   category?: {
     name?: string | null;
@@ -154,6 +158,34 @@ export function calculateCashFlowTotals(
     creditCardInvoices,
     projectedBalance: income - accountExpenses - creditCardInvoices,
   };
+}
+
+export type CurrencyCashFlowTotals = ReturnType<typeof calculateCashFlowTotals> & {
+  currency: string;
+};
+
+/**
+ * Totais de fluxo de caixa calculados separadamente para cada moeda de conta.
+ * Cada moeda usa somente os próprios lançamentos; nada é somado entre moedas.
+ */
+export function calculateCashFlowTotalsByCurrency(
+  cashFlowTransactions: BalanceTransaction[],
+  previousCardTransactions: BalanceTransaction[],
+): CurrencyCashFlowTotals[] {
+  const getCurrency = (transaction: BalanceTransaction) =>
+    transaction.account?.currency;
+  const currencies: string[] = listCurrencies(
+    [...cashFlowTransactions, ...previousCardTransactions],
+    getCurrency,
+  );
+
+  return currencies.map((currency) => ({
+    currency,
+    ...calculateCashFlowTotals(
+      filterByCurrency(cashFlowTransactions, currency, getCurrency),
+      filterByCurrency(previousCardTransactions, currency, getCurrency),
+    ),
+  }));
 }
 
 export function calculateCardRealizedValue(

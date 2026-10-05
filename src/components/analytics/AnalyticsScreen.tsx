@@ -45,7 +45,7 @@ import {
   AnalyticsHeader,
   AnalyticsSummaryCard,
   CsvExportButton,
-  formatAnalyticsCurrency,
+  useAnalyticsMoneyFormatter,
 } from "./AnalyticsUi";
 
 const screenCopy: Record<
@@ -81,9 +81,9 @@ const chartColors = {
   secondary: "#60a5fa",
 };
 
-function currencyTooltip(value: unknown) {
+function currencyTooltip(value: unknown, formatCurrency: (value: number) => string) {
   const resolved = Array.isArray(value) ? value[0] : value;
-  return formatAnalyticsCurrency(Number(resolved ?? 0));
+  return formatCurrency(Number(resolved ?? 0));
 }
 
 function MonthlyLines({
@@ -93,6 +93,7 @@ function MonthlyLines({
   data: MonthlyAnalytics[];
   lines: Array<{ key: keyof MonthlyAnalytics; name: string; color: string }>;
 }) {
+  const formatCurrency = useAnalyticsMoneyFormatter();
   if (data.length === 0) {
     return <AnalyticsEmptyState message="Nenhum dado encontrado para o período." />;
   }
@@ -115,7 +116,7 @@ function MonthlyLines({
           }
         />
         <Tooltip
-          formatter={(value, name) => [currencyTooltip(value), String(name)]}
+          formatter={(value, name) => [currencyTooltip(value, formatCurrency), String(name)]}
           contentStyle={{
             backgroundColor: "#020617",
             border: "1px solid rgba(255,255,255,.12)",
@@ -147,6 +148,7 @@ function MonthlyBars({
   data: MonthlyAnalytics[];
   bars: Array<{ key: keyof MonthlyAnalytics; name: string; color: string }>;
 }) {
+  const formatCurrency = useAnalyticsMoneyFormatter();
   if (data.length === 0) {
     return <AnalyticsEmptyState message="Nenhum dado encontrado para o período." />;
   }
@@ -169,7 +171,7 @@ function MonthlyBars({
           }
         />
         <Tooltip
-          formatter={(value, name) => [currencyTooltip(value), String(name)]}
+          formatter={(value, name) => [currencyTooltip(value, formatCurrency), String(name)]}
           contentStyle={{
             backgroundColor: "#020617",
             border: "1px solid rgba(255,255,255,.12)",
@@ -192,6 +194,7 @@ function MonthlyBars({
 }
 
 function BreakdownBars({ data }: { data: AnalyticsBreakdown[] }) {
+  const formatCurrency = useAnalyticsMoneyFormatter();
   const visible = data.slice(0, 8);
   if (visible.length === 0) {
     return <AnalyticsEmptyState message="Nenhum agrupamento disponível." />;
@@ -226,7 +229,7 @@ function BreakdownBars({ data }: { data: AnalyticsBreakdown[] }) {
           }
         />
         <Tooltip
-          formatter={(value) => [currencyTooltip(value), "Total"]}
+          formatter={(value) => [currencyTooltip(value, formatCurrency), "Total"]}
           contentStyle={{
             backgroundColor: "#020617",
             border: "1px solid rgba(255,255,255,.12)",
@@ -264,6 +267,7 @@ function MonthlyTable({
   monthly: MonthlyAnalytics[];
   includePendingCashFlow: boolean;
 }) {
+  const formatCurrency = useAnalyticsMoneyFormatter();
   const columns =
     kind === "income"
       ? ["Competência", "Receitas"]
@@ -300,7 +304,7 @@ function MonthlyTable({
                 <div key={columns[index + 1]}>
                   <p className="text-xs text-slate-500">{columns[index + 1]}</p>
                   <p className="mt-1 break-words text-sm font-medium text-slate-200">
-                    {formatAnalyticsCurrency(value)}
+                    {formatCurrency(value)}
                   </p>
                 </div>
               ))}
@@ -329,7 +333,7 @@ function MonthlyTable({
                 <td className="px-3 py-3 font-medium text-white">{item.competenceName}</td>
                 {rowValues(item).map((value, index) => (
                   <td key={columns[index + 1]} className="px-3 py-3 text-right text-slate-300">
-                    {formatAnalyticsCurrency(value)}
+                    {formatCurrency(value)}
                   </td>
                 ))}
               </tr>
@@ -342,6 +346,7 @@ function MonthlyTable({
 }
 
 export default function AnalyticsScreen({ kind }: { kind: AnalyticsScreenKind }) {
+  const formatCurrency = useAnalyticsMoneyFormatter();
   const {
     selectedCompetences,
     transactions,
@@ -517,9 +522,9 @@ export default function AnalyticsScreen({ kind }: { kind: AnalyticsScreenKind })
       {(kind === "overview" || kind === "expenses") && dateRange && (
         <>
           <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4" aria-label="Indicadores preditivos do período">
-            <AnalyticsSummaryCard label="Ritmo médio diário" value={formatAnalyticsCurrency(dailyExpensePace)} detail={`${consideredDays} ${consideredDays === 1 ? "dia considerado" : "dias considerados"}${dailyPaceChange === null ? " · sem base comparável" : ` · ${Math.abs(dailyPaceChange).toLocaleString("pt-BR", { maximumFractionDigits: 1 })}% ${dailyPaceChange >= 0 ? "acima" : "abaixo"} do anterior`}`} tone={dailyPaceChange !== null && dailyPaceChange > 0 ? "negative" : "info"} />
-            <AnalyticsSummaryCard label={monthlyProjection === null ? "Despesas realizadas" : "Projeção até o fim do mês"} value={formatAnalyticsCurrency(monthlyProjection ?? expenseSummary.total)} detail={monthlyProjection === null ? "Sem projeção para período histórico ou com mais de um mês." : `Divisor: ${consideredDays} dias decorridos; sem incluir dias futuros.`} tone="negative" />
-            <AnalyticsSummaryCard label="Limite diário disponível" value={dailyAvailable === null ? "Sem orçamento" : formatAnalyticsCurrency(dailyAvailable)} detail={dailyAvailable === null ? "Configure planejamento mensal por categoria." : `${remainingDays} ${remainingDays === 1 ? "dia restante" : "dias restantes"} considerados${totalBudgetRealized > totalPlanned ? " · Estourado" : ""}.`} tone={dailyAvailable === 0 && totalPlanned > 0 ? "negative" : "info"} />
+            <AnalyticsSummaryCard label="Ritmo médio diário" value={formatCurrency(dailyExpensePace)} detail={`${consideredDays} ${consideredDays === 1 ? "dia considerado" : "dias considerados"}${dailyPaceChange === null ? " · sem base comparável" : ` · ${Math.abs(dailyPaceChange).toLocaleString("pt-BR", { maximumFractionDigits: 1 })}% ${dailyPaceChange >= 0 ? "acima" : "abaixo"} do anterior`}`} tone={dailyPaceChange !== null && dailyPaceChange > 0 ? "negative" : "info"} />
+            <AnalyticsSummaryCard label={monthlyProjection === null ? "Despesas realizadas" : "Projeção até o fim do mês"} value={formatCurrency(monthlyProjection ?? expenseSummary.total)} detail={monthlyProjection === null ? "Sem projeção para período histórico ou com mais de um mês." : `Divisor: ${consideredDays} dias decorridos; sem incluir dias futuros.`} tone="negative" />
+            <AnalyticsSummaryCard label="Limite diário disponível" value={dailyAvailable === null ? "Sem orçamento" : formatCurrency(dailyAvailable)} detail={dailyAvailable === null ? "Configure planejamento mensal por categoria." : `${remainingDays} ${remainingDays === 1 ? "dia restante" : "dias restantes"} considerados${totalBudgetRealized > totalPlanned ? " · Estourado" : ""}.`} tone={dailyAvailable === 0 && totalPlanned > 0 ? "negative" : "info"} />
             <AnalyticsSummaryCard label="Período comparativo" value={`${formatAnalyticsDate(comparisonRange!.startDate)} a ${formatAnalyticsDate(comparisonRange!.endDate)}`} detail="Intervalo imediatamente anterior; mês completo usa o mês anterior completo." />
           </section>
 
@@ -536,8 +541,8 @@ export default function AnalyticsScreen({ kind }: { kind: AnalyticsScreenKind })
               <div className="mt-4 grid gap-3 lg:grid-cols-3">
                 {visibleAlerts.map((alert) => <article key={alert.categoryId} className={`rounded-xl border p-4 ${budgetStatusClass[alert.status]}`}>
                   <div className="flex items-center justify-between gap-3"><h3 className="font-semibold">{alert.status} em {alert.categoryName}</h3><span className="text-xs font-bold">{alert.percentage.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%</span></div>
-                  <p className="mt-2 text-sm opacity-90">Você gastou {formatAnalyticsCurrency(alert.realized)} de {formatAnalyticsCurrency(alert.planned)}.</p>
-                  {alert.projected !== null && <p className="mt-1 text-sm opacity-80">No ritmo atual, a categoria deve encerrar em {formatAnalyticsCurrency(alert.projected)}.</p>}
+                  <p className="mt-2 text-sm opacity-90">Você gastou {formatCurrency(alert.realized)} de {formatCurrency(alert.planned)}.</p>
+                  {alert.projected !== null && <p className="mt-1 text-sm opacity-80">No ritmo atual, a categoria deve encerrar em {formatCurrency(alert.projected)}.</p>}
                   {alert.probableOverrunDate && <p className="mt-1 text-sm font-medium">Possível estouro em {formatAnalyticsDate(alert.probableOverrunDate)}.</p>}
                 </article>)}
               </div>
@@ -550,7 +555,7 @@ export default function AnalyticsScreen({ kind }: { kind: AnalyticsScreenKind })
               <div className="flex flex-wrap items-center justify-between gap-2"><h3 className="font-medium text-white">{item.categoryName}</h3><span className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${budgetStatusClass[item.status]}`}>{item.status}</span></div>
               <div className="mt-3 h-2 overflow-hidden rounded-full bg-slate-800"><div className="h-full rounded-full bg-cyan-400" style={{ width: `${Math.min(100, item.percentage)}%` }} /></div>
               <div className="mt-3 grid grid-cols-2 gap-3 text-xs text-slate-400 sm:grid-cols-4">
-                <div><span className="block">Realizado</span><strong className="mt-1 block text-slate-200">{formatAnalyticsCurrency(item.realized)}</strong></div><div><span className="block">Planejado</span><strong className="mt-1 block text-slate-200">{formatAnalyticsCurrency(item.planned)}</strong></div><div><span className="block">Utilizado</span><strong className="mt-1 block text-slate-200">{item.percentage.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%</strong></div><div><span className="block">Restante</span><strong className="mt-1 block text-slate-200">{formatAnalyticsCurrency(item.remaining)}</strong></div>
+                <div><span className="block">Realizado</span><strong className="mt-1 block text-slate-200">{formatCurrency(item.realized)}</strong></div><div><span className="block">Planejado</span><strong className="mt-1 block text-slate-200">{formatCurrency(item.planned)}</strong></div><div><span className="block">Utilizado</span><strong className="mt-1 block text-slate-200">{item.percentage.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%</strong></div><div><span className="block">Restante</span><strong className="mt-1 block text-slate-200">{formatCurrency(item.remaining)}</strong></div>
               </div>
             </article>)}</div>
           </section>}
@@ -558,7 +563,7 @@ export default function AnalyticsScreen({ kind }: { kind: AnalyticsScreenKind })
           <section className="rounded-2xl border border-white/10 bg-slate-900/60 p-4 sm:p-5">
             <h2 className="font-semibold text-white">Principais responsáveis pelo aumento</h2><p className="mt-1 text-xs text-slate-500">Até três categorias com maior aumento absoluto contra o período comparativo.</p>
             {increaseDrivers.length === 0 ? <p className="mt-4 rounded-xl border border-dashed border-white/10 p-4 text-sm text-slate-400">Nenhuma categoria aumentou no período selecionado.</p> : <div className="mt-4 grid gap-3 lg:grid-cols-3">{increaseDrivers.map((item) => <article key={item.categoryId} className="rounded-xl border border-white/10 bg-white/[0.025] p-4">
-              <h3 className="font-medium text-white">{item.categoryName}</h3><p className="mt-3 text-lg font-semibold text-rose-300">+ {formatAnalyticsCurrency(item.difference)}</p><p className="mt-1 text-xs text-slate-400">Atual {formatAnalyticsCurrency(item.current)} · anterior {formatAnalyticsCurrency(item.previous)}</p><p className="mt-2 text-xs font-medium text-slate-300">{item.percentageChange === null ? "Período anterior sem base; percentual não calculado." : `${item.percentageChange.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}% de variação`}</p>
+              <h3 className="font-medium text-white">{item.categoryName}</h3><p className="mt-3 text-lg font-semibold text-rose-300">+ {formatCurrency(item.difference)}</p><p className="mt-1 text-xs text-slate-400">Atual {formatCurrency(item.current)} · anterior {formatCurrency(item.previous)}</p><p className="mt-2 text-xs font-medium text-slate-300">{item.percentageChange === null ? "Período anterior sem base; percentual não calculado." : `${item.percentageChange.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}% de variação`}</p>
             </article>)}</div>}
           </section>
         </>
@@ -567,37 +572,37 @@ export default function AnalyticsScreen({ kind }: { kind: AnalyticsScreenKind })
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         {kind === "overview" && (
           <>
-            <AnalyticsSummaryCard label="Receitas · período" value={formatAnalyticsCurrency(incomeSummary.total)} tone="positive" />
-            <AnalyticsSummaryCard label="Despesas · período" value={formatAnalyticsCurrency(expenseSummary.total)} tone="negative" />
-            <AnalyticsSummaryCard label="Resultado do período" value={formatAnalyticsCurrency(netResult)} tone={netResult >= 0 ? "positive" : "negative"} />
-            <AnalyticsSummaryCard label="Resultado médio mensal" value={formatAnalyticsCurrency(averageSavings)} tone={averageSavings >= 0 ? "info" : "negative"} />
+            <AnalyticsSummaryCard label="Receitas · período" value={formatCurrency(incomeSummary.total)} tone="positive" />
+            <AnalyticsSummaryCard label="Despesas · período" value={formatCurrency(expenseSummary.total)} tone="negative" />
+            <AnalyticsSummaryCard label="Resultado do período" value={formatCurrency(netResult)} tone={netResult >= 0 ? "positive" : "negative"} />
+            <AnalyticsSummaryCard label="Resultado médio mensal" value={formatCurrency(averageSavings)} tone={averageSavings >= 0 ? "info" : "negative"} />
           </>
         )}
 
         {kind === "income" && (
           <>
-            <AnalyticsSummaryCard label="Total" value={formatAnalyticsCurrency(incomeSummary.total)} tone="positive" />
-            <AnalyticsSummaryCard label="Média mensal" value={formatAnalyticsCurrency(incomeSummary.average)} />
-            <AnalyticsSummaryCard label="Maior mês" value={formatAnalyticsCurrency(incomeSummary.highest?.income ?? 0)} detail={incomeSummary.highest?.competenceName ?? "Sem dados"} tone="positive" />
-            <AnalyticsSummaryCard label="Menor mês" value={formatAnalyticsCurrency(incomeSummary.lowest?.income ?? 0)} detail={incomeSummary.lowest?.competenceName ?? "Sem dados"} />
+            <AnalyticsSummaryCard label="Total" value={formatCurrency(incomeSummary.total)} tone="positive" />
+            <AnalyticsSummaryCard label="Média mensal" value={formatCurrency(incomeSummary.average)} />
+            <AnalyticsSummaryCard label="Maior mês" value={formatCurrency(incomeSummary.highest?.income ?? 0)} detail={incomeSummary.highest?.competenceName ?? "Sem dados"} tone="positive" />
+            <AnalyticsSummaryCard label="Menor mês" value={formatCurrency(incomeSummary.lowest?.income ?? 0)} detail={incomeSummary.lowest?.competenceName ?? "Sem dados"} />
           </>
         )}
 
         {kind === "expenses" && (
           <>
-            <AnalyticsSummaryCard label="Total" value={formatAnalyticsCurrency(expenseSummary.total)} tone="negative" />
-            <AnalyticsSummaryCard label="Média mensal" value={formatAnalyticsCurrency(expenseSummary.average)} />
-            <AnalyticsSummaryCard label="Maior mês" value={formatAnalyticsCurrency(expenseSummary.highest?.expenses ?? 0)} detail={expenseSummary.highest?.competenceName ?? "Sem dados"} tone="negative" />
-            <AnalyticsSummaryCard label="Menor mês" value={formatAnalyticsCurrency(expenseSummary.lowest?.expenses ?? 0)} detail={expenseSummary.lowest?.competenceName ?? "Sem dados"} />
+            <AnalyticsSummaryCard label="Total" value={formatCurrency(expenseSummary.total)} tone="negative" />
+            <AnalyticsSummaryCard label="Média mensal" value={formatCurrency(expenseSummary.average)} />
+            <AnalyticsSummaryCard label="Maior mês" value={formatCurrency(expenseSummary.highest?.expenses ?? 0)} detail={expenseSummary.highest?.competenceName ?? "Sem dados"} tone="negative" />
+            <AnalyticsSummaryCard label="Menor mês" value={formatCurrency(expenseSummary.lowest?.expenses ?? 0)} detail={expenseSummary.lowest?.competenceName ?? "Sem dados"} />
           </>
         )}
 
         {kind === "cash-flow" && (
           <>
-            <AnalyticsSummaryCard label="Saldo inicial" value={formatAnalyticsCurrency(openingBalance)} />
-            <AnalyticsSummaryCard label={includePendingCashFlow ? "Entradas realizadas e previstas" : "Entradas realizadas"} value={formatAnalyticsCurrency(totalCashIn)} tone="positive" />
-            <AnalyticsSummaryCard label={includePendingCashFlow ? "Saídas realizadas e previstas" : "Saídas realizadas"} value={formatAnalyticsCurrency(totalCashOut)} tone="negative" />
-            <AnalyticsSummaryCard label={includePendingCashFlow ? "Saldo projetado" : "Saldo realizado"} value={formatAnalyticsCurrency(finalCashBalance)} tone={finalCashBalance >= 0 ? "info" : "negative"} />
+            <AnalyticsSummaryCard label="Saldo inicial" value={formatCurrency(openingBalance)} />
+            <AnalyticsSummaryCard label={includePendingCashFlow ? "Entradas realizadas e previstas" : "Entradas realizadas"} value={formatCurrency(totalCashIn)} tone="positive" />
+            <AnalyticsSummaryCard label={includePendingCashFlow ? "Saídas realizadas e previstas" : "Saídas realizadas"} value={formatCurrency(totalCashOut)} tone="negative" />
+            <AnalyticsSummaryCard label={includePendingCashFlow ? "Saldo projetado" : "Saldo realizado"} value={formatCurrency(finalCashBalance)} tone={finalCashBalance >= 0 ? "info" : "negative"} />
           </>
         )}
       </div>

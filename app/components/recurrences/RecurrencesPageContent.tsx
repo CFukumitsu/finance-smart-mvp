@@ -24,8 +24,17 @@ type SelectOption = {
     name: string;
 };
 
+type AccountOption = SelectOption & {
+    currency: string | null;
+};
+
 import { generateRecurringTransactions } from "@/src/services/generateRecurringTransactionsService";
 import { useModalShortcuts } from "@/src/hooks/useModalShortcuts";
+import {
+    formatMoney,
+    formatMoneyInput,
+    parseMoneyInput,
+} from "@/src/utils/currencies";
 const emptyForm: RecurringTransactionFormData = {
     description: "",
     type: "expense",
@@ -36,35 +45,25 @@ const emptyForm: RecurringTransactionFormData = {
     startCompetenceId: "",
     endCompetenceId: "",
 };
-function formatCurrencyInput(value: string) {
-    const onlyNumbers = value.replace(/\D/g, "");
-
-    if (!onlyNumbers) return "";
-
-    const numericValue = Number(onlyNumbers) / 100;
-
-    return numericValue.toLocaleString("pt-BR", {
-        style: "currency",
-        currency: "BRL",
-    });
+// A máscara usa a moeda da conta da recorrência; o valor salvo é o número
+// nativo, obtido pelos centavos digitados (independe do símbolo exibido).
+function formatCurrencyInput(value: string, currency: string | null | undefined) {
+    return formatMoneyInput(value, currency);
 }
 
 function parseCurrencyInput(value: string) {
-    return value
-        .replace(/\s/g, "")
-        .replace("R$", "")
-        .replace(/\./g, "")
-        .replace(",", ".")
-        .trim();
+    return String(parseMoneyInput(value));
 }
 
 export default function RecurrencesPageContent() {
   const mutation = useMutation();
     const [items, setItems] = useState<RecurringTransaction[]>([]);
-    const [accounts, setAccounts] = useState<SelectOption[]>([]);
+    const [accounts, setAccounts] = useState<AccountOption[]>([]);
 
     const accountName = (id?: string | null) =>
         accounts.find((a) => a.id === id)?.name ?? "-";
+    const accountCurrency = (id?: string | null) =>
+        accounts.find((a) => a.id === id)?.currency ?? null;
     const [categories, setCategories] = useState<SelectOption[]>([]);
     const [competences, setCompetences] = useState<SelectOption[]>([]);
     const [selectedCompetenceId, setSelectedCompetenceId] = useState("");
@@ -98,7 +97,7 @@ export default function RecurrencesPageContent() {
             await Promise.all([
                 supabase
                     .from("accounts")
-                    .select("id, name")
+                    .select("id, name, currency")
                     .eq("owner_id", ownerId)
                     .eq("active", true)
                     .order("name"),
@@ -115,7 +114,7 @@ export default function RecurrencesPageContent() {
                     .order("name"),
             ]);
 
-        setAccounts((accountsResult.data ?? []) as SelectOption[]);
+        setAccounts((accountsResult.data ?? []) as AccountOption[]);
         setCategories((categoriesResult.data ?? []) as SelectOption[]);
         setCompetences((competencesResult.data ?? []) as SelectOption[]);
 
@@ -170,7 +169,10 @@ export default function RecurrencesPageContent() {
         setFormData({
             description: item.description,
             type: item.type,
-            amount: formatCurrencyInput(String(Math.round(Number(item.amount) * 100))),
+            amount: formatCurrencyInput(
+                String(Math.round(Number(item.amount) * 100)),
+                accountCurrency(item.account_id)
+            ),
             accountId: item.account_id ?? "",
             categoryId: item.category_id ?? "",
             dayOfMonth: String(item.day_of_month ?? new Date().getDate()),
@@ -384,10 +386,7 @@ export default function RecurrencesPageContent() {
                                     </div>
 
                                     <p className="whitespace-nowrap text-sm font-semibold text-slate-100">
-                                        {Number(item.amount).toLocaleString("pt-BR", {
-                                            style: "currency",
-                                            currency: "BRL",
-                                        })}
+                                        {formatMoney(Number(item.amount), accountCurrency(item.account_id))}
                                     </p>
                                 </div>
 
@@ -505,10 +504,7 @@ export default function RecurrencesPageContent() {
                                         </td>
 
                                         <td className="px-5 py-4 text-slate-200">
-                                            {Number(item.amount).toLocaleString("pt-BR", {
-                                                style: "currency",
-                                                currency: "BRL",
-                                            })}
+                                            {formatMoney(Number(item.amount), accountCurrency(item.account_id))}
                                         </td>
 
                                         <td className="px-5 py-4 text-slate-300">Mensal</td>
@@ -614,9 +610,18 @@ export default function RecurrencesPageContent() {
                                 <input
                                     type="text"
                                     inputMode="numeric"
-                                    value={formData.amount}
+                                    value={formatCurrencyInput(
+                                        formData.amount,
+                                        accountCurrency(formData.accountId)
+                                    )}
                                     onChange={(event) =>
-                                        updateField("amount", formatCurrencyInput(event.target.value))
+                                        updateField(
+                                            "amount",
+                                            formatCurrencyInput(
+                                                event.target.value,
+                                                accountCurrency(formData.accountId)
+                                            )
+                                        )
                                     }
                                     required
                                     className="w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-white outline-none focus:border-emerald-400"
