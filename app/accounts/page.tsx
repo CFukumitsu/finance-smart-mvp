@@ -9,6 +9,11 @@ import AppShell from "../components/layout/AppShell";
 import { getCurrentUserId, supabase } from "@/src/lib/supabase";
 import { Pencil, TrendingUp, Power, Trash2 } from "lucide-react";
 import {
+  PLANNING_ROLE_LABELS,
+  resolvePlanningRole,
+  type PlanningRole,
+} from "@/src/utils/financialOverview";
+import {
   getAccountCardFields,
   type AccountFormType,
 } from "@/src/utils/accountForm";
@@ -36,6 +41,9 @@ type Account = {
   currency: string | null;
   show_on_investments_dashboard: boolean;
   investment_account_kind: "BALANCE" | null;
+  planning_role: PlanningRole | null;
+  use_spending_history: boolean;
+  spending_history_start_date: string | null;
   has_financial_history: boolean;
   active: boolean;
 };
@@ -50,6 +58,10 @@ const initialForm = {
   currency: "BRL",
   show_on_investments_dashboard: false,
   investment_account_kind: null as "BALANCE" | null,
+  // Visão Financeira: "" = automático (resolvido pelo cadastro).
+  planning_role: "" as PlanningRole | "",
+  use_spending_history: true,
+  spending_history_start_date: "",
   active: true,
 };
 
@@ -85,7 +97,7 @@ export default function AccountsPage() {
         supabase
           .from("accounts")
           .select(
-            "id, name, type, closing_day, due_day, limit_amount, current_balance, currency, show_on_investments_dashboard, investment_account_kind, active",
+            "id, name, type, closing_day, due_day, limit_amount, current_balance, currency, show_on_investments_dashboard, investment_account_kind, planning_role, use_spending_history, spending_history_start_date, active",
           )
           .eq("owner_id", ownerId)
           .order("active", { ascending: false })
@@ -171,6 +183,9 @@ export default function AccountsPage() {
       show_on_investments_dashboard:
         account.show_on_investments_dashboard ?? false,
       investment_account_kind: account.investment_account_kind ?? null,
+      planning_role: account.planning_role ?? "",
+      use_spending_history: account.use_spending_history ?? true,
+      spending_history_start_date: account.spending_history_start_date ?? "",
       active: account.active,
     });
     setIsDrawerOpen(true);
@@ -257,6 +272,22 @@ export default function AccountsPage() {
     });
   }
 
+  // Papel que valerá se o campo ficar em "Automático" (mesma regra da Visão Financeira).
+  const automaticPlanningRole = resolvePlanningRole({
+    id: editingAccountId ?? "new",
+    name: form.name,
+    type: form.type,
+    currency: form.currency,
+    current_balance: null,
+    active: form.active,
+    show_on_investments_dashboard:
+      form.investment_account_kind === "BALANCE" || form.show_on_investments_dashboard,
+    investment_account_kind: form.investment_account_kind,
+    planning_role: null,
+  });
+  const effectivePlanningRole: PlanningRole =
+    form.planning_role || automaticPlanningRole;
+
   function closeDrawer() {
     resetForm();
     setIsDrawerOpen(false);
@@ -309,6 +340,9 @@ export default function AccountsPage() {
           ? true
           : form.show_on_investments_dashboard,
       investment_account_kind: form.investment_account_kind,
+      planning_role: form.planning_role || null,
+      use_spending_history: form.use_spending_history,
+      spending_history_start_date: form.spending_history_start_date || null,
       active: form.active,
       updated_at: new Date().toISOString(),
     };
@@ -921,6 +955,94 @@ export default function AccountsPage() {
                   />
                 </>
               )}
+
+              <div className="space-y-3 rounded-2xl border border-violet-400/20 bg-violet-500/5 p-4">
+                <div>
+                  <p className="text-sm font-semibold text-white">
+                    Visão Financeira
+                  </p>
+                  <p className="mt-1 text-xs text-slate-400">
+                    Como esta {form.type === "Cartão" ? "conta/cartão" : "conta"} participa do
+                    planejamento (Pode guardar hoje, guardado e reserva).
+                  </p>
+                </div>
+
+                <label className="block space-y-1 text-sm text-slate-300">
+                  <span>Papel no planejamento</span>
+                  <select
+                    value={form.planning_role}
+                    onChange={(event) =>
+                      setForm({
+                        ...form,
+                        planning_role: event.target.value as PlanningRole | "",
+                      })
+                    }
+                    className="w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none"
+                  >
+                    <option value="">
+                      {`Automático (${PLANNING_ROLE_LABELS[automaticPlanningRole]})`}
+                    </option>
+                    <option value="operational">{PLANNING_ROLE_LABELS.operational}</option>
+                    {form.type === "Conta" && (
+                      <option value="savings">{PLANNING_ROLE_LABELS.savings}</option>
+                    )}
+                    <option value="excluded">{PLANNING_ROLE_LABELS.excluded}</option>
+                  </select>
+                  <span className="block text-xs text-slate-400">
+                    Operacional: o saldo conta como disponível. Reserva/investimento:
+                    transferências para cá viram &quot;guardado&quot;. Nada depende do nome da conta.
+                  </span>
+                </label>
+
+                {form.type === "Conta" && effectivePlanningRole === "operational" && (
+                  <>
+                    <label className="flex items-start gap-3 rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-slate-300">
+                      <input
+                        type="checkbox"
+                        checked={form.use_spending_history}
+                        onChange={(event) =>
+                          setForm({
+                            ...form,
+                            use_spending_history: event.target.checked,
+                          })
+                        }
+                        className="mt-0.5"
+                      />
+                      <span>
+                        <span className="block font-semibold text-white">
+                          Usar no cálculo da reserva
+                        </span>
+                        <span className="mt-1 block text-xs text-slate-400">
+                          Os gastos variáveis (débito/Pix) desta conta estimam quanto
+                          reservar até o fim do mês. Desmarque para contas só de
+                          despesas fixas.
+                        </span>
+                      </span>
+                    </label>
+
+                    {form.use_spending_history && (
+                      <label className="block space-y-1 text-sm text-slate-300">
+                        <span>Usar histórico a partir de (opcional)</span>
+                        <input
+                          type="date"
+                          value={form.spending_history_start_date}
+                          onChange={(event) =>
+                            setForm({
+                              ...form,
+                              spending_history_start_date: event.target.value,
+                            })
+                          }
+                          className="w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none"
+                        />
+                        <span className="block text-xs text-slate-400">
+                          Use quando o jeito de usar a conta mudou: o histórico
+                          anterior a esta data é ignorado.
+                        </span>
+                      </label>
+                    )}
+                  </>
+                )}
+              </div>
 
               <label className="flex items-center gap-3 rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-slate-300">
                 <input

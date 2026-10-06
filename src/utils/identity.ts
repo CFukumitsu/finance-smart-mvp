@@ -55,6 +55,9 @@ export function isSafeInternalRedirect(value: string | null | undefined) {
   return Boolean(value && value.startsWith("/") && !value.startsWith("//") && !value.includes("\\"));
 }
 
-export function safeInternalRedirect(value: string | null | undefined, fallback = "/dashboard") {
+/** Página inicial após o login: a Visão Financeira (Dashboard Premium). */
+export const HOME_ROUTE = "/overview";
+
+export function safeInternalRedirect(value: string | null | undefined, fallback = HOME_ROUTE) {
   return isSafeInternalRedirect(value) ? value! : fallback;
 }

@@ -735,3 +735,59 @@ a,
 *::-webkit-scrollbar-corner {
   background: transparent;
 }
+
+/* Visão Financeira (Dashboard Premium): mesmo mapeamento de tema claro usado
+   em .transactions-page, restrito a esta tela. O tema escuro não muda. */
+.overview-page [class~="bg-slate-950/60"],
+.overview-page [class~="bg-slate-900"] {
+  background: var(--surface);
+}
+
+.overview-page [class~="border-white/10"],
+.overview-page [class~="border-white/5"] {
+  border-color: var(--border);
+}
+
+[data-theme="light"] .overview-page [class~="text-white"] {
+  color: var(--foreground);
+}
+
+[data-theme="light"] .overview-page [class~="text-slate-200"],
+[data-theme="light"] .overview-page [class~="text-slate-300"] {
+  color: var(--muted-strong);
+}
+
+[data-theme="light"] .overview-page [class~="text-slate-400"] {
+  color: var(--muted);
+}
+
+[data-theme="light"] .overview-page .text-emerald-300 {
+  color: #047857;
+}
+
+[data-theme="light"] .overview-page .text-red-300 {
+  color: #dc2626;
+}
+
+[data-theme="light"] .overview-page .text-blue-300 {
+  color: #2563eb;
+}
+
+[data-theme="light"] .overview-page .text-violet-300 {
+  color: #6d28d9;
+}
+
+[data-theme="light"] .overview-page .text-orange-300 {
+  color: #c2410c;
+}
+
+[data-theme="light"] .overview-page .text-cyan-300 {
+  color: #0369a1;
+}
+
+[data-theme="light"] .overview-page [class~="bg-white/[0.02]"],
+[data-theme="light"] .overview-page [class~="bg-white/[0.03]"],
+[data-theme="light"] .overview-page [class~="bg-white/5"],
+[data-theme="light"] .overview-page [class~="bg-white/10"] {
+  background: var(--surface-muted);
+}

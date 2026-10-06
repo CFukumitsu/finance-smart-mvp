@@ -1,8 +1,9 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
+import { HOME_ROUTE } from "@/src/utils/identity";
 
 const protectedRoutes = [
-  "/dashboard", "/analytics", "/transactions", "/reconciliation", "/accounts",
+  "/overview", "/dashboard", "/analytics", "/transactions", "/reconciliation", "/accounts",
   "/categories", "/competences", "/recurrences", "/closings", "/vehicles",
   "/fuel", "/bankroll", "/settings", "/account", "/admin",
 ];
@@ -45,7 +46,7 @@ export async function proxy(request: NextRequest) {
 
   if (pathname === "/login" && user) {
     const dashboardUrl = request.nextUrl.clone();
-    dashboardUrl.pathname = "/dashboard";
+    dashboardUrl.pathname = HOME_ROUTE;
     dashboardUrl.search = "";
     return NextResponse.redirect(dashboardUrl);
   }
@@ -54,7 +55,7 @@ export async function proxy(request: NextRequest) {
 
 export const config = {
   matcher: [
-    "/dashboard/:path*", "/analytics/:path*", "/transactions/:path*", "/reconciliation/:path*",
+    "/overview/:path*", "/dashboard/:path*", "/analytics/:path*", "/transactions/:path*", "/reconciliation/:path*",
     "/accounts/:path*", "/categories/:path*", "/competences/:path*", "/recurrences/:path*",
     "/closings/:path*", "/vehicles/:path*", "/fuel/:path*", "/bankroll/:path*", "/settings/:path*",
     "/account/:path*", "/admin/:path*", "/login",

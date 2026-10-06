@@ -19,13 +19,19 @@ import {
   MapPin,
   ChartNoAxesCombined,
   Spade,
+  PiggyBank,
 } from "lucide-react";
 
 const menuItems = [
   {
+    label: "Visão Financeira",
+    icon: PiggyBank,
+    href: "/overview",
+  },
+  {
     label: "Dashboard",
     icon: LayoutDashboard,
-    href: "/",
+    href: "/dashboard",
   },
   {
     label: "Análises",

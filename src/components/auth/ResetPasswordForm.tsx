@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/src/lib/supabase";
 import { updatePassword } from "@/src/services/authService";
+import { HOME_ROUTE } from "@/src/utils/identity";
 
 type LinkState = "checking" | "ready" | "invalid";
 
@@ -78,7 +79,7 @@ export default function ResetPasswordForm() {
       return;
     }
 
-    router.replace("/dashboard");
+    router.replace(HOME_ROUTE);
     router.refresh();
   }
 

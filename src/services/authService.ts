@@ -1,5 +1,6 @@
 import { supabase } from "@/src/lib/supabase";
 import { recordIdleLogin } from "@/src/utils/idleSession";
+import { HOME_ROUTE } from "@/src/utils/identity";
 
 export async function signInWithEmailAndPassword(email: string, password: string) {
   const result = await supabase.auth.signInWithPassword({
@@ -33,7 +34,7 @@ export async function updatePassword(password: string) {
   });
 }
 
-export async function signInWithGoogle(redirectTo = "/dashboard") {
+export async function signInWithGoogle(redirectTo = HOME_ROUTE) {
   const callback = new URL("/auth/callback", window.location.origin);
   callback.searchParams.set("next", redirectTo);
   return supabase.auth.signInWithOAuth({

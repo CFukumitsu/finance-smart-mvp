@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { HOME_ROUTE } from "@/src/utils/identity";
 
 export default function NotFound() {
   return (
@@ -23,10 +24,10 @@ export default function NotFound() {
         </p>
 
         <Link
-          href="/dashboard"
+          href={HOME_ROUTE}
           className="mt-6 rounded-xl bg-blue-600 px-5 py-3 text-sm font-bold text-white hover:bg-blue-500"
         >
-          Voltar ao Dashboard
+          Voltar ao início
         </Link>
 
         <p className="mt-6 text-xs text-slate-500">

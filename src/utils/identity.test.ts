@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 // @ts-expect-error Node's native TypeScript test runner requires the extension.
-import { getAvatarUrl, getInitials, getRoleLabel, isSafeInternalRedirect, safeInternalRedirect } from "./identity.ts";
+import { getAvatarUrl, getInitials, getRoleLabel, HOME_ROUTE, isSafeInternalRedirect, safeInternalRedirect } from "./identity.ts";
 
 test("gera iniciais do primeiro e último nome", () => {
   assert.equal(getInitials("César Fukumitsu", "cesar@example.com"), "CF");
@@ -15,7 +15,9 @@ test("aceita somente redirects internos", () => {
   assert.equal(isSafeInternalRedirect("/account?tab=profile"), true);
   assert.equal(isSafeInternalRedirect("//malicious.example"), false);
   assert.equal(isSafeInternalRedirect("https://malicious.example"), false);
-  assert.equal(safeInternalRedirect("https://malicious.example"), "/dashboard");
+  assert.equal(safeInternalRedirect("https://malicious.example"), HOME_ROUTE);
+  assert.equal(HOME_ROUTE, "/overview");
+  assert.equal(safeInternalRedirect("/dashboard"), "/dashboard");
 });
 
 test("prioriza o avatar futuro do Storage", () => {
