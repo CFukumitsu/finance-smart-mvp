@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, type ReactNode } from "react";
-import { ChevronLeft, ChevronRight, Info } from "lucide-react";
+import { ChevronLeft, ChevronRight, Info, type LucideIcon } from "lucide-react";
 import {
   Bar,
   BarChart,
@@ -76,6 +76,7 @@ export function StatCard({
   tone,
   hint,
   info,
+  icon: Icon,
   children,
 }: {
   label: string;
@@ -83,12 +84,16 @@ export function StatCard({
   tone: Tone;
   hint?: string;
   info?: string;
+  /** Ícone discreto no lugar do ponto colorido. */
+  icon?: LucideIcon;
   children?: ReactNode;
 }) {
   return (
-    <div className="flex min-w-0 flex-col rounded-2xl border border-white/10 bg-slate-950/60 p-5">
+    <div className="flex h-full min-w-0 flex-col rounded-2xl border border-white/10 bg-slate-950/60 p-5">
       <p className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wider text-slate-400">
-        <span aria-hidden="true" className={`h-1.5 w-1.5 shrink-0 rounded-full ${toneDot[tone]}`} />
+        {Icon
+          ? <Icon aria-hidden="true" size={14} className={`shrink-0 ${toneText[tone]}`} />
+          : <span aria-hidden="true" className={`h-1.5 w-1.5 shrink-0 rounded-full ${toneDot[tone]}`} />}
         <span className="min-w-0 truncate">{label}</span>
         {info && <InfoTip text={info} />}
       </p>

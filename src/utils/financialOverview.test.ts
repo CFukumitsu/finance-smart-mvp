@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  allocateCents,
   buildFinancialOverview,
   calculateAccountBalanceAt,
   classifyConfidence,
@@ -532,4 +533,149 @@ test("4. reserva estimada maior reduz Pode guardar na mesma medida", () => {
   // reserva passa de 1.000 (histórico) para 1.800 (variável já lançado)
   assert.equal(after.reserve.total - before.reserve.total, 800);
   assert.equal((before.canSave ?? 0) - (after.canSave ?? 0), 800);
+});
+
+// ---------------------------------------------------------------------------
+// Detalhamento da reserva por categoria (Top 10 + Outras), mesma metodologia.
+// ---------------------------------------------------------------------------
+const categoryNames: Record<string, string> = Object.fromEntries(
+  ["mercado", "almoco", "lazer", "combustivel", "farmacia", "uber", "padaria", "pet", "roupas", "presentes", "cafe", "livros"]
+    .map((id) => [id, id.charAt(0).toUpperCase() + id.slice(1)]),
+);
+// Gasto depois do dia 16 em jul/ago/set por categoria (mesmo valor nos 3 meses).
+const categoryValues: Record<string, number> = {
+  mercado: 1200, almoco: 750, lazer: 650, combustivel: 450, farmacia: 300, uber: 280,
+  padaria: 250, pet: 220, roupas: 200, presentes: 180, cafe: 90, livros: 60,
+};
+const categoryHistory = ["2026-07", "2026-08", "2026-09"].flatMap((key) =>
+  Object.entries(categoryValues).map(([category_id, value]) =>
+    tx({ account_id: "diaadia", due_date: `${key}-20`, value, category_id })));
+const sumBreakdown = (breakdown: ReturnType<typeof buildFinancialOverview>["reserve"]["categoryBreakdown"]) =>
+  Math.round((breakdown.items.reduce((sum, item) => sum + item.amount, 0) + (breakdown.others?.amount ?? 0)) * 100);
+const byCategory = (extra: OverviewTransaction[] = [], patch: Partial<OverviewInput> = {}) =>
+  buildFinancialOverview(baseInput({ transactions: [...categoryHistory, ...extra], categoryNames, ...patch }));
+
+test("cat 1/2/3/7. Top 10 em ordem decrescente + Outras, fechando com a reserva", () => {
+  const overview = byCategory();
+  const breakdown = overview.reserve.categoryBreakdown;
+  assert.equal(breakdown.source, "historical");
+  assert.equal(overview.reserve.total, 4630); // soma das 12 categorias
+  assert.deepEqual(breakdown.items.map((item) => [item.name, item.amount]), [
+    ["Mercado", 1200], ["Almoco", 750], ["Lazer", 650], ["Combustivel", 450], ["Farmacia", 300],
+    ["Uber", 280], ["Padaria", 250], ["Pet", 220], ["Roupas", 200], ["Presentes", 180],
+  ]);
+  assert.deepEqual(breakdown.others, { amount: 150, count: 2 });
+  assert.equal(sumBreakdown(breakdown), Math.round(overview.reserve.total * 100));
+});
+
+test("cat 4/5. até 10 categorias não cria Outras; categoria com valor zero não aparece", () => {
+  const few = buildFinancialOverview(baseInput({
+    categoryNames,
+    transactions: ["2026-07", "2026-08", "2026-09"].flatMap((key) => [
+      tx({ account_id: "diaadia", due_date: `${key}-20`, value: 500, category_id: "mercado" }),
+      tx({ account_id: "diaadia", due_date: `${key}-22`, value: 100, category_id: "cafe" }),
+      // só antes do dia 16: fica fora da janela restante (valor zero)
+      tx({ account_id: "diaadia", due_date: `${key}-05`, value: 999, category_id: "livros" }),
+    ]),
+  }));
+  assert.equal(few.reserve.categoryBreakdown.others, null);
+  assert.deepEqual(few.reserve.categoryBreakdown.items.map((item) => item.name), ["Mercado", "Cafe"]);
+});
+
+test("cat 6. gastos sem categoria aparecem como Sem categoria e entram no ranking", () => {
+  const overview = byCategory(["2026-07", "2026-08", "2026-09"].map((key) =>
+    tx({ account_id: "diaadia", due_date: `${key}-21`, value: 320 })));
+  const item = overview.reserve.categoryBreakdown.items.find((entry) => entry.name === "Sem categoria");
+  assert.equal(item?.amount, 320);
+  assert.equal(sumBreakdown(overview.reserve.categoryBreakdown), Math.round(overview.reserve.total * 100));
+});
+
+test("cat 8. pesos 3/2/1 por categoria", () => {
+  const overview = buildFinancialOverview(baseInput({
+    categoryNames,
+    transactions: [
+      tx({ account_id: "diaadia", due_date: "2026-07-20", value: 900, category_id: "mercado" }),
+      tx({ account_id: "diaadia", due_date: "2026-08-20", value: 600, category_id: "mercado" }),
+      tx({ account_id: "diaadia", due_date: "2026-09-20", value: 300, category_id: "mercado" }),
+    ],
+  }));
+  // (3*300 + 2*600 + 1*900) / 6 = 500
+  assert.deepEqual(overview.reserve.categoryBreakdown.items, [{ key: "mercado", name: "Mercado", amount: 500 }]);
+});
+
+test("cat 9/10. janela restante muda com o dia e não é proporcional aos dias", () => {
+  const lateSpending = ["2026-07", "2026-08", "2026-09"].flatMap((key) => [
+    tx({ account_id: "diaadia", due_date: `${key}-05`, value: 1000, category_id: "mercado" }),
+    tx({ account_id: "diaadia", due_date: `${key}-28`, value: 2000, category_id: "lazer" }),
+  ]);
+  const day3 = buildFinancialOverview(baseInput({ today: "2026-10-03", categoryNames, transactions: lateSpending }));
+  const day20 = buildFinancialOverview(baseInput({ today: "2026-10-20", categoryNames, transactions: lateSpending }));
+  assert.deepEqual(day3.reserve.categoryBreakdown.items.map((item) => [item.name, item.amount]), [["Lazer", 2000], ["Mercado", 1000]]);
+  assert.deepEqual(day20.reserve.categoryBreakdown.items.map((item) => [item.name, item.amount]), [["Lazer", 2000]]);
+  // Proporcional seria 3.000 x 11/31 = 1.064,52; o histórico da janela diz 2.000.
+  assert.equal(day20.reserve.total, 2000);
+  assert.notEqual(day20.reserve.total, Math.round(3000 * (11 / 31) * 100) / 100);
+});
+
+test("cat 11/12/13/14. transferências, receitas, faturas, recorrências e parcelas ficam fora", () => {
+  const noise = ["2026-07", "2026-08", "2026-09"].flatMap((key) => [
+    { ...transfer("diaadia", "cofrinho", `${key}-25`, 5000)[0], category_id: "lazer" },
+    tx({ account_id: "diaadia", due_date: `${key}-25`, type: "Receita", value: 7000, category_id: "mercado" }),
+    tx({ account_id: "diaadia", due_date: `${key}-25`, type: "Pagamento de Fatura", value: 3000, category_id: "uber" }),
+    tx({ account_id: "diaadia", due_date: `${key}-25`, value: 900, recurring_transaction_id: "rec", category_id: "pet" }),
+    tx({ account_id: "diaadia", due_date: `${key}-25`, value: 400, mode: "parcelado", parcel_number: 2, category_id: "roupas" }),
+  ]);
+  assert.deepEqual(byCategory(noise).reserve.categoryBreakdown, byCategory().reserve.categoryBreakdown);
+});
+
+test("cat 15/16. data inicial do histórico e contas fora do histórico são respeitadas", () => {
+  const withStart = byCategory([], {
+    accounts: ACCOUNTS.map((item) => item.id === "diaadia" ? { ...item, spending_history_start_date: "2026-09-01" } : item),
+  });
+  assert.equal(sumBreakdown(withStart.reserve.categoryBreakdown), Math.round(withStart.reserve.total * 100));
+  assert.equal(withStart.reserve.monthsAvailable, 1);
+
+  const fixedAccount = byCategory(["2026-07", "2026-08", "2026-09"].map((key) =>
+    tx({ account_id: "fixas", due_date: `${key}-20`, value: 5000, category_id: "mercado" })));
+  assert.deepEqual(fixedAccount.reserve.categoryBreakdown, byCategory().reserve.categoryBreakdown);
+});
+
+test("cat 17. lançados maiores que o histórico: detalha os lançados e fecha com a reserva final", () => {
+  const overview = byCategory([
+    tx({ account_id: "diaadia", due_date: "2026-10-25", value: 4000, category_id: "lazer", status: "Pendente" }),
+    tx({ account_id: "diaadia", due_date: "2026-10-26", value: 2500, category_id: "mercado", status: "Pendente" }),
+  ]);
+  assert.equal(overview.reserve.total, 6500);
+  assert.equal(overview.reserve.categoryBreakdown.source, "registered");
+  assert.deepEqual(overview.reserve.categoryBreakdown.items.map((item) => [item.name, item.amount]), [["Lazer", 4000], ["Mercado", 2500]]);
+  assert.equal(sumBreakdown(overview.reserve.categoryBreakdown), 650000);
+});
+
+test("cat 18. arredondamento fecha exatamente em centavos", () => {
+  const thirds = buildFinancialOverview(baseInput({
+    categoryNames,
+    transactions: ["2026-07", "2026-08", "2026-09"].flatMap((key, index) => [
+      tx({ account_id: "diaadia", due_date: `${key}-20`, value: 100 + index * 0.01, category_id: "mercado" }),
+      tx({ account_id: "diaadia", due_date: `${key}-21`, value: 33.33 + index, category_id: "cafe" }),
+      tx({ account_id: "diaadia", due_date: `${key}-22`, value: 66.67 - index * 0.07, category_id: "pet" }),
+    ]),
+  }));
+  assert.equal(sumBreakdown(thirds.reserve.categoryBreakdown), Math.round(thirds.reserve.total * 100));
+  for (const item of thirds.reserve.categoryBreakdown.items) {
+    assert.equal(Math.round(item.amount * 100), Math.round(item.amount * 100 * 1000) / 1000);
+  }
+  assert.deepEqual(allocateCents({ a: 1, b: 1, c: 1 }, 100), { a: 34, b: 33, c: 33 });
+});
+
+test("cat 19. adicionar, editar e excluir lançamento atualiza o detalhamento", () => {
+  const base = byCategory();
+  const extra = tx({ account_id: "diaadia", due_date: "2026-09-27", value: 3000, category_id: "cafe" });
+  const added = byCategory([extra]);
+  const edited = byCategory([{ ...extra, value: 300 }]);
+  const amount = (overview: ReturnType<typeof byCategory>) =>
+    overview.reserve.categoryBreakdown.items.find((item) => item.key === "cafe")?.amount ?? 0;
+  assert.equal(amount(base), 0, "Café estava em Outras");
+  assert.equal(amount(added), 90 + 1500); // 90 + 3*3000/6
+  assert.equal(amount(edited), 90 + 150);
+  assert.deepEqual(byCategory([]).reserve.categoryBreakdown, base.reserve.categoryBreakdown);
 });

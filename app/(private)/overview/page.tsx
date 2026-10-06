@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { ArrowRight, Plus, Settings2 } from "lucide-react";
+import { ArrowRight, Coins, PiggyBank, Plus, Settings2, Target, TrendingUp } from "lucide-react";
 import AppShell from "../../components/layout/AppShell";
 import { updateOverduePaymentStatusesOncePerDay } from "@/src/services/paymentStatusService";
 import {
@@ -27,6 +27,7 @@ import {
   type FormulaTerm,
   type Tone,
 } from "@/src/components/overview/OverviewWidgets";
+import { ReserveBreakdownDialog } from "@/src/components/overview/ReserveBreakdownDialog";
 
 const money = (value: number) => formatMoney(value, PRIMARY_CURRENCY);
 const percent = (value: number) =>
@@ -296,6 +297,57 @@ function PrimaryArea({
 
   const heroTone: Tone = heroValue >= 0 ? "green" : "red";
 
+  // Mês atual: o resultado conquistado (Guardado) vem primeiro e com o maior
+  // destaque; Pode guardar ao lado, mesmo tamanho estrutural; Previsão e Meta
+  // na segunda linha, como secundários. Só layout: nenhum cálculo muda.
+  if (overview.temporal === "current") {
+    const canSave = overview.canSave ?? 0;
+    return (
+      <section className="space-y-4" aria-label="Indicadores principais">
+        <div className="grid gap-4 md:grid-cols-2">
+          <div className="flex h-full min-w-0 flex-col rounded-2xl border border-violet-400/30 bg-violet-500/[0.08] p-6">
+            <p className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-slate-300">
+              <PiggyBank aria-hidden="true" size={16} className="shrink-0 text-violet-300" />
+              Guardado no mês
+              <InfoTip text="Transferências para contas de reserva/investimento, menos resgates. Não é despesa." />
+            </p>
+            <p className="mt-3 break-words text-4xl font-bold tabular-nums tracking-tight text-violet-300 sm:text-5xl">
+              {money(overview.saved)}
+            </p>
+            <p className="mt-3 text-sm text-slate-300">Total destinado a reservas/investimentos neste mês.</p>
+          </div>
+
+          <div className={`flex h-full min-w-0 flex-col rounded-2xl border p-6 ${
+            canSave >= 0 ? "border-emerald-400/25 bg-emerald-500/[0.06]" : "border-red-400/30 bg-red-500/[0.06]"
+          }`}>
+            <p className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-slate-300">
+              <Coins aria-hidden="true" size={16} className={`shrink-0 ${canSave >= 0 ? "text-emerald-300" : "text-red-300"}`} />
+              {heroLabel}
+              <InfoTip text={heroInfo} />
+            </p>
+            <p className={`mt-3 break-words text-3xl font-semibold tabular-nums tracking-tight sm:text-4xl ${
+              canSave >= 0 ? "text-emerald-300" : "text-red-300"
+            }`}>
+              {money(canSave)}
+            </p>
+            <p className="mt-3 text-sm text-slate-300">{heroText}</p>
+            <p className="mt-auto pt-3 text-xs text-slate-400">
+              {overview.daysRemaining === 0 ? "Último dia do mês." : `${overview.daysRemaining} dias até o fim do mês.`}
+            </p>
+          </div>
+        </div>
+
+        <div className="grid gap-4 md:grid-cols-2">
+          <StatCard label="Previsão de economia" value={money(overview.forecast ?? 0)} tone="blue" icon={TrendingUp}
+            hint={`Guardado no mês + Pode guardar, até ${end}.`}
+            info="Quanto você provavelmente terá guardado ao fim do mês. Guardar dinheiro durante o mês só move valor de “Pode guardar” para “Guardado”; a previsão não muda." />
+          <GoalCard overview={overview} goalDraft={goalDraft} setGoalDraft={setGoalDraft}
+            saveGoal={saveGoal} isSavingGoal={isSavingGoal} />
+        </div>
+      </section>
+    );
+  }
+
   return (
     <section className="grid gap-4 lg:grid-cols-12" aria-label="Indicadores principais">
       <div className={`flex min-w-0 flex-col justify-between rounded-2xl border p-6 lg:col-span-5 ${
@@ -311,19 +363,9 @@ function PrimaryArea({
           </p>
           <p className="mt-3 text-sm text-slate-300">{heroText}</p>
         </div>
-        {overview.temporal === "current" && (
-          <p className="mt-4 text-xs text-slate-400">
-            {overview.daysRemaining === 0 ? "Último dia do mês." : `${overview.daysRemaining} dias até o fim do mês.`}
-          </p>
-        )}
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2 lg:col-span-7">
-        {overview.temporal === "current" && (
-          <StatCard label="Previsão de economia" value={money(overview.forecast ?? 0)} tone="blue"
-            hint={`Guardado no mês + Pode guardar, até ${end}.`}
-            info="Quanto você provavelmente terá guardado ao fim do mês. Guardar dinheiro durante o mês só move valor de “Pode guardar” para “Guardado”; a previsão não muda." />
-        )}
         {overview.temporal === "past" && (
           <StatCard label="Receitas do mês" value={money(overview.income.realized)} tone="blue"
             hint={`Saídas realizadas: ${money(overview.realizedOutflows)}`} />
@@ -343,14 +385,10 @@ function PrimaryArea({
           info="Transferências para contas de reserva/investimento, menos resgates. Não é despesa."
         />
 
-        {/* Mês atual: só 3 cards (o antigo "Ainda pode guardar" seria igual ao
-            destaque "Pode guardar"), então a meta ocupa a linha inteira. */}
-        <div className={overview.temporal === "current" ? "sm:col-span-2" : ""}>
-          <GoalCard overview={overview} goalDraft={goalDraft} setGoalDraft={setGoalDraft}
-            saveGoal={saveGoal} isSavingGoal={isSavingGoal} />
-        </div>
+        <GoalCard overview={overview} goalDraft={goalDraft} setGoalDraft={setGoalDraft}
+          saveGoal={saveGoal} isSavingGoal={isSavingGoal} />
 
-        {overview.temporal === "current" ? null : overview.temporal === "future" ? (
+        {overview.temporal === "future" ? (
           <StatCard label="Pode guardar" value={money(overview.canSave ?? 0)}
             tone={(overview.canSave ?? 0) >= 0 ? "green" : "red"}
             hint="Previsão do mês menos o já programado."
@@ -384,7 +422,7 @@ function GoalCard({
   return (
     <div className="flex h-full min-w-0 flex-col rounded-2xl border border-violet-400/20 bg-violet-500/[0.05] p-5">
       <p className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wider text-slate-400">
-        <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-violet-400" />
+        <Target aria-hidden="true" size={14} className="shrink-0 text-violet-300" />
         Meta do mês
       </p>
 
@@ -547,6 +585,8 @@ function EvolutionCard({ overview }: { overview: FinancialOverview }) {
 
 function ReserveCard({ overview }: { overview: FinancialOverview }) {
   const { reserve } = overview;
+  const [showBreakdown, setShowBreakdown] = useState(false);
+  const usedMonths = reserve.historyMonths.filter((item) => item.accountsAvailable > 0);
   if (overview.temporal === "past") {
     return (
       <section className="min-w-0 rounded-2xl border border-white/10 bg-slate-950/60 p-5" aria-label="Reserva">
@@ -603,17 +643,39 @@ function ReserveCard({ overview }: { overview: FinancialOverview }) {
         </div>
       </dl>
 
-      {reserve.historyMonths.some((item) => item.accountsAvailable > 0) && (
+      {usedMonths.length > 0 && (
         <p className="mt-3 text-xs text-slate-400">
-          Meses usados: {reserve.historyMonths
-            .filter((item) => item.accountsAvailable > 0)
-            .map((item) => `${item.key.slice(5, 7)}/${item.key.slice(2, 4)} (peso ${item.weight})`)
-            .join(", ")}.
+          Meses usados: {usedMonths.map((item) => `${monthShort(item.key)} (peso ${item.weight})`).join(", ")}.
         </p>
       )}
+
+      {reserve.total > 0 && (
+        <button
+          type="button"
+          onClick={() => setShowBreakdown(true)}
+          aria-haspopup="dialog"
+          className="mt-4 inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl border border-orange-400/30 px-4 text-sm font-semibold text-orange-300 hover:bg-orange-500/10 sm:w-auto"
+        >
+          Ver por categoria
+        </button>
+      )}
+
+      <ReserveBreakdownDialog
+        open={showBreakdown}
+        onClose={() => setShowBreakdown(false)}
+        breakdown={reserve.categoryBreakdown}
+        untilLabel={shortDate(overview.monthEnd)}
+        basisLabel={reserve.categoryBreakdown.source === "historical" && usedMonths.length > 0
+          ? usedMonths.map((item) => monthShort(item.key)).join(", ")
+          : null}
+        isFutureMonth={overview.temporal === "future"}
+        formatCurrency={money}
+      />
     </section>
   );
 }
+
+const monthShort = (key: string) => `${key.slice(5, 7)}/${key.slice(2, 4)}`;
 
 function CardsCard({ overview }: { overview: FinancialOverview }) {
   const { cards } = overview;

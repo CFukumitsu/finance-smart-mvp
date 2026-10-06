@@ -17,7 +17,7 @@ import {
 } from "@/src/utils/financialOverview";
 
 const TRANSACTION_FIELDS =
-  "id, account_id, competence_id, due_date, type, value, status, description, origin_account_id, destination_account_id, recurring_transaction_id, mode, parcel_number, investment_event_type";
+  "id, account_id, competence_id, due_date, type, value, status, description, origin_account_id, destination_account_id, recurring_transaction_id, mode, parcel_number, investment_event_type, category_id";
 const PAGE_SIZE = 1000;
 
 type QueryResult<T> = PromiseLike<{ data: T[] | null; error: { message: string } | null }>;
@@ -46,7 +46,7 @@ export async function loadFinancialOverviewInput(params: {
   const ownerId = await getCurrentUserId();
   const previous = shiftMonth(params.year, params.month, -1);
 
-  const [accountsResponse, competencesResponse, closuresResponse, recurringResponse] = await Promise.all([
+  const [accountsResponse, competencesResponse, closuresResponse, recurringResponse, categoriesResponse] = await Promise.all([
     supabase
       .from("accounts")
       .select(
@@ -63,6 +63,9 @@ export async function loadFinancialOverviewInput(params: {
       .select("id, type, amount, account_id, start_competence_id, end_competence_id")
       .eq("owner_id", ownerId)
       .eq("status", "active"),
+    // Todas (inclusive inativas): o detalhamento da reserva mostra o nome da
+    // categoria de qualquer gasto do histórico.
+    supabase.from("categories").select("id, name").eq("owner_id", ownerId),
   ]);
 
   const accounts = (throwIfError(accountsResponse) ?? []) as OverviewAccount[];
@@ -72,6 +75,9 @@ export async function loadFinancialOverviewInput(params: {
   const closures = ((throwIfError(closuresResponse) ?? []) as (OverviewClosure & { status: string | null })[])
     .filter((closure) => closure.status === null || closure.status === "Fechada");
   const recurring = (throwIfError(recurringResponse) ?? []) as OverviewRecurring[];
+  const categoryNames = Object.fromEntries(
+    ((throwIfError(categoriesResponse) ?? []) as { id: string; name: string }[]).map((item) => [item.id, item.name]),
+  );
 
   const competence = competences.find((item) => item.year === params.year && item.month === params.month);
   const previousCompetence = competences.find((item) => item.year === previous.year && item.month === previous.month);
@@ -216,6 +222,7 @@ export async function loadFinancialOverviewInput(params: {
     firstTransactionDateByAccount,
     savingsGoal,
     cardTargets,
+    categoryNames,
   };
 }
 

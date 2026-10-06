@@ -62,6 +62,7 @@ export type OverviewTransaction = {
   recurring_transaction_id?: string | null;
   mode?: string | null;
   parcel_number?: number | null;
+  category_id?: string | null;
   /** Conta de investimento do evento integrado (resolvida pelo carregamento). */
   investment_account_id?: string | null;
   investment_event_type?: string | null;
@@ -104,6 +105,8 @@ export type OverviewInput = {
   savingsGoal: number | null;
   /** Metas mensais (financial_targets) dos cartões na competência. */
   cardTargets: Record<string, number>;
+  /** Nomes das categorias (id -> nome), para o detalhamento da reserva. */
+  categoryNames?: Record<string, string>;
 };
 
 export type Temporal = "past" | "current" | "future";
@@ -283,7 +286,17 @@ export type HistoryEstimate = {
   /** Menor quantidade de meses disponíveis entre as contas (0 a 3). */
   monthsAvailable: number | null;
   months: { key: string; weight: number; accountsAvailable: number; remaining: number; fullMonth: number }[];
+  /**
+   * Mesma média ponderada, separada por categoria (chave = category_id ou
+   * UNCATEGORIZED_KEY). Valores sem arredondar: somam exatamente remaining /
+   * fullMonth antes do arredondamento do total.
+   */
+  remainingByCategory: Record<string, number>;
+  fullMonthByCategory: Record<string, number>;
 };
+
+export const UNCATEGORIZED_KEY = "__sem_categoria__";
+const categoryKeyOf = (transaction: OverviewTransaction) => transaction.category_id || UNCATEGORIZED_KEY;
 
 export function estimateVariableSpending(params: {
   historyAccounts: OverviewAccount[];
@@ -301,8 +314,11 @@ export function estimateVariableSpending(params: {
     fullMonth: 0,
   }));
 
+  const remainingByCategory: Record<string, number> = {};
+  const fullMonthByCategory: Record<string, number> = {};
+
   if (params.historyAccounts.length === 0) {
-    return { remaining: 0, fullMonth: 0, monthsAvailable: null, months };
+    return { remaining: 0, fullMonth: 0, monthsAvailable: null, months, remainingByCategory, fullMonthByCategory };
   }
 
   let remaining = 0;
@@ -315,6 +331,9 @@ export function estimateVariableSpending(params: {
     let fullSum = 0;
     let available = 0;
     let hasSpending = false;
+    // Somas ponderadas por categoria desta conta (dividem pelo mesmo weightSum).
+    const accountRemainingByCategory: Record<string, number> = {};
+    const accountFullByCategory: Record<string, number> = {};
 
     params.historyMonths.forEach((historyMonth, index) => {
       if (!isHistoryMonthAvailable(account, historyMonth, params.firstTransactionDateByAccount[account.id])) {
@@ -334,6 +353,14 @@ export function estimateVariableSpending(params: {
         .reduce((sum, item) => sum + Number(item.value), 0);
 
       if (spending.length > 0) hasSpending = true;
+      for (const item of spending) {
+        const key = categoryKeyOf(item);
+        const weighted = historyMonth.weight * Number(item.value);
+        accountFullByCategory[key] = (accountFullByCategory[key] ?? 0) + weighted;
+        if (dayOf(item.due_date) > fromDay) {
+          accountRemainingByCategory[key] = (accountRemainingByCategory[key] ?? 0) + weighted;
+        }
+      }
       weightSum += historyMonth.weight;
       remainingSum += historyMonth.weight * monthRemaining;
       fullSum += historyMonth.weight * monthFull;
@@ -352,6 +379,12 @@ export function estimateVariableSpending(params: {
     if (weightSum > 0) {
       remaining += remainingSum / weightSum;
       fullMonth += fullSum / weightSum;
+      for (const [key, value] of Object.entries(accountRemainingByCategory)) {
+        remainingByCategory[key] = (remainingByCategory[key] ?? 0) + value / weightSum;
+      }
+      for (const [key, value] of Object.entries(accountFullByCategory)) {
+        fullMonthByCategory[key] = (fullMonthByCategory[key] ?? 0) + value / weightSum;
+      }
     }
   }
 
@@ -360,6 +393,70 @@ export function estimateVariableSpending(params: {
     fullMonth: roundMoney(fullMonth),
     monthsAvailable: minimumMonths === Infinity ? 0 : minimumMonths,
     months,
+    remainingByCategory,
+    fullMonthByCategory,
+  };
+}
+
+/**
+ * Distribui um total em centavos proporcionalmente aos pesos (maior resto):
+ * a soma das partes é EXATAMENTE o total.
+ */
+export function allocateCents(weights: Record<string, number>, totalCents: number) {
+  const entries = Object.entries(weights).filter(([, value]) => value > 0);
+  const weightSum = entries.reduce((sum, [, value]) => sum + value, 0);
+  const result: Record<string, number> = {};
+  if (totalCents <= 0 || weightSum <= 0) return result;
+  const shares = entries.map(([key, value]) => {
+    const exact = (value / weightSum) * totalCents;
+    return { key, floor: Math.floor(exact), fraction: exact - Math.floor(exact) };
+  });
+  let leftover = totalCents - shares.reduce((sum, item) => sum + item.floor, 0);
+  shares
+    .sort((left, right) => right.fraction - left.fraction || left.key.localeCompare(right.key))
+    .forEach((item) => {
+      result[item.key] = item.floor + (leftover > 0 ? 1 : 0);
+      if (leftover > 0) leftover -= 1;
+    });
+  return result;
+}
+
+export const RESERVE_TOP_CATEGORIES = 10;
+
+export type ReserveCategoryBreakdown = {
+  /** Origem da composição (D1): histórico ou gastos variáveis já lançados. */
+  source: "historical" | "registered";
+  total: number;
+  items: { key: string; name: string; amount: number }[];
+  others: { amount: number; count: number } | null;
+};
+
+/**
+ * Top 10 categorias + "Outras categorias", fechando exatamente com o total da
+ * reserva (centavos). Valores zero não aparecem.
+ */
+export function buildReserveCategoryBreakdown(params: {
+  total: number;
+  weights: Record<string, number>;
+  source: ReserveCategoryBreakdown["source"];
+  categoryNames: Record<string, string>;
+}): ReserveCategoryBreakdown {
+  const cents = allocateCents(params.weights, Math.round(params.total * 100));
+  const nameOf = (key: string) =>
+    key === UNCATEGORIZED_KEY ? "Sem categoria" : params.categoryNames[key] ?? "Categoria sem nome";
+  const ranked = Object.entries(cents)
+    .filter(([, value]) => value > 0)
+    .map(([key, value]) => ({ key, name: nameOf(key), cents: value }))
+    .sort((left, right) => right.cents - left.cents || left.name.localeCompare(right.name, "pt-BR"));
+  const top = ranked.slice(0, RESERVE_TOP_CATEGORIES);
+  const rest = ranked.slice(RESERVE_TOP_CATEGORIES);
+  return {
+    source: params.source,
+    total: params.total,
+    items: top.map((item) => ({ key: item.key, name: item.name, amount: item.cents / 100 })),
+    others: rest.length > 0
+      ? { amount: rest.reduce((sum, item) => sum + item.cents, 0) / 100, count: rest.length }
+      : null,
   };
 }
 
@@ -427,6 +524,8 @@ export type FinancialOverview = {
     monthsAvailable: number | null;
     historyMonths: HistoryEstimate["months"];
     historyAccounts: number;
+    /** Decomposição da MESMA reserva final por categoria (fecha em centavos). */
+    categoryBreakdown: ReserveCategoryBreakdown;
   };
 
   income: {
@@ -546,6 +645,7 @@ export function buildFinancialOverview(input: OverviewInput): FinancialOverview 
     transfersOut: 0,
   };
   let knownVariable = 0;
+  const knownVariableByCategory: Record<string, number> = {};
   let variableRealized = 0;
   let incomeRealized = 0;
   let incomeExpected = 0;
@@ -574,7 +674,11 @@ export function buildFinancialOverview(input: OverviewInput): FinancialOverview 
     if (transaction.type === "Despesa") {
       const variable = historyIds.has(accountId) && isVariableExpense(transaction);
       if (variable) {
-        if (pending) knownVariable += value;
+        if (pending) {
+          knownVariable += value;
+          const key = categoryKeyOf(transaction);
+          knownVariableByCategory[key] = (knownVariableByCategory[key] ?? 0) + value;
+        }
         if (realized) variableRealized += value;
       } else if (pending) {
         commitments.fixedExpenses += value;
@@ -697,6 +801,18 @@ export function buildFinancialOverview(input: OverviewInput): FinancialOverview 
     monthsAvailable: estimate.monthsAvailable,
     historyMonths: estimate.months,
     historyAccounts: historyAccounts.length,
+    // D1: a reserva é o maior entre histórico e já lançados. A composição
+    // segue a mesma origem: se vale o histórico, decompõe o histórico (os
+    // lançados fazem parte dele); se valem os lançados, decompõe os lançados.
+    // Nunca soma os dois.
+    categoryBreakdown: buildReserveCategoryBreakdown({
+      total: reserveTotal,
+      source: knownVariable > historicalEstimate ? "registered" : "historical",
+      weights: knownVariable > historicalEstimate
+        ? knownVariableByCategory
+        : temporal === "current" ? estimate.remainingByCategory : estimate.fullMonthByCategory,
+      categoryNames: input.categoryNames ?? {},
+    }),
   };
 
   const incomeExpectedTotal = roundMoney(incomeExpected);
