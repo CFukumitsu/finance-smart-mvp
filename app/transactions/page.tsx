@@ -41,6 +41,39 @@ import { useRouter, useSearchParams } from "next/navigation";
 import AppShell from "../components/layout/AppShell";
 import { getCurrentUserId, supabase } from "@/src/lib/supabase";
 import { deleteTransaction as deleteTransactionService } from "@/src/services/transactionService";
+import {
+  createConversionProvider,
+  createLinkedTransfer,
+  deleteLinkedTransfer,
+  loadConversionProviders,
+  loadLinkedTransferLegs,
+  updateLinkedTransfer,
+  type CurrencyConversionProvider,
+} from "@/src/services/transferService";
+import {
+  applyConversionDriverChange,
+  buildConversionInput,
+  calculateEffectiveRate,
+  calculateQuotedRateDifference,
+  CONVERSION_FEE_HINT,
+  formatCompactRate,
+  formatRateInput,
+  formatSignedPercent,
+  getConversionFeeCurrency,
+  getQuoteUnitLabel,
+  getTransferCurrencyMode,
+  invertQuotedRateDirection,
+  normalizeQuotedRate,
+  parseRateInput,
+  type ConversionFormValues,
+  type TransferConversionInput,
+} from "@/src/utils/currencyConversion";
+import {
+  createTransferIdempotencyKey,
+  getLinkedTransferFormValues,
+  LINKED_TRANSFER_DELETE_CONFIRMATION,
+  LINKED_TRANSFER_INCONSISTENT_MESSAGE,
+} from "@/src/utils/linkedTransfers";
 import FuelTransactionFields, {
   emptyFuelForm,
   type FuelForm,
@@ -135,12 +168,22 @@ type Transaction = {
   bankroll_operation_type?: "deposit" | "withdrawal" | null;
   investment_integration_group_id?: string | null;
   investment_event_type?: "application" | "redemption" | null;
+  transfer_group_id?: string | null;
 };
 
 type AccountClosure = {
   account_id: string;
   competence_id: string;
   closing_balance: number | null;
+};
+
+const emptyConversionForm: ConversionFormValues = {
+  destinationValue: "",
+  providerId: "",
+  feeAmount: "",
+  feeCurrency: "",
+  quotedRate: "",
+  quotedRateBase: "destination",
 };
 
 type SummaryTone = "positive" | "negative" | "warning" | "info" | "neutral";
@@ -320,6 +363,24 @@ function TransactionsPageContent() {
   const [editingTransactionId, setEditingTransactionId] = useState<
     string | null
   >(null);
+  // Edição de transferência vinculada: o formulário representa a operação
+  // inteira (origem -> destino), não a ponta clicada.
+  const [editingTransferGroupId, setEditingTransferGroupId] = useState<
+    string | null
+  >(null);
+  // Chave idempotente da nova transferência, mantida enquanto o formulário
+  // estiver aberto para que um reenvio não crie outra transferência.
+  const transferIdempotencyKeyRef = useRef<string | null>(null);
+  // Conversão entre moedas (Fase 2): só usada quando as contas da
+  // transferência têm moedas confirmadas diferentes.
+  const [conversionForm, setConversionForm] =
+    useState<ConversionFormValues>(emptyConversionForm);
+  const [conversionProviders, setConversionProviders] = useState<
+    CurrencyConversionProvider[]
+  >([]);
+  const [newProviderName, setNewProviderName] = useState<string | null>(null);
+  const [isSavingProvider, setIsSavingProvider] = useState(false);
+  const [showConversionOptions, setShowConversionOptions] = useState(false);
 
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
@@ -706,6 +767,7 @@ function TransactionsPageContent() {
           bankroll_operation_type,
           investment_integration_group_id,
           investment_event_type,
+          transfer_group_id,
           account:accounts!transactions_account_id_fkey(name, type, currency),
           category:categories!transactions_category_id_fkey(name),
           competence:competences!transactions_competence_id_fkey(name)
@@ -822,6 +884,13 @@ function TransactionsPageContent() {
     const loadedAccounts = (accountsResponse.data ?? []) as Account[];
     setAccounts(loadedAccounts);
     if (categoriesResponse.data) setCategories(categoriesResponse.data);
+
+    try {
+      setConversionProviders(await loadConversionProviders());
+    } catch (error) {
+      console.error("Erro ao carregar provedores de conversão:", error);
+      setConversionProviders([]);
+    }
 
     await loadClosedCompetences(ownerId);
 
@@ -990,6 +1059,11 @@ function TransactionsPageContent() {
     const defaultType = storedDefaults?.type ?? "Despesa";
 
     setEditingTransactionId(null);
+    setEditingTransferGroupId(null);
+    transferIdempotencyKeyRef.current = null;
+    setConversionForm(emptyConversionForm);
+    setNewProviderName(null);
+    setShowConversionOptions(false);
     setFuelForm(emptyFuelForm);
 
     setForm({
@@ -1033,6 +1107,11 @@ function TransactionsPageContent() {
         "Esta transferência pertence a uma conta por saldo e deve ser editada pelo módulo de Investimentos.",
       );
       router.push("/investments/operations");
+      return;
+    }
+
+    if (transaction.transfer_group_id) {
+      await openLinkedTransferEditDrawer(transaction);
       return;
     }
 
@@ -1087,6 +1166,99 @@ function TransactionsPageContent() {
     setIsDrawerOpen(true);
   }
 
+  // Qualquer ponta abre a operação completa: origem/destino vêm da estrutura
+  // das pontas, não da linha clicada.
+  async function openLinkedTransferEditDrawer(transaction: Transaction) {
+    let legs: Awaited<ReturnType<typeof loadLinkedTransferLegs>>;
+
+    try {
+      legs = await loadLinkedTransferLegs(transaction.transfer_group_id ?? "");
+    } catch (error) {
+      console.error("Erro ao carregar transferência vinculada:", error);
+      alert(LINKED_TRANSFER_INCONSISTENT_MESSAGE);
+      return;
+    }
+
+    if (!legs) {
+      alert(LINKED_TRANSFER_INCONSISTENT_MESSAGE);
+      return;
+    }
+
+    if (
+      isTransactionLocked({ ...transaction, ...legs.outgoing }) ||
+      isTransactionLocked({ ...transaction, ...legs.incoming })
+    ) {
+      alert("Esta conta/cartão já está fechado nesta competência.");
+      return;
+    }
+
+    const values = getLinkedTransferFormValues(legs);
+
+    setEditingTransactionId(transaction.id);
+    setEditingTransferGroupId(values.transferGroupId);
+    setFuelForm(emptyFuelForm);
+    setNewProviderName(null);
+
+    // Conversão: carrega valor recebido, provedor, taxa e cotação para não
+    // perder metadados ao salvar. Mesma moeda: formulário de conversão vazio.
+    const conversion = legs.conversion;
+    setConversionForm(
+      conversion
+        ? {
+            destinationValue: formatCurrencyFromNumber(
+              values.destinationValue,
+              values.destinationAccountId,
+            ),
+            providerId: conversion.provider_id,
+            feeAmount:
+              conversion.fee_amount === null
+                ? ""
+                : formatMoney(
+                    Number(conversion.fee_amount),
+                    conversion.fee_currency,
+                  ),
+            feeCurrency: conversion.fee_currency ?? "",
+            quotedRate: formatRateInput(conversion.quoted_rate),
+            quotedRateBase:
+              conversion.quoted_rate_base_currency &&
+              conversion.quoted_rate_base_currency ===
+                getAccountCurrency(values.originAccountId)
+                ? "origin"
+                : "destination",
+          }
+        : emptyConversionForm,
+    );
+    // Configuração fora do padrão (taxa no destino ou cotação invertida)
+    // fica visível ao abrir; o valor recebido salvo nunca é recalculado aqui.
+    const originCurrency = getAccountCurrency(values.originAccountId);
+    setShowConversionOptions(
+      Boolean(
+        conversion &&
+          ((conversion.fee_currency !== null &&
+            conversion.fee_currency !== originCurrency) ||
+            conversion.quoted_rate_base_currency === originCurrency),
+      ),
+    );
+
+    setForm({
+      description: values.description,
+      value: formatCurrencyFromNumber(values.value, values.originAccountId),
+      due_date: values.dueDate,
+      type: "Transferência",
+      mode: "unico",
+      status: "Pago",
+      installments: "2",
+      account_id: values.originAccountId,
+      card_payment_account_id: "",
+      origin_account_id: values.originAccountId,
+      destination_account_id: values.destinationAccountId,
+      category_id: "",
+      competence_id: values.competenceId,
+    });
+
+    setIsDrawerOpen(true);
+  }
+
   async function saveTransaction() {
     return mutation.run("saveTransaction", async () => {
       const numericValue = parseCurrencyInput(form.value);
@@ -1121,7 +1293,7 @@ function TransactionsPageContent() {
         !form.due_date ||
         !form.competence_id ||
         (form.type === "Transferência" &&
-          !editingTransactionId &&
+          (!editingTransactionId || editingTransferGroupId) &&
           (!form.account_id ||
             !form.destination_account_id ||
             form.account_id === form.destination_account_id)) ||
@@ -1134,10 +1306,47 @@ function TransactionsPageContent() {
         return;
       }
 
-      // Bloqueio temporário até existir conversão cambial: sem ele, a ponta de
-      // destino receberia o valor nativo da origem em outra moeda. Pontas
-      // históricas continuam editáveis enquanto as contas não mudarem.
-      if (form.type === "Transferência") {
+      // Transferências vinculadas (novas ou em edição) aceitam moedas
+      // diferentes como conversão; conta sem moeda + conta confirmada segue
+      // bloqueada. Pontas legadas não têm conversão: continuam exigindo a mesma
+      // moeda e seguem editáveis enquanto as contas não mudarem.
+      const isLinkedTransferFlow =
+        form.type === "Transferência" &&
+        (!editingTransactionId || editingTransferGroupId !== null);
+      const transferCurrencyMode = isLinkedTransferFlow
+        ? getTransferCurrencyMode(
+            selectedAccount.currency,
+            getAccountCurrency(form.destination_account_id),
+          )
+        : null;
+
+      if (transferCurrencyMode?.mode === "blocked") {
+        alert(transferCurrencyMode.message);
+        return;
+      }
+
+      // Moedas diferentes: valor recebido e provedor obrigatórios; taxa e
+      // cotação opcionais. Mesma moeda não envia dados de conversão.
+      let conversionInput: TransferConversionInput | null = null;
+      if (transferCurrencyMode?.mode === "conversion") {
+        const conversionResult = buildConversionInput(
+          {
+            ...conversionForm,
+            feeCurrency: getConversionFeeCurrency(
+              conversionForm.feeCurrency,
+              transferCurrencyMode,
+            ),
+          },
+          transferCurrencyMode,
+        );
+        if (!conversionResult.ok) {
+          alert(conversionResult.message);
+          return;
+        }
+        conversionInput = conversionResult.conversion;
+      }
+
+      if (form.type === "Transferência" && !isLinkedTransferFlow) {
         const originalTransaction = editingTransactionId
           ? transactions.find(
               (transaction) => transaction.id === editingTransactionId,
@@ -1293,59 +1502,26 @@ function TransactionsPageContent() {
           return;
         }
 
-        if (form.type === "Transferência" && !editingTransactionId) {
-          const originAccount = accounts.find(
-            (account) => account.id === form.account_id,
-          );
-
-          const destinationAccount = accounts.find(
-            (account) => account.id === form.destination_account_id,
-          );
-
-          const transferTransactions = [
-            {
-              description:
-                form.description ||
-                `Transferência para ${destinationAccount?.name ?? "conta destino"}`,
-              value: numericValue,
-              due_date: form.due_date,
-              type: "Transferência",
-              mode: "unico",
-              status: "Pago",
-              account_id: form.account_id,
-              category_id: null,
-              competence_id: effectiveCompetenceId,
-              origin_account_id: form.account_id,
-              destination_account_id: form.destination_account_id,
-              owner_id: ownerId,
-            },
-            {
-              description:
-                form.description ||
-                `Transferência recebida de ${originAccount?.name ?? "conta origem"}`,
-              value: numericValue,
-              due_date: form.due_date,
-              type: "Transferência",
-              mode: "unico",
-              status: "Recebido",
-              account_id: form.destination_account_id,
-              category_id: null,
-              competence_id: effectiveCompetenceId,
-              origin_account_id: form.account_id,
-              destination_account_id: form.destination_account_id,
-              owner_id: ownerId,
-            },
-          ];
-
-          for (const transaction of transferTransactions) {
-            if (!transaction.account_id) {
+        // Nova transferência ou edição de transferência vinculada: as duas
+        // pontas são gravadas juntas pelas RPCs (Pago na origem, Recebido no
+        // destino, mesmo transfer_group_id). Transferências legadas seguem o
+        // fluxo de lançamento individual abaixo.
+        if (
+          form.type === "Transferência" &&
+          (!editingTransactionId || editingTransferGroupId)
+        ) {
+          for (const accountId of [
+            form.account_id,
+            form.destination_account_id,
+          ]) {
+            if (!accountId) {
               alert("Conta/cartão inválido para validar fechamento.");
               return;
             }
 
             const lock = await ensureAccountIsOpen({
-              accountId: transaction.account_id,
-              competenceId: transaction.competence_id,
+              accountId,
+              competenceId: effectiveCompetenceId,
             });
 
             if (!lock.allowed) {
@@ -1354,12 +1530,28 @@ function TransactionsPageContent() {
             }
           }
 
-          const { error } = await supabase
-            .from("transactions")
-            .insert(transferTransactions);
+          const transferInput = {
+            originAccountId: form.account_id,
+            destinationAccountId: form.destination_account_id,
+            dueDate: form.due_date,
+            competenceId: effectiveCompetenceId,
+            amount: numericValue,
+            description: form.description,
+            conversion: conversionInput,
+          };
 
-          if (error) {
-            throw new Error(error.message);
+          if (editingTransferGroupId) {
+            await updateLinkedTransfer({
+              ...transferInput,
+              transferGroupId: editingTransferGroupId,
+            });
+          } else {
+            transferIdempotencyKeyRef.current ??=
+              createTransferIdempotencyKey();
+            await createLinkedTransfer({
+              ...transferInput,
+              idempotencyKey: transferIdempotencyKeyRef.current,
+            });
           }
 
           if (!editingTransactionId) {
@@ -1519,6 +1711,11 @@ function TransactionsPageContent() {
     return mutation.run(
       "handleDeleteTransaction" + ":" + transaction.id,
       async () => {
+        if (transaction.transfer_group_id) {
+          await deleteLinkedTransferFromList(transaction);
+          return;
+        }
+
         const confirmed = window.confirm(
           "Tem certeza que deseja excluir este lançamento? Se ele estiver conciliado, a conciliação será desfeita automaticamente.",
         );
@@ -1560,6 +1757,57 @@ function TransactionsPageContent() {
     );
   }
 
+  async function saveNewConversionProvider() {
+    if (newProviderName === null || isSavingProvider) return;
+    setIsSavingProvider(true);
+
+    try {
+      const provider = await createConversionProvider(newProviderName);
+      setConversionProviders((current) =>
+        [...current, provider].sort((left, right) =>
+          left.name.localeCompare(right.name, "pt-BR"),
+        ),
+      );
+      setConversionForm((current) => ({ ...current, providerId: provider.id }));
+      setNewProviderName(null);
+    } catch (error) {
+      alert(error instanceof Error ? error.message : "Erro ao criar provedor.");
+    } finally {
+      setIsSavingProvider(false);
+    }
+  }
+
+  // Qualquer ponta exclui a transferência inteira; a RPC valida o período das
+  // duas pontas e remove ambas na mesma transação.
+  async function deleteLinkedTransferFromList(transaction: Transaction) {
+    if (isTransactionLocked(transaction)) {
+      alert("Esta conta/cartão já está fechado nesta competência.");
+      return;
+    }
+
+    if (!window.confirm(LINKED_TRANSFER_DELETE_CONFIRMATION)) return;
+
+    try {
+      await deleteLinkedTransfer(transaction.transfer_group_id ?? "");
+
+      await loadTransactions({
+        competenceId: competenceFilter,
+        accountId: accountFilter,
+        type: typeFilter,
+        status: statusFilter,
+        categoryId: categoryFilter,
+        search: debouncedSearchTerm,
+        listMode,
+      });
+    } catch (error) {
+      console.error("Erro ao excluir transferência:", error);
+
+      alert(
+        error instanceof Error ? error.message : "Erro ao excluir transferência.",
+      );
+    }
+  }
+
   const selectedCompetence = competences.find(
     (item) => item.id === competenceFilter,
   );
@@ -1567,6 +1815,78 @@ function TransactionsPageContent() {
     (category) => category.id === form.category_id,
   );
   const isFuelCategory = selectedCategory?.special_type === "fuel";
+
+  // Bloco de conversão: só em transferência vinculada (nova ou em edição)
+  // entre contas com moedas confirmadas diferentes. Legado não muda.
+  const transferFormCurrencyMode =
+    form.type === "Transferência" &&
+    (!editingTransactionId || editingTransferGroupId !== null) &&
+    form.account_id &&
+    form.destination_account_id
+      ? getTransferCurrencyMode(
+          getAccountCurrency(form.account_id),
+          getAccountCurrency(form.destination_account_id),
+        )
+      : null;
+  const conversionCurrencies =
+    transferFormCurrencyMode?.mode === "conversion"
+      ? transferFormCurrencyMode
+      : null;
+  const conversionEffectiveRate = conversionCurrencies
+    ? calculateEffectiveRate(
+        parseCurrencyInput(form.value),
+        parseCurrencyInput(conversionForm.destinationValue),
+      )
+    : null;
+  const conversionQuotedRate = parseRateInput(conversionForm.quotedRate);
+  const conversionNormalizedQuotedRate =
+    conversionCurrencies && conversionQuotedRate
+      ? normalizeQuotedRate({
+          quotedRate: conversionQuotedRate,
+          baseCurrency:
+            conversionForm.quotedRateBase === "destination"
+              ? conversionCurrencies.destinationCurrency
+              : conversionCurrencies.originCurrency,
+          quoteCurrency:
+            conversionForm.quotedRateBase === "destination"
+              ? conversionCurrencies.originCurrency
+              : conversionCurrencies.destinationCurrency,
+          originCurrency: conversionCurrencies.originCurrency,
+          destinationCurrency: conversionCurrencies.destinationCurrency,
+        })
+      : null;
+  const conversionQuotedDifference =
+    conversionEffectiveRate && conversionNormalizedQuotedRate
+      ? calculateQuotedRateDifference(
+          conversionEffectiveRate,
+          conversionNormalizedQuotedRate,
+        )
+      : null;
+  const conversionFeeCurrency = conversionCurrencies
+    ? getConversionFeeCurrency(conversionForm.feeCurrency, conversionCurrencies)
+    : "";
+  // Recalcula o valor recebido SÓ quando muda um campo determinante (valor
+  // debitado, cotação, taxa, moeda da taxa, direção). Abrir a edição ou
+  // digitar o valor recebido não passa por aqui, então o valor real
+  // informado à mão é preservado até a próxima mudança determinante.
+  function changeConversionDriver(
+    patch: Parameters<typeof applyConversionDriverChange>[1],
+    sourceAmount = parseCurrencyInput(form.value),
+  ) {
+    if (!conversionCurrencies) return;
+    const context = {
+      originCurrency: conversionCurrencies.originCurrency,
+      destinationCurrency: conversionCurrencies.destinationCurrency,
+      sourceAmount,
+    };
+    setConversionForm((current) =>
+      applyConversionDriverChange(current, patch, context),
+    );
+  }
+
+  const visibleConversionProviders = conversionProviders.filter(
+    (provider) => provider.active || provider.id === conversionForm.providerId,
+  );
 
   function getCompetenceOrder(competence: Competence) {
     return competence.year * 100 + competence.month;
@@ -2911,9 +3231,11 @@ function TransactionsPageContent() {
                     </h2>
 
                     <p className="theme-muted mt-1 text-sm">
-                      {editingTransactionId
-                        ? "Altere as informações do lançamento."
-                        : "Registre uma nova movimentação financeira."}
+                      {editingTransferGroupId
+                        ? "As movimentações nas duas contas serão atualizadas juntas."
+                        : editingTransactionId
+                          ? "Altere as informações do lançamento."
+                          : "Registre uma nova movimentação financeira."}
                     </p>
                   </div>
 
@@ -3038,7 +3360,7 @@ function TransactionsPageContent() {
 
                 <div>
                   <label className="theme-muted-strong mb-1.5 block text-sm font-semibold">
-                    Valor
+                    {conversionCurrencies ? "Valor debitado" : "Valor"}
                   </label>
 
                   <input
@@ -3053,6 +3375,10 @@ function TransactionsPageContent() {
                         ...form,
                         value,
                       });
+
+                      if (conversionCurrencies) {
+                        changeConversionDriver({}, parseCurrencyInput(value));
+                      }
 
                       if (isFuelCategory) {
                         const total = parseCurrencyInput(value);
@@ -3077,6 +3403,7 @@ function TransactionsPageContent() {
                 </div>
 
                 {form.type === "Transferência" ? (
+                  <>
                   <div className="grid gap-4 sm:grid-cols-2">
                     <div>
                       <label className="theme-muted-strong mb-1.5 block text-sm font-semibold">
@@ -3140,6 +3467,255 @@ function TransactionsPageContent() {
                       </select>
                     </div>
                   </div>
+
+                  {conversionCurrencies && (
+                    <div className="space-y-4 rounded-xl border border-white/10 bg-white/[0.02] p-4">
+                      <div>
+                        <label className="theme-muted-strong mb-1.5 block text-sm font-semibold">
+                          Provedor
+                        </label>
+                        <div className="flex gap-2">
+                          <select
+                            value={conversionForm.providerId}
+                            onChange={(event) =>
+                              setConversionForm((current) => ({
+                                ...current,
+                                providerId: event.target.value,
+                              }))
+                            }
+                            className="theme-field min-w-0 flex-1 rounded-xl border px-4 py-3 text-sm outline-none"
+                          >
+                            <option value="">Selecione</option>
+                            {visibleConversionProviders.map((provider) => (
+                              <option key={provider.id} value={provider.id}>
+                                {provider.active
+                                  ? provider.name
+                                  : `${provider.name} (inativo)`}
+                              </option>
+                            ))}
+                          </select>
+                          {newProviderName === null && (
+                            <button
+                              type="button"
+                              onClick={() => setNewProviderName("")}
+                              className="theme-field theme-hover shrink-0 rounded-xl border px-3 text-sm font-semibold"
+                            >
+                              + Novo
+                            </button>
+                          )}
+                        </div>
+
+                        {newProviderName !== null && (
+                          <div className="mt-2 flex gap-2">
+                            <input
+                              value={newProviderName}
+                              onChange={(event) =>
+                                setNewProviderName(event.target.value)
+                              }
+                              onKeyDown={(event) => {
+                                if (event.key === "Enter") {
+                                  event.preventDefault();
+                                  void saveNewConversionProvider();
+                                }
+                              }}
+                              placeholder="Nome do provedor"
+                              autoFocus
+                              className="theme-field min-w-0 flex-1 rounded-xl border px-4 py-2 text-sm outline-none"
+                            />
+                            <button
+                              type="button"
+                              disabled={isSavingProvider || !newProviderName.trim()}
+                              onClick={() => void saveNewConversionProvider()}
+                              className="shrink-0 rounded-xl bg-blue-600 px-3 text-sm font-semibold text-white hover:bg-blue-500 disabled:opacity-60"
+                            >
+                              Salvar
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setNewProviderName(null)}
+                              aria-label="Cancelar novo provedor"
+                              className="theme-muted theme-hover shrink-0 rounded-xl px-2"
+                            >
+                              <X size={16} />
+                            </button>
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="grid gap-4 sm:grid-cols-2">
+                        <div>
+                          <label className="theme-muted-strong mb-1.5 block text-sm font-semibold">
+                            Cotação
+                          </label>
+                          <div className="relative">
+                            <input
+                              value={conversionForm.quotedRate}
+                              onChange={(event) =>
+                                changeConversionDriver({
+                                  quotedRate: event.target.value.replace(
+                                    /[^\d.,]/g,
+                                    "",
+                                  ),
+                                })
+                              }
+                              placeholder="0,00"
+                              inputMode="decimal"
+                              className="theme-field w-full rounded-xl border py-3 pl-4 pr-16 text-sm outline-none"
+                            />
+                            <span className="pointer-events-none absolute inset-y-0 right-4 flex items-center text-sm text-slate-400">
+                              {getQuoteUnitLabel(
+                                conversionForm.quotedRateBase,
+                                conversionCurrencies,
+                              )}
+                            </span>
+                          </div>
+                        </div>
+                        <div>
+                          <label
+                            className="theme-muted-strong mb-1.5 block text-sm font-semibold"
+                            title={CONVERSION_FEE_HINT}
+                          >
+                            Taxa
+                          </label>
+                          <input
+                            value={conversionForm.feeAmount}
+                            onChange={(event) =>
+                              changeConversionDriver({
+                                feeAmount: formatMoneyInput(
+                                  event.target.value,
+                                  conversionFeeCurrency,
+                                ),
+                              })
+                            }
+                            placeholder={`${getMoneyInputPlaceholder(conversionFeeCurrency)} (opcional)`}
+                            title={CONVERSION_FEE_HINT}
+                            inputMode="numeric"
+                            className="theme-field w-full rounded-xl border px-4 py-3 text-sm outline-none"
+                          />
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="theme-muted-strong mb-1.5 block text-sm font-semibold">
+                          Valor recebido
+                        </label>
+                        <input
+                          value={formatCurrencyInput(
+                            conversionForm.destinationValue,
+                            form.destination_account_id,
+                          )}
+                          onChange={(event) =>
+                            // Edição manual (valor real do provedor): não recalcula.
+                            setConversionForm((current) => ({
+                              ...current,
+                              destinationValue: formatCurrencyInput(
+                                event.target.value,
+                                form.destination_account_id,
+                              ),
+                            }))
+                          }
+                          placeholder={getMoneyInputPlaceholder(
+                            conversionCurrencies.destinationCurrency,
+                          )}
+                          inputMode="numeric"
+                          className="theme-field w-full rounded-xl border px-4 py-3 text-sm font-semibold outline-none"
+                        />
+                      </div>
+
+                      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 text-xs">
+                        <span className="theme-muted tabular-nums">
+                          {conversionEffectiveRate
+                            ? `Custo efetivo ${formatCompactRate(
+                                conversionEffectiveRate,
+                                conversionCurrencies.originCurrency,
+                                conversionCurrencies.destinationCurrency,
+                              )}${
+                                conversionQuotedDifference !== null
+                                  ? ` · ${formatSignedPercent(conversionQuotedDifference)} vs. cotação`
+                                  : ""
+                              }`
+                            : "Informe a cotação para calcular o valor recebido."}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setShowConversionOptions((current) => !current)
+                          }
+                          aria-expanded={showConversionOptions}
+                          className="theme-muted theme-hover rounded-lg px-2 py-1 font-semibold"
+                        >
+                          {showConversionOptions ? "Menos opções" : "Mais opções"}
+                        </button>
+                      </div>
+
+                      {showConversionOptions && (
+                        <div className="grid gap-3 border-t border-white/10 pt-3 text-sm sm:grid-cols-2">
+                          <div>
+                            <span className="theme-muted mb-1.5 block text-xs font-semibold">
+                              Taxa cobrada em
+                            </span>
+                            <div className="flex gap-2">
+                              {[
+                                conversionCurrencies.originCurrency,
+                                conversionCurrencies.destinationCurrency,
+                              ].map((currency) => (
+                                <button
+                                  key={currency}
+                                  type="button"
+                                  aria-pressed={conversionFeeCurrency === currency}
+                                  onClick={() =>
+                                    changeConversionDriver({
+                                      feeCurrency: currency,
+                                      feeAmount: formatMoneyInput(
+                                        conversionForm.feeAmount,
+                                        currency,
+                                      ),
+                                    })
+                                  }
+                                  className={`flex-1 rounded-lg border px-3 py-2 text-xs font-semibold ${
+                                    conversionFeeCurrency === currency
+                                      ? "border-blue-500 bg-blue-500/10 text-blue-300"
+                                      : "border-white/10 text-slate-400"
+                                  }`}
+                                >
+                                  {currency}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                          <div>
+                            <span className="theme-muted mb-1.5 block text-xs font-semibold">
+                              Cotação em
+                            </span>
+                            <div className="flex gap-2">
+                              {(["destination", "origin"] as const).map((base) => (
+                                <button
+                                  key={base}
+                                  type="button"
+                                  aria-pressed={conversionForm.quotedRateBase === base}
+                                  onClick={() => {
+                                    if (conversionForm.quotedRateBase !== base) {
+                                      changeConversionDriver(
+                                        invertQuotedRateDirection(conversionForm),
+                                      );
+                                    }
+                                  }}
+                                  className={`flex-1 rounded-lg border px-3 py-2 text-xs font-semibold ${
+                                    conversionForm.quotedRateBase === base
+                                      ? "border-blue-500 bg-blue-500/10 text-blue-300"
+                                      : "border-white/10 text-slate-400"
+                                  }`}
+                                >
+                                  {getQuoteUnitLabel(base, conversionCurrencies)}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  </>
                 ) : (
                   <div className="grid gap-4 sm:grid-cols-2">
                     {form.type !== "Pagamento de Fatura" && (

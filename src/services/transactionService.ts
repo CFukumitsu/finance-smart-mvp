@@ -11,7 +11,7 @@ export async function deleteTransaction(id: string): Promise<ServiceResult> {
 
   const { data: existingTransaction, error: findError } = await supabase
     .from("transactions")
-    .select("competence_id, bankroll_integration_group_id, investment_integration_group_id")
+    .select("competence_id, bankroll_integration_group_id, investment_integration_group_id, transfer_group_id")
     .eq("id", id)
     .eq("owner_id", ownerId)
     .single();
@@ -34,6 +34,14 @@ export async function deleteTransaction(id: string): Promise<ServiceResult> {
     return {
       success: false,
       message: "Esta transferência deve ser excluída pelo módulo de Investimentos.",
+    };
+  }
+
+  // Ponta de transferência vinculada: só sai junto com a outra (delete_transfer).
+  if (existingTransaction.transfer_group_id) {
+    return {
+      success: false,
+      message: "Esta transferência é vinculada e deve ser excluída como uma transferência completa.",
     };
   }
 

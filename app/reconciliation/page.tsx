@@ -23,6 +23,7 @@ import {
   formatMoney,
 } from "@/src/utils/currencies";
 import { ensureCompetenceExists } from "@/src/services/competenceService";
+import { blockLinkedTransferIndividualChange } from "@/src/utils/linkedTransfers";
 
 type Account = {
   id: string;
@@ -54,6 +55,7 @@ type Transaction = {
   type?: string;
   status?: string;
   category_id?: string;
+  transfer_group_id?: string | null;
   signedValue?: number;
 };
 
@@ -997,7 +999,7 @@ export default function ReconciliationPage() {
 
     const { data, error } = await supabase
       .from("transactions")
-      .select("id, description, due_date, value, type, status, category_id")
+      .select("id, description, due_date, value, type, status, category_id, transfer_group_id")
       .eq("owner_id", ownerId)
       .eq("account_id", accountId)
       .eq("competence_id", competenceId);
@@ -1058,7 +1060,7 @@ export default function ReconciliationPage() {
     if (linkedTransactionIds.length > 0) {
       const { data, error } = await supabase
         .from("transactions")
-        .select("id, description, due_date, value, type, status, category_id")
+        .select("id, description, due_date, value, type, status, category_id, transfer_group_id")
         .in("id", linkedTransactionIds)
         .eq("owner_id", await getCurrentUserId())
         .eq("account_id", accountId)
@@ -1650,7 +1652,7 @@ export default function ReconciliationPage() {
       if (linkedTransactionIds.length > 0) {
         const { data, error } = await supabase
           .from("transactions")
-          .select("id, description, due_date, value, type, status, category_id")
+          .select("id, description, due_date, value, type, status, category_id, transfer_group_id")
           .in("id", linkedTransactionIds)
           .eq("account_id", selectedAccountId)
           .eq("competence_id", selectedCompetenceId);
@@ -1874,7 +1876,7 @@ export default function ReconciliationPage() {
     const { data: createdTransaction, error } = await supabase
       .from("transactions")
       .insert(payload)
-      .select("id, description, due_date, value, type, status, category_id")
+      .select("id, description, due_date, value, type, status, category_id, transfer_group_id")
       .single();
 
     if (error || !createdTransaction) {
@@ -1923,6 +1925,10 @@ export default function ReconciliationPage() {
       return;
     }
 
+    if (blockLinkedTransferIndividualChange(item.matchedTransaction, alert)) {
+      return;
+    }
+
     setItemToEditTransaction(item);
 
     setEditForm({
@@ -1937,6 +1943,16 @@ export default function ReconciliationPage() {
 
     if (!itemToEditTransaction?.matchedTransaction) return;
 
+    if (
+      blockLinkedTransferIndividualChange(
+        itemToEditTransaction.matchedTransaction,
+        alert,
+      )
+    ) {
+      setItemToEditTransaction(null);
+      return;
+    }
+
     const ownerId = await getCurrentUserId();
 
     const transactionId = itemToEditTransaction.matchedTransaction.id;
@@ -1950,7 +1966,7 @@ export default function ReconciliationPage() {
       })
       .eq("id", transactionId)
       .eq("owner_id", ownerId)
-      .select("id, description, due_date, value, type, status, category_id")
+      .select("id, description, due_date, value, type, status, category_id, transfer_group_id")
       .single();
 
     if (error || !updatedTransaction) {
@@ -2101,6 +2117,14 @@ export default function ReconciliationPage() {
       return;
     }
 
+    // Só vincular não altera o lançamento; mudar o valor alteraria uma ponta.
+    if (
+      valueChanged &&
+      blockLinkedTransferIndividualChange(selectedTransaction, alert)
+    ) {
+      return;
+    }
+
     try {
       if (!valueChanged) {
         await saveReconciliation(item, transactionId);
@@ -2155,6 +2179,9 @@ export default function ReconciliationPage() {
   ) {
     return mutation.run("reconcileAndAdjustLinkedTotal:" + item.id + ":" + transaction.id, async () => {
 
+    // Bloqueia antes de vincular: o ajuste mudaria o valor de uma só ponta.
+    if (blockLinkedTransferIndividualChange(transaction, alert)) return;
+
     const adjustedValue = calculateAdjustedTransactionValue(transaction.alreadyReconciled, item.value);
 
     const confirmed = window.confirm(
@@ -2184,7 +2211,7 @@ export default function ReconciliationPage() {
       })
       .eq("id", transaction.id)
       .eq("owner_id", ownerId)
-      .select("id, description, due_date, value, type, status, category_id")
+      .select("id, description, due_date, value, type, status, category_id, transfer_group_id")
       .single();
 
     if (error || !updatedTransaction) {
