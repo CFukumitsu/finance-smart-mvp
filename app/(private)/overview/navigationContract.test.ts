@@ -45,3 +45,31 @@ test("cadastro permite Reserva/investimento em qualquer moeda (só depende de se
   assert.ok(guard.includes('form.type === "Conta"'));
   assert.ok(!/currency/i.test(guard), "a opção não pode depender da moeda");
 });
+
+test("9. fórmula visual do mês atual: Saldo atual + Entradas previstas - Compromissos - Reserva = Pode guardar", () => {
+  const page = read("./page.tsx");
+  const start = page.indexOf('title = "De onde vem o \\"Pode guardar\\""');
+  assert.ok(start > 0);
+  const block = page.slice(start, page.indexOf("];", start));
+  const order = [
+    'label: "Saldo atual"',
+    'label: "Entradas previstas", value: money(overview.expectedInflows), tone: "blue", operator: "+"',
+    'label: "Compromissos a pagar", value: money(commitments.total), tone: "red", operator: "−"',
+    'label: "Reserva estimada", value: money(reserve.total), tone: "orange", operator: "−"',
+    'label: "Pode guardar", value: money(overview.canSave ?? 0)',
+  ].map((term) => block.indexOf(term));
+  assert.ok(order.every((position) => position >= 0), "todos os termos presentes");
+  assert.deepEqual([...order].sort((left, right) => left - right), order, "na ordem certa");
+});
+
+test("10. não existe mais 'Pode guardar hoje' nem o card redundante 'Ainda pode guardar'", () => {
+  const sources = [
+    read("./page.tsx"),
+    read("../../../src/utils/financialOverview.ts"),
+    read("../../../src/components/overview/OverviewWidgets.tsx"),
+    read("../../accounts/page.tsx"),
+  ].join("\n");
+  assert.ok(!/pode guardar hoje/i.test(sources));
+  assert.ok(!/label="Ainda pode guardar"/.test(sources));
+  assert.ok(!/canSaveToday|remainingToSave/.test(sources));
+});

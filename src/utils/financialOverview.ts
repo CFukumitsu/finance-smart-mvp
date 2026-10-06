@@ -6,7 +6,11 @@
 // Princípios:
 // - O saldo das contas é a fonte da verdade. Dinheiro já transferido para uma
 //   conta de reserva/investimento já saiu do saldo da origem; por isso o
-//   "guardado" NUNCA é subtraído de novo de "Pode guardar hoje".
+//   "guardado" NUNCA é subtraído de novo de "Pode guardar".
+// - Horizonte único: a competência inteira. "Pode guardar" usa o saldo atual
+//   + entradas previstas até o fim do mês - compromissos até o fim do mês -
+//   reserva até o fim do mês. Receitas já realizadas estão no saldo e não são
+//   somadas de novo.
 // - Transferências não são receita nem despesa. Só viram "guardado" quando o
 //   DESTINO é uma conta com papel "savings" no planejamento.
 // - Fatura e compras do cartão nunca são contadas juntas: a fatura de uma
@@ -433,16 +437,21 @@ export type FinancialOverview = {
   /** Saídas realizadas no mês (despesas, faturas pagas e transferências para fora), sem o guardado. */
   realizedOutflows: number;
 
-  /** Pode guardar hoje (mês atual). */
-  canSaveToday: number | null;
+  /**
+   * Pode guardar: quanto AINDA pode ser separado dentro da competência.
+   * Atual: saldo + entradas previstas - compromissos - reserva.
+   * Futuro: previsão do mês - guardado já programado. Passado: null.
+   * Sempre vale: Previsão de economia = Guardado + Pode guardar.
+   */
+  canSave: number | null;
+  /** Entradas previstas ainda por acontecer (receitas + transferências de fora do planejamento). */
+  expectedInflows: number;
   /** Guardado (mês atual: até hoje; passado: no mês; futuro: programado). */
   saved: number;
   savedScheduled: number;
   savingsMovements: SavingsMovement[];
   /** Previsão total de economia (atual/futuro). */
   forecast: number | null;
-  /** Ainda pode guardar = previsão - guardado (atual) ou - programado (futuro). */
-  remainingToSave: number | null;
   /** Resultado do mês (passado): entradas - saídas, sem contar o guardado. */
   monthResult: number | null;
 
@@ -691,18 +700,19 @@ export function buildFinancialOverview(input: OverviewInput): FinancialOverview 
   };
 
   const incomeExpectedTotal = roundMoney(incomeExpected);
-  let canSaveToday: number | null = null;
+  let canSave: number | null = null;
   let forecast: number | null = null;
-  let remainingToSave: number | null = null;
   let monthResult: number | null = null;
 
   if (temporal === "current") {
-    canSaveToday = roundMoney((availableBalance ?? 0) - commitments.total - reserve.total);
-    remainingToSave = roundMoney(canSaveToday + incomeExpectedTotal + transferInflowsPending);
-    forecast = roundMoney(saved + remainingToSave);
+    // Mesmo horizonte (fim da competência) para entradas, compromissos e reserva.
+    canSave = roundMoney(
+      (availableBalance ?? 0) + incomeExpectedTotal + transferInflowsPending - commitments.total - reserve.total,
+    );
+    forecast = roundMoney(saved + canSave);
   } else if (temporal === "future") {
     forecast = roundMoney(incomeExpectedTotal + transferInflowsPending - commitments.total - reserve.total);
-    remainingToSave = roundMoney(forecast - savedScheduled);
+    canSave = roundMoney(forecast - savedScheduled);
   } else {
     monthResult = roundMoney(incomeRealized + transferInflowsRealized - realizedOutflows);
   }
@@ -752,12 +762,12 @@ export function buildFinancialOverview(input: OverviewInput): FinancialOverview 
       expected: incomeExpectedTotal,
       transferInflows: roundMoney(temporal === "past" ? transferInflowsRealized : transferInflowsPending),
     },
-    canSaveToday,
+    canSave,
+    expectedInflows: roundMoney(temporal === "past" ? 0 : incomeExpectedTotal + transferInflowsPending),
     saved: savedValue,
     savedScheduled: roundMoney(savedScheduled),
     savingsMovements: savingsMovements.sort((left, right) => right.date.localeCompare(left.date)),
     forecast,
-    remainingToSave,
     monthResult,
     goal,
     cards: {

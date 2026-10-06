@@ -46,7 +46,9 @@ function monthTitle(year: number, month: number) {
 
 const METHODOLOGY = [
   "Os valores são baseados nos seus lançamentos, contas, compromissos e histórico de gastos. Transferências para investimentos/reservas não são consideradas despesas.",
-  "Saldo disponível: saldo de hoje das contas marcadas como operacionais (último fechamento + lançamentos até hoje). Contas de reserva/investimento e contas fora do planejamento não entram.",
+  "Pode guardar = saldo atual + entradas previstas − compromissos a pagar − reserva estimada, tudo até o fim do mês. É quanto ainda pode ser separado na competência. Previsão de economia = guardado no mês + pode guardar.",
+  "Saldo atual: saldo das contas marcadas como operacionais (último fechamento + lançamentos até hoje), já incluindo as receitas recebidas. Contas de reserva/investimento e contas fora do planejamento não entram.",
+  "Entradas previstas: receitas lançadas com data futura no mês, recorrências de receita ainda não geradas e transferências previstas vindas de fora do planejamento. Receitas já recebidas não são somadas de novo.",
   "Compromissos: despesas, faturas e transferências para fora do planejamento que ainda vão acontecer no mês, recorrências ainda não geradas e faturas de cartão projetadas a partir das compras do mês anterior (quando a fatura ainda não foi lançada).",
   "Reserva estimada: quanto você costuma gastar com despesas variáveis (débito/Pix, sem recorrências e parcelas) do dia seguinte até o fim do mês, pela média ponderada dos últimos 3 meses completos (pesos 3, 2 e 1). Se você já lançou gastos variáveis maiores que essa média, vale o valor lançado.",
   "Guardado: transferências e aplicações cujo destino é uma conta de reserva/investimento, menos os resgates. Como esse dinheiro já saiu do saldo, ele não é descontado de novo.",
@@ -274,17 +276,17 @@ function PrimaryArea({
   let heroInfo: string;
 
   if (overview.temporal === "current") {
-    heroLabel = "Pode guardar hoje";
-    heroValue = overview.canSaveToday ?? 0;
+    heroLabel = "Pode guardar";
+    heroValue = overview.canSave ?? 0;
     heroText = heroValue >= 0
-      ? `Valor disponível após proteger compromissos e gastos estimados até ${end}.`
-      : `Atenção: faltam ${money(Math.abs(heroValue))} para cobrir compromissos e gastos estimados até ${end}.`;
-    heroInfo = "Saldo disponível nas contas − compromissos a pagar − reserva estimada. É o que dá para guardar AGORA sem comprometer o restante do mês.";
+      ? "Este é o valor estimado que ainda pode ser guardado sem comprometer o planejamento até o final do mês."
+      : `Faltam ${money(Math.abs(heroValue))} para cobrir os compromissos e gastos estimados até o final do mês.`;
+    heroInfo = `Saldo atual + entradas previstas − compromissos a pagar − reserva estimada, tudo até ${end}. Receitas já recebidas estão no saldo e não são somadas de novo.`;
   } else if (overview.temporal === "future") {
     heroLabel = "Previsão de economia";
     heroValue = overview.forecast ?? 0;
     heroText = "Receitas previstas − compromissos − reserva estimada para o mês.";
-    heroInfo = "Mês futuro: não existe \"pode guardar hoje\". A previsão usa somente o fluxo do próprio mês (não inclui o saldo que sobrar dos meses anteriores).";
+    heroInfo = "Mês futuro: a previsão usa somente o fluxo do próprio mês (não inclui o saldo que sobrar dos meses anteriores).";
   } else {
     heroLabel = "Resultado do mês";
     heroValue = overview.monthResult ?? 0;
@@ -319,8 +321,8 @@ function PrimaryArea({
       <div className="grid gap-4 sm:grid-cols-2 lg:col-span-7">
         {overview.temporal === "current" && (
           <StatCard label="Previsão de economia" value={money(overview.forecast ?? 0)} tone="blue"
-            hint={`Estimativa de quanto deverá sobrar até ${end}.`}
-            info="Guardado no mês + Pode guardar hoje + receitas ainda previstas no mês." />
+            hint={`Guardado no mês + Pode guardar, até ${end}.`}
+            info="Quanto você provavelmente terá guardado ao fim do mês. Guardar dinheiro durante o mês só move valor de “Pode guardar” para “Guardado”; a previsão não muda." />
         )}
         {overview.temporal === "past" && (
           <StatCard label="Receitas do mês" value={money(overview.income.realized)} tone="blue"
@@ -341,16 +343,18 @@ function PrimaryArea({
           info="Transferências para contas de reserva/investimento, menos resgates. Não é despesa."
         />
 
-        <GoalCard overview={overview} goalDraft={goalDraft} setGoalDraft={setGoalDraft}
-          saveGoal={saveGoal} isSavingGoal={isSavingGoal} />
+        {/* Mês atual: só 3 cards (o antigo "Ainda pode guardar" seria igual ao
+            destaque "Pode guardar"), então a meta ocupa a linha inteira. */}
+        <div className={overview.temporal === "current" ? "sm:col-span-2" : ""}>
+          <GoalCard overview={overview} goalDraft={goalDraft} setGoalDraft={setGoalDraft}
+            saveGoal={saveGoal} isSavingGoal={isSavingGoal} />
+        </div>
 
-        {overview.temporal !== "past" ? (
-          <StatCard label="Ainda pode guardar" value={money(overview.remainingToSave ?? 0)}
-            tone={(overview.remainingToSave ?? 0) >= 0 ? "green" : "red"}
-            hint={overview.temporal === "current" ? `Economia adicional projetada até ${end}.` : "Previsão menos o já programado."}
-            info={overview.temporal === "current"
-              ? "Diferente de \"Pode guardar hoje\": inclui as receitas que ainda vão entrar no mês. É quanto mais você provavelmente conseguirá guardar até o fim do mês."
-              : "Previsão de economia menos o que já está programado para ser guardado."} />
+        {overview.temporal === "current" ? null : overview.temporal === "future" ? (
+          <StatCard label="Pode guardar" value={money(overview.canSave ?? 0)}
+            tone={(overview.canSave ?? 0) >= 0 ? "green" : "red"}
+            hint="Previsão do mês menos o já programado."
+            info="Mês futuro: quanto ainda poderá ser separado além das transferências já agendadas para reserva/investimento." />
         ) : (
           <StatCard label="Gastos variáveis" value={money(overview.reserve.variableRealized)} tone="orange"
             hint="Débito/Pix realizados no mês." />
@@ -378,7 +382,7 @@ function GoalCard({
   const referenceLabel = overview.temporal === "past" ? "Guardado" : "Previsão";
 
   return (
-    <div className="flex min-w-0 flex-col rounded-2xl border border-violet-400/20 bg-violet-500/[0.05] p-5">
+    <div className="flex h-full min-w-0 flex-col rounded-2xl border border-violet-400/20 bg-violet-500/[0.05] p-5">
       <p className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wider text-slate-400">
         <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-violet-400" />
         Meta do mês
@@ -463,16 +467,22 @@ function FormulaArea({ overview }: { overview: FinancialOverview }) {
   let terms: FormulaTerm[];
   let title: string;
   if (overview.temporal === "current") {
-    title = "De onde vem o \"Pode guardar hoje\"";
+    title = "De onde vem o \"Pode guardar\"";
     terms = [
-      { label: "Saldo disponível nas contas", value: money(overview.availableBalance ?? 0), tone: "neutral",
-        info: `Saldo atual das contas que participam do planejamento: ${overview.accountBalances
+      { label: "Saldo atual", value: money(overview.availableBalance ?? 0), tone: "neutral",
+        info: `Saldo de hoje das contas que participam do planejamento (já inclui as receitas recebidas): ${overview.accountBalances
           .map((item) => `${item.name} ${money(item.balance)}`).join(" · ") || "nenhuma conta"}.` },
+      { label: "Entradas previstas", value: money(overview.expectedInflows), tone: "blue", operator: "+",
+        info: `Ainda vão entrar até o fim do mês: receitas lançadas e recorrências de receita não geradas ${money(overview.income.expected)}`
+          + (overview.income.transferInflows > 0
+            ? ` · transferências vindas de fora do planejamento ${money(overview.income.transferInflows)} (não são receita)`
+            : "")
+          + ". Receitas já recebidas não entram aqui." },
       { label: "Compromissos a pagar", value: money(commitments.total), tone: "red", operator: "−", info: commitmentsInfo },
-      { label: "Reserva estimada do mês", value: money(reserve.total), tone: "orange", operator: "−",
+      { label: "Reserva estimada", value: money(reserve.total), tone: "orange", operator: "−",
         info: "Gastos variáveis esperados até o fim do mês (detalhes no card Reserva estimada)." },
-      { label: "Pode guardar hoje", value: money(overview.canSaveToday ?? 0),
-        tone: (overview.canSaveToday ?? 0) >= 0 ? "green" : "red", operator: "=" },
+      { label: "Pode guardar", value: money(overview.canSave ?? 0),
+        tone: (overview.canSave ?? 0) >= 0 ? "green" : "red", operator: "=" },
     ];
   } else if (overview.temporal === "future") {
     title = "Composição da previsão do mês";
@@ -511,7 +521,7 @@ function EvolutionCard({ overview }: { overview: FinancialOverview }) {
     ? [{ name: "Guardado", value: overview.saved, color: "#8b5cf6" }]
     : [
         { name: overview.temporal === "future" ? "Programado" : "Guardado", value: overview.saved, color: "#8b5cf6" },
-        { name: "Previsão adicional", value: Math.max(0, overview.remainingToSave ?? 0), color: "#3b82f6" },
+        { name: "Pode guardar", value: Math.max(0, overview.canSave ?? 0), color: "#3b82f6" },
         { name: "Previsão total", value: Math.max(0, overview.forecast ?? 0), color: "#10b981" },
       ];
   if (goal !== null) data.push({ name: "Meta", value: goal, color: "#a78bfa" });
@@ -520,7 +530,7 @@ function EvolutionCard({ overview }: { overview: FinancialOverview }) {
     <section className="min-w-0 rounded-2xl border border-white/10 bg-slate-950/60 p-5" aria-label="Evolução da economia">
       <p className="text-sm font-semibold text-blue-300">Evolução da economia no mês</p>
       <p className="mt-1 text-xs text-slate-400">
-        {overview.temporal === "past" ? "Quanto foi guardado no mês." : "Guardado até agora, previsão adicional e previsão total."}
+        {overview.temporal === "past" ? "Quanto foi guardado no mês." : "Previsão total = guardado + pode guardar."}
       </p>
       {data.every((item) => item.value === 0) ? (
         <div className="mt-4 rounded-xl border border-dashed border-white/10 p-6 text-center text-sm text-slate-400">

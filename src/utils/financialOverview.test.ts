@@ -100,7 +100,7 @@ test("papel automático: investimento vira reserva; demais contas operacionais; 
   assert.equal(resolvePlanningRole(account({ id: "x", show_on_investments_dashboard: true, planning_role: "operational" })), "operational");
 });
 
-test("1. Pode guardar hoje = saldo disponível - compromissos - reserva", () => {
+test("1/3/4. Pode guardar = saldo atual + entradas previstas - compromissos - reserva", () => {
   const overview = withTransactions([
     tx({ account_id: "fixas", due_date: "2026-10-25", value: 1500, status: "Pendente" }),
   ]);
@@ -109,7 +109,7 @@ test("1. Pode guardar hoje = saldo disponível - compromissos - reserva", () => 
   assert.equal(overview.commitments.total, 1500);
   assert.equal(overview.reserve.historicalEstimate, 1000); // gasto após o dia 16, média ponderada
   assert.equal(overview.reserve.total, 1000);
-  assert.equal(overview.canSaveToday, 6000 - 1500 - 1000);
+  assert.equal(overview.canSave, 6000 - 1500 - 1000);
 });
 
 test("2/4. transferência para conta de reserva vira Guardado e não é despesa", () => {
@@ -126,38 +126,68 @@ test("3. transferência entre contas operacionais não vira economia nem muda o 
   const before = withTransactions([]);
   const after = withTransactions(transfer("corrente", "diaadia", "2026-10-10", 700));
   assert.equal(after.saved, 0);
-  assert.equal(after.canSaveToday, before.canSaveToday);
+  assert.equal(after.canSave, before.canSave);
   assert.equal(after.commitments.transfersOut, 0);
 });
 
-test("5/18. guardar R$ 5.000 reduz Pode guardar hoje uma única vez e mantém a previsão", () => {
+test("5/6. guardar R$ 5.000 reduz Pode guardar uma única vez, aumenta Guardado e mantém a previsão", () => {
   const before = withTransactions([]);
   const after = withTransactions(transfer("corrente", "investimento", TODAY, 5000));
   assert.equal(after.saved, 5000);
-  assert.equal(after.canSaveToday, (before.canSaveToday ?? 0) - 5000);
+  assert.equal(after.canSave, (before.canSave ?? 0) - 5000);
   assert.equal(after.forecast, before.forecast);
-  assert.equal(after.remainingToSave, (before.remainingToSave ?? 0) - 5000);
   assert.equal(after.goal.reference, before.goal.reference);
 });
 
-test("6/7. receita futura não entra em Pode guardar hoje, mas entra na previsão", () => {
+test("1. receita futura do mês entra em Pode guardar e na previsão", () => {
   const before = withTransactions([]);
   const after = withTransactions([
-    tx({ account_id: "corrente", due_date: "2026-10-28", type: "Receita", value: 9000, status: "Pendente" }),
+    tx({ account_id: "corrente", due_date: "2026-10-28", type: "Receita", value: 7000, status: "Pendente" }),
   ]);
-  assert.equal(after.canSaveToday, before.canSaveToday);
-  assert.equal(after.income.expected, 9000);
-  assert.equal(after.forecast, (before.forecast ?? 0) + 9000);
-  assert.equal(after.remainingToSave, (before.remainingToSave ?? 0) + 9000);
+  assert.equal(after.income.expected, 7000);
+  assert.equal(after.expectedInflows, 7000);
+  assert.equal(after.canSave, (before.canSave ?? 0) + 7000);
+  assert.equal(after.forecast, (before.forecast ?? 0) + 7000);
 });
 
-test("8. compromissos futuros reduzem Pode guardar hoje e a previsão", () => {
+test("2. receita já realizada NÃO é somada de novo (já está no saldo atual)", () => {
+  const before = withTransactions([]);
+  const after = withTransactions([
+    tx({ account_id: "corrente", due_date: "2026-10-05", type: "Receita", value: 7000, status: "Recebido" }),
+  ]);
+  assert.equal(after.expectedInflows, 0);
+  assert.equal(after.availableBalance, (before.availableBalance ?? 0) + 7000);
+  assert.equal(after.canSave, (before.canSave ?? 0) + 7000, "entra uma única vez, via saldo");
+});
+
+test("7/8. entrada prevista removida ou alterada recalcula Pode guardar na próxima carga", () => {
+  const income = tx({ account_id: "corrente", due_date: "2026-10-28", type: "Receita", value: 7000, status: "Pendente" });
+  const withIncome = withTransactions([income]);
+  const removed = withTransactions([]);
+  const edited = withTransactions([{ ...income, value: 4000 }]);
+  assert.equal((withIncome.canSave ?? 0) - (removed.canSave ?? 0), 7000);
+  assert.equal((withIncome.canSave ?? 0) - (edited.canSave ?? 0), 3000);
+});
+
+test("Previsão de economia = Guardado no mês + Pode guardar (exemplo da regra)", () => {
+  const overview = withTransactions([
+    ...transfer("corrente", "cofrinho", "2026-10-05", 1000),
+    tx({ account_id: "corrente", due_date: "2026-10-28", type: "Receita", value: 7000, status: "Pendente" }),
+    tx({ account_id: "fixas", due_date: "2026-10-26", value: 3500, status: "Pendente" }),
+  ]);
+  assert.equal(overview.saved, 1000);
+  // saldo (6.000 - 1.000 guardado) + 7.000 entradas - 3.500 compromissos - 1.000 reserva
+  assert.equal(overview.canSave, 5000 + 7000 - 3500 - 1000);
+  assert.equal(overview.forecast, overview.saved + (overview.canSave ?? 0));
+});
+
+test("3. compromissos futuros reduzem Pode guardar e a previsão", () => {
   const before = withTransactions([]);
   const after = withTransactions([
     tx({ account_id: "fixas", due_date: "2026-10-20", value: 800, status: "Pendente" }),
   ]);
   assert.equal(after.commitments.fixedExpenses, 800);
-  assert.equal(after.canSaveToday, (before.canSaveToday ?? 0) - 800);
+  assert.equal(after.canSave, (before.canSave ?? 0) - 800);
   assert.equal(after.forecast, (before.forecast ?? 0) - 800);
 });
 
@@ -256,14 +286,14 @@ test("12. mês atual: realizado + disponível hoje + projeção", () => {
   const overview = withTransactions([tx({ account_id: "diaadia", due_date: "2026-10-03", value: 250 })]);
   assert.equal(overview.temporal, "current");
   assert.equal(overview.daysRemaining, 15);
-  assert.notEqual(overview.canSaveToday, null);
+  assert.notEqual(overview.canSave, null);
   assert.notEqual(overview.forecast, null);
   assert.equal(overview.monthResult, null);
   assert.equal(overview.reserve.variableRealized, 250);
   assert.equal(overview.reserve.variableExpectedMonth, 1250);
 });
 
-test("13. mês passado: só realizado, sem Pode guardar hoje nem projeção", () => {
+test("13. mês passado: só realizado, sem Pode guardar nem projeção", () => {
   const overview = buildFinancialOverview(baseInput({
     year: 2026,
     month: 9,
@@ -274,7 +304,7 @@ test("13. mês passado: só realizado, sem Pode guardar hoje nem projeção", ()
     ],
   }));
   assert.equal(overview.temporal, "past");
-  assert.equal(overview.canSaveToday, null);
+  assert.equal(overview.canSave, null);
   assert.equal(overview.forecast, null);
   assert.equal(overview.reserve.total, 0);
   assert.equal(overview.saved, 3000);
@@ -295,11 +325,10 @@ test("14. mês futuro: sem saldo de hoje; previsão = receitas - compromissos - 
   }));
   assert.equal(overview.temporal, "future");
   assert.equal(overview.availableBalance, null);
-  assert.equal(overview.canSaveToday, null);
   assert.equal(overview.reserve.total, 2000); // média mensal completa
   assert.equal(overview.forecast, 10000 - 3000 - 2000);
   assert.equal(overview.saved, 1000);
-  assert.equal(overview.remainingToSave, 5000 - 1000);
+  assert.equal(overview.canSave, 5000 - 1000, "futuro: previsão - guardado programado");
 });
 
 test("15. sem histórico: confiança baixa e reserva só com o que já foi lançado", () => {
@@ -346,8 +375,8 @@ test("19/20. alterar ou excluir um lançamento muda os indicadores na próxima c
   const original = withTransactions([expense]);
   const edited = withTransactions([{ ...expense, value: 500 }]);
   const deleted = withTransactions([]);
-  assert.equal((edited.canSaveToday ?? 0) - (original.canSaveToday ?? 0), 1000);
-  assert.equal((deleted.canSaveToday ?? 0) - (original.canSaveToday ?? 0), 1500);
+  assert.equal((edited.canSave ?? 0) - (original.canSave ?? 0), 1000);
+  assert.equal((deleted.canSave ?? 0) - (original.canSave ?? 0), 1500);
 });
 
 test("resgate da reserva reduz o guardado; aplicação via Investimentos conta como guardado", () => {
@@ -469,14 +498,13 @@ test("moeda 6/7/8. Reserva em moeda estrangeira não é compromisso, despesa nem
   assert.equal(past.income.realized, 0);
 });
 
-test("moeda 9. guardar R$ 2.000 em reserva EUR: saldo -2.000, guardado +2.000, Pode guardar hoje -2.000, previsão estável", () => {
+test("moeda 9. guardar R$ 2.000 em reserva EUR: saldo -2.000, guardado +2.000, Pode guardar -2.000, previsão estável", () => {
   const before = foreign([]);
   const after = foreign(transfer("corrente", "reservaEur", TODAY, 2000, 320));
   assert.equal(after.availableBalance, (before.availableBalance ?? 0) - 2000);
   assert.equal(after.saved, before.saved + 2000);
-  assert.equal(after.canSaveToday, (before.canSaveToday ?? 0) - 2000);
+  assert.equal(after.canSave, (before.canSave ?? 0) - 2000);
   assert.equal(after.forecast, before.forecast);
-  assert.equal(after.remainingToSave, (before.remainingToSave ?? 0) - 2000);
   assert.equal(after.commitments.total, before.commitments.total);
   assert.ok(!after.otherCurrencyAccounts.some((item) => item.id === "reservaEur"), "reserva não é caixa operacional");
 });
@@ -496,4 +524,12 @@ test("limitação documentada: resgate da Reserva EUR para conta fora do caixa B
     ...transfer("reservaEur", "operEur", "2026-10-12", 100, 100),
   ]);
   assert.equal(overview.saved, 2000);
+});
+
+test("4. reserva estimada maior reduz Pode guardar na mesma medida", () => {
+  const before = withTransactions([]);
+  const after = withTransactions([tx({ account_id: "diaadia", due_date: "2026-10-25", value: 1800, status: "Pendente" })]);
+  // reserva passa de 1.000 (histórico) para 1.800 (variável já lançado)
+  assert.equal(after.reserve.total - before.reserve.total, 800);
+  assert.equal((before.canSave ?? 0) - (after.canSave ?? 0), 800);
 });

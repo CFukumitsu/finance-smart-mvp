@@ -963,7 +963,7 @@ export default function AccountsPage() {
                   </p>
                   <p className="mt-1 text-xs text-slate-400">
                     Como esta {form.type === "Cartão" ? "conta/cartão" : "conta"} participa do
-                    planejamento (Pode guardar hoje, guardado e reserva).
+                    planejamento (Pode guardar, guardado e reserva).
                   </p>
                 </div>
 
