@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { ArrowRight, Coins, PiggyBank, Plus, Settings2, Target, TrendingUp } from "lucide-react";
+import { ArrowRight, Coins, PiggyBank, Plus, Settings2, SlidersHorizontal, Target, TrendingUp } from "lucide-react";
 import AppShell from "../../components/layout/AppShell";
 import { updateOverduePaymentStatusesOncePerDay } from "@/src/services/paymentStatusService";
 import {
@@ -13,6 +13,8 @@ import {
   buildFinancialOverview,
   CONFIDENCE_LABELS,
   describeConfidence,
+  describeReserveProjectionBasis,
+  describeReserveProjectionFallback,
   type FinancialOverview,
   type OverviewInput,
 } from "@/src/utils/financialOverview";
@@ -51,7 +53,7 @@ const METHODOLOGY = [
   "Saldo atual: saldo das contas marcadas como operacionais (último fechamento + lançamentos até hoje), já incluindo as receitas recebidas. Contas de reserva/investimento e contas fora do planejamento não entram.",
   "Entradas previstas: receitas lançadas com data futura no mês, recorrências de receita ainda não geradas e transferências previstas vindas de fora do planejamento. Receitas já recebidas não são somadas de novo.",
   "Compromissos: despesas, faturas e transferências para fora do planejamento que ainda vão acontecer no mês, recorrências ainda não geradas e faturas de cartão projetadas a partir das compras do mês anterior (quando a fatura ainda não foi lançada).",
-  "Reserva estimada: quanto você costuma gastar com despesas variáveis (débito/Pix, sem recorrências e parcelas) do dia seguinte até o fim do mês, pela média ponderada dos últimos 3 meses completos (pesos 3, 2 e 1). Se você já lançou gastos variáveis maiores que essa média, vale o valor lançado.",
+  "Reserva estimada: quanto você costuma gastar com despesas variáveis (débito/Pix, sem recorrências e parcelas) do dia seguinte até o fim do mês, no mesmo período do(s) mês(es) usado(s) como base. O modelo é escolhido em Configurações: média ponderada dos últimos 3 meses completos (pesos 3, 2 e 1, o padrão), último mês ou mês de referência. Meses marcados como desconsiderados são pulados. Se você já lançou gastos variáveis maiores que essa estimativa, vale o valor lançado.",
   "Guardado: transferências e aplicações cujo destino é uma conta de reserva/investimento, menos os resgates. Como esse dinheiro já saiu do saldo, ele não é descontado de novo.",
   "Somente a moeda principal (BRL) é somada; contas em outras moedas aparecem à parte, sem conversão.",
 ];
@@ -143,6 +145,12 @@ export default function FinancialOverviewPage() {
               <p className="mt-1 text-sm text-slate-400">{subtitle}</p>
             </div>
             <div className="flex gap-2">
+              <Link href="/overview/settings"
+                className="inline-flex min-h-11 flex-1 items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/5 px-4 text-sm font-semibold text-white hover:bg-white/10 sm:flex-none"
+                title="Configurações da Visão Financeira (modelo da reserva estimada)">
+                <SlidersHorizontal size={16} />
+                <span>Configurações</span>
+              </Link>
               <Link href="/accounts"
                 className="inline-flex min-h-11 flex-1 items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/5 px-4 text-sm font-semibold text-white hover:bg-white/10 sm:flex-none"
                 title="Configurar contas do planejamento">
@@ -587,6 +595,9 @@ function ReserveCard({ overview }: { overview: FinancialOverview }) {
   const { reserve } = overview;
   const [showBreakdown, setShowBreakdown] = useState(false);
   const usedMonths = reserve.historyMonths.filter((item) => item.accountsAvailable > 0);
+  const basis = describeReserveProjectionBasis(reserve.projection);
+  const fallbackWarning = describeReserveProjectionFallback(reserve.projection);
+  const isWeighted = reserve.projection.model === "weighted_average";
   if (overview.temporal === "past") {
     return (
       <section className="min-w-0 rounded-2xl border border-white/10 bg-slate-950/60 p-5" aria-label="Reserva">
@@ -594,14 +605,15 @@ function ReserveCard({ overview }: { overview: FinancialOverview }) {
         <p className="mt-2 text-sm text-slate-400">Mês encerrado: não há reserva a proteger.</p>
         <p className="mt-3 text-xs text-slate-400">
           Gastos variáveis realizados: <span className="font-semibold text-white">{money(reserve.variableRealized)}</span>
-          {" · "}média dos 3 meses anteriores: {money(reserve.historicalMonthlyAverage)}
+          {" · "}estimativa histórica do mês: {money(reserve.historicalMonthlyAverage)}
         </p>
+        <p className="mt-1 text-xs text-slate-400">Base da estimativa: {basis}</p>
       </section>
     );
   }
 
   const rows: [string, number, string?][] = [
-    [overview.temporal === "current" ? "Média histórica do período restante" : "Média histórica do mês", reserve.historicalEstimate],
+    [overview.temporal === "current" ? "Estimativa histórica do período restante" : "Estimativa histórica do mês", reserve.historicalEstimate],
     ["Gastos variáveis já lançados (previstos)", reserve.knownVariable, "Lançamentos variáveis futuros já registrados nas contas do histórico."],
     ["Estimado ainda não lançado", reserve.estimatedNotRegistered],
   ];
@@ -615,9 +627,16 @@ function ReserveCard({ overview }: { overview: FinancialOverview }) {
         </div>
         <span className="inline-flex items-center gap-1 rounded-full border border-white/10 px-2.5 py-1 text-xs text-slate-300">
           Confiança: <strong className="font-semibold">{CONFIDENCE_LABELS[reserve.confidence]}</strong>
-          <InfoTip text={describeConfidence(reserve.confidence, reserve.monthsAvailable)} />
+          <InfoTip text={describeConfidence(reserve.confidence, reserve.monthsAvailable, reserve.projection.model)} />
         </span>
       </div>
+
+      {fallbackWarning && (
+        <p role="status" className="mt-3 rounded-xl border border-orange-400/30 bg-orange-500/10 px-3 py-2 text-xs text-orange-300">
+          {fallbackWarning}{" "}
+          <Link href="/overview/settings" className="font-semibold underline underline-offset-2">Abrir configurações</Link>
+        </p>
+      )}
 
       {reserve.confidence === "indisponivel" ? (
         <p className="mt-3 text-sm text-slate-400">
@@ -638,13 +657,16 @@ function ReserveCard({ overview }: { overview: FinancialOverview }) {
           </div>
         ))}
         <div className="flex items-center justify-between gap-3 pt-1">
-          <dt className="text-slate-300">Reserva final (o maior entre média e já lançado)</dt>
+          <dt className="text-slate-300">Reserva final (o maior entre estimativa e já lançado)</dt>
           <dd className="whitespace-nowrap font-semibold tabular-nums text-orange-300">{money(reserve.total)}</dd>
         </div>
       </dl>
 
-      {usedMonths.length > 0 && (
-        <p className="mt-3 text-xs text-slate-400">
+      <p className="mt-3 text-xs text-slate-400">
+        Base da estimativa: <span className="text-slate-200">{basis}</span>
+      </p>
+      {isWeighted && usedMonths.length > 0 && (
+        <p className="mt-1 text-xs text-slate-400">
           Meses usados: {usedMonths.map((item) => `${monthShort(item.key)} (peso ${item.weight})`).join(", ")}.
         </p>
       )}
@@ -665,9 +687,8 @@ function ReserveCard({ overview }: { overview: FinancialOverview }) {
         onClose={() => setShowBreakdown(false)}
         breakdown={reserve.categoryBreakdown}
         untilLabel={shortDate(overview.monthEnd)}
-        basisLabel={reserve.categoryBreakdown.source === "historical" && usedMonths.length > 0
-          ? usedMonths.map((item) => monthShort(item.key)).join(", ")
-          : null}
+        basisLabel={basis}
+        basisWarning={fallbackWarning}
         isFutureMonth={overview.temporal === "future"}
         formatCurrency={money}
       />
@@ -741,7 +762,7 @@ function VariableSpendingCard({ overview }: { overview: FinancialOverview }) {
         </>
       )}
       <p className="mt-3 text-xs text-slate-400">
-        Média histórica mensal: {money(reserve.historicalMonthlyAverage)}
+        Estimativa histórica mensal: {money(reserve.historicalMonthlyAverage)}
         {overview.temporal === "current" ? ` · ${overview.daysRemaining} dias restantes` : ""}
       </p>
       <Link href="/analytics/expenses" className="mt-auto inline-flex min-h-10 items-center gap-1 pt-3 text-sm font-semibold text-blue-300 hover:text-blue-200">

@@ -5,14 +5,23 @@ import {
   buildFinancialOverview,
   calculateAccountBalanceAt,
   classifyConfidence,
+  DEFAULT_RESERVE_PROJECTION_SETTINGS,
+  describeReserveProjectionBasis,
+  describeReserveProjectionFallback,
   estimateVariableSpending,
   getHistoryMonths,
   getTemporal,
+  isReserveProjectionModel,
   isVariableExpense,
+  monthsRequiredFor,
+  planReserveProjection,
+  RESERVE_PROJECTION_MODELS,
   resolvePlanningRole,
+  roundMoney,
   type OverviewAccount,
   type OverviewInput,
   type OverviewTransaction,
+  type ReserveProjectionSettings,
   // @ts-expect-error Node's native TypeScript test runner requires the extension.
 } from "./financialOverview.ts";
 
@@ -678,4 +687,164 @@ test("cat 19. adicionar, editar e excluir lançamento atualiza o detalhamento", 
   assert.equal(amount(added), 90 + 1500); // 90 + 3*3000/6
   assert.equal(amount(edited), 90 + 150);
   assert.deepEqual(byCategory([]).reserve.categoryBreakdown, base.reserve.categoryBreakdown);
+});
+
+// ---------------------------------------------------------------------------
+// Modelos de projeção da reserva estimada
+// ---------------------------------------------------------------------------
+
+// Um valor distinto por mês (depois do dia 16) para identificar a base usada.
+const projectionHistory = ([["2026-06", 600], ["2026-07", 700], ["2026-08", 800], ["2026-09", 900]] as const)
+  .flatMap(([key, after]) => [
+    tx({ account_id: "diaadia", due_date: `${key}-05`, value: 100 }),
+    tx({ account_id: "diaadia", due_date: `${key}-20`, value: after }),
+  ]);
+const projectionInput = (
+  reserveSettings: ReserveProjectionSettings | undefined,
+  patch: Partial<OverviewInput> = {},
+): OverviewInput => baseInput({ transactions: projectionHistory, reserveSettings, ...patch });
+const settings = (patch: Partial<ReserveProjectionSettings>): ReserveProjectionSettings => ({
+  model: "weighted_average",
+  referenceMonth: null,
+  excludedMonths: [],
+  ...patch,
+});
+const allFinite = (overview: ReturnType<typeof buildFinancialOverview>) => [
+  overview.reserve.total, overview.reserve.historicalEstimate, overview.reserve.historicalMonthlyAverage,
+  overview.reserve.estimatedNotRegistered, overview.canSave ?? 0, overview.forecast ?? 0,
+].every(Number.isFinite);
+
+test("modelo 1. usuário sem configuração mantém a média ponderada, idêntica ao default explícito", () => {
+  const withoutSettings = buildFinancialOverview(projectionInput(undefined));
+  const withDefault = buildFinancialOverview(projectionInput(DEFAULT_RESERVE_PROJECTION_SETTINGS));
+  assert.equal(withoutSettings.reserve.projection.model, "weighted_average");
+  assert.equal(withoutSettings.reserve.projection.requestedModel, "weighted_average");
+  assert.equal(withoutSettings.reserve.projection.fallback, null);
+  assert.deepEqual(withoutSettings, withDefault);
+});
+
+test("modelo 2. média ponderada: mesmos meses e pesos da regra anterior (3/2/1 nos 3 meses completos)", () => {
+  assert.deepEqual(getHistoryMonths(2026, 10, TODAY, []), getHistoryMonths(2026, 10, TODAY));
+  assert.deepEqual(getHistoryMonths(2026, 10, TODAY).map((item) => [item.key, item.weight]), [
+    ["2026-09", 3], ["2026-08", 2], ["2026-07", 1],
+  ]);
+  const overview = buildFinancialOverview(projectionInput(settings({})));
+  assert.equal(overview.reserve.historicalEstimate, roundMoney((3 * 900 + 2 * 800 + 1 * 700) / 6));
+  assert.equal(overview.reserve.historicalMonthlyAverage, roundMoney((3 * 1000 + 2 * 900 + 1 * 800) / 6));
+  assert.equal(overview.reserve.confidence, "alta");
+  assert.equal(describeReserveProjectionBasis(overview.reserve.projection), "Média ponderada — 09/2026, 08/2026 e 07/2026");
+});
+
+test("modelo 3. último mês: usa só o último mês completo, no período equivalente ao restante do mês", () => {
+  const overview = buildFinancialOverview(projectionInput(settings({ model: "last_month" })));
+  assert.deepEqual(overview.reserve.projection.months.map((item) => item.key), ["2026-09"]);
+  assert.equal(overview.reserve.historicalEstimate, 900); // só o gasto de set depois do dia 16
+  assert.equal(overview.reserve.historicalMonthlyAverage, 1000);
+  assert.equal(overview.reserve.confidence, "alta");
+  assert.equal(describeReserveProjectionBasis(overview.reserve.projection), "Último mês — 09/2026");
+  // Hoje = 03/10: o período restante (04 a 31) inclui o gasto do dia 05 de setembro.
+  const early = buildFinancialOverview(projectionInput(settings({ model: "last_month" }), { today: "2026-10-03" }));
+  assert.equal(early.reserve.historicalEstimate, 1000);
+  // Mês futuro: base é o último mês completo antes do mês atual, mês inteiro.
+  const future = buildFinancialOverview(projectionInput(settings({ model: "last_month" }), { month: 11 }));
+  assert.deepEqual(future.reserve.projection.months.map((item) => item.key), ["2026-09"]);
+  assert.equal(future.reserve.historicalEstimate, 1000);
+});
+
+test("modelo 4. último mês desconsiderado: busca o mês válido anterior", () => {
+  const overview = buildFinancialOverview(projectionInput(settings({ model: "last_month", excludedMonths: ["2026-09"] })));
+  assert.deepEqual(overview.reserve.projection.months.map((item) => item.key), ["2026-08"]);
+  assert.equal(overview.reserve.historicalEstimate, 800);
+  const twoSkipped = buildFinancialOverview(projectionInput(settings({ model: "last_month", excludedMonths: ["2026-09", "2026-08"] })));
+  assert.equal(twoSkipped.reserve.historicalEstimate, 700);
+});
+
+test("modelo 5. mês de referência: usa o mês escolhido", () => {
+  const overview = buildFinancialOverview(projectionInput(settings({ model: "reference_month", referenceMonth: "2026-06" })));
+  assert.equal(overview.reserve.projection.model, "reference_month");
+  assert.equal(overview.reserve.projection.fallback, null);
+  assert.equal(overview.reserve.historicalEstimate, 600);
+  assert.equal(overview.reserve.historicalMonthlyAverage, 700);
+  assert.equal(describeReserveProjectionBasis(overview.reserve.projection), "Mês de referência — 06/2026");
+  assert.equal(describeReserveProjectionFallback(overview.reserve.projection), null);
+});
+
+test("modelo 6. mês de referência desconsiderado/inválido: volta para a média ponderada com aviso explícito", () => {
+  const excluded = buildFinancialOverview(projectionInput(settings({
+    model: "reference_month", referenceMonth: "2026-08", excludedMonths: ["2026-08"],
+  })));
+  assert.equal(excluded.reserve.projection.requestedModel, "reference_month");
+  assert.equal(excluded.reserve.projection.model, "weighted_average");
+  assert.equal(excluded.reserve.projection.fallback, "reference_month_excluded");
+  // A média ponderada também pula o mês desconsiderado: 09 (3), 07 (2), 06 (1).
+  assert.equal(excluded.reserve.historicalEstimate, roundMoney((3 * 900 + 2 * 700 + 1 * 600) / 6));
+  assert.match(describeReserveProjectionFallback(excluded.reserve.projection) ?? "", /08\/2026 está marcado como desconsiderado/);
+
+  const incomplete = planReserveProjection(2026, 10, TODAY, settings({ model: "reference_month", referenceMonth: "2026-10" }));
+  assert.equal(incomplete.fallback, "reference_month_incomplete");
+  const missing = planReserveProjection(2026, 10, TODAY, settings({ model: "reference_month", referenceMonth: null }));
+  assert.equal(missing.fallback, "reference_month_missing");
+  assert.equal(missing.model, "weighted_average");
+});
+
+test("modelo 7. mês sem dados suficientes não gera NaN/Infinity", () => {
+  // Antes do primeiro lançamento da conta: mês indisponível.
+  const beforeAccount = buildFinancialOverview(projectionInput(settings({ model: "reference_month", referenceMonth: "2025-12" })));
+  assert.equal(beforeAccount.reserve.historicalEstimate, 0);
+  assert.equal(beforeAccount.reserve.confidence, "baixa");
+  assert.ok(allFinite(beforeAccount));
+  // Mês disponível, mas sem nenhum gasto variável.
+  const empty = buildFinancialOverview(projectionInput(settings({ model: "reference_month", referenceMonth: "2026-05" })));
+  assert.equal(empty.reserve.historicalEstimate, 0);
+  assert.ok(allFinite(empty));
+  // Sem contas de histórico.
+  const noAccounts = buildFinancialOverview(projectionInput(settings({ model: "last_month" }), {
+    accounts: ACCOUNTS.map((item) => ({ ...item, use_spending_history: false })),
+  }));
+  assert.equal(noAccounts.reserve.confidence, "indisponivel");
+  assert.ok(allFinite(noAccounts));
+  // Média ponderada com vários meses desconsiderados.
+  const manyExcluded = buildFinancialOverview(projectionInput(settings({
+    excludedMonths: ["2026-09", "2026-08", "2026-07", "2026-06", "2026-05"],
+  })));
+  assert.deepEqual(manyExcluded.reserve.projection.months.map((item) => item.key), ["2026-04", "2026-03", "2026-02"]);
+  assert.equal(manyExcluded.reserve.historicalEstimate, 0);
+  assert.ok(allFinite(manyExcluded));
+});
+
+test("modelo 8. menos de 3 meses válidos na média ponderada: mesma regra de antes (renormaliza os pesos)", () => {
+  const recent = { diaadia: "2026-08-10", corrente: "2026-01-02" };
+  const overview = buildFinancialOverview(projectionInput(settings({}), { firstTransactionDateByAccount: recent }));
+  assert.equal(overview.reserve.historicalEstimate, roundMoney((3 * 900 + 2 * 800) / 5));
+  assert.equal(overview.reserve.monthsAvailable, 2);
+  assert.equal(overview.reserve.confidence, "media");
+  const withExcluded = buildFinancialOverview(projectionInput(settings({ excludedMonths: ["2026-09"] }), {
+    firstTransactionDateByAccount: recent,
+  }));
+  assert.equal(withExcluded.reserve.historicalEstimate, 800);
+  assert.equal(withExcluded.reserve.monthsAvailable, 1);
+});
+
+test("modelo 9. gastos variáveis já lançados maiores que a estimativa continuam protegendo a reserva", () => {
+  for (const model of RESERVE_PROJECTION_MODELS) {
+    const overview = buildFinancialOverview(projectionInput(settings({ model, referenceMonth: "2026-06" }), {
+      transactions: [...projectionHistory, tx({ account_id: "diaadia", due_date: "2026-10-28", value: 5000, status: "Pendente" })],
+    }));
+    assert.equal(overview.reserve.knownVariable, 5000, model);
+    assert.ok(overview.reserve.historicalEstimate < 5000, model);
+    assert.equal(overview.reserve.total, 5000, model);
+    assert.equal(overview.reserve.categoryBreakdown.source, "registered", model);
+  }
+});
+
+test("modelo 10. meses desconsiderados: pesos seguem a ordem dos 3 meses válidos", () => {
+  assert.deepEqual(getHistoryMonths(2026, 10, TODAY, ["2026-08"]).map((item) => [item.key, item.weight]), [
+    ["2026-09", 3], ["2026-07", 2], ["2026-06", 1],
+  ]);
+  // Mês futuro desconsiderado (planejamento antecipado) não afeta o histórico atual.
+  assert.deepEqual(getHistoryMonths(2026, 10, TODAY, ["2027-05"]), getHistoryMonths(2026, 10, TODAY));
+  assert.equal(classifyConfidence(1, monthsRequiredFor("last_month")), "alta");
+  assert.equal(classifyConfidence(1, monthsRequiredFor("weighted_average")), "media");
+  assert.ok(isReserveProjectionModel("reference_month"));
+  assert.ok(!isReserveProjectionModel("Média ponderada"));
 });

@@ -1,9 +1,11 @@
 import { getCurrentUserId, supabase } from "@/src/lib/supabase";
 import { ensureCompetenceExists } from "@/src/services/competenceService";
 import {
-  getHistoryMonths,
+  DEFAULT_RESERVE_PROJECTION_SETTINGS,
+  isReserveProjectionModel,
   monthEnd,
   monthStart,
+  planReserveProjection,
   resolvePlanningRole,
   shiftMonth,
   type OverviewAccount,
@@ -14,6 +16,8 @@ import {
   type OverviewRecurring,
   type OverviewTransaction,
   type PlanningRole,
+  type ReserveProjectionModel,
+  type ReserveProjectionSettings,
 } from "@/src/utils/financialOverview";
 
 const TRANSACTION_FIELDS =
@@ -46,7 +50,7 @@ export async function loadFinancialOverviewInput(params: {
   const ownerId = await getCurrentUserId();
   const previous = shiftMonth(params.year, params.month, -1);
 
-  const [accountsResponse, competencesResponse, closuresResponse, recurringResponse, categoriesResponse] = await Promise.all([
+  const [accountsResponse, competencesResponse, closuresResponse, recurringResponse, categoriesResponse, reserveSettings] = await Promise.all([
     supabase
       .from("accounts")
       .select(
@@ -66,6 +70,7 @@ export async function loadFinancialOverviewInput(params: {
     // Todas (inclusive inativas): o detalhamento da reserva mostra o nome da
     // categoria de qualquer gasto do histórico.
     supabase.from("categories").select("id, name").eq("owner_id", ownerId),
+    fetchReserveProjectionSettings(ownerId),
   ]);
 
   const accounts = (throwIfError(accountsResponse) ?? []) as OverviewAccount[];
@@ -88,9 +93,9 @@ export async function loadFinancialOverviewInput(params: {
   const operationalCards = accounts.filter((account) => account.active && account.type === "Cartão" && role(account) === "operational");
   const historyAccounts = operationalCash.filter((account) => account.use_spending_history !== false);
 
-  const historyMonths = getHistoryMonths(params.year, params.month, params.today);
-  const historyStart = monthStart(historyMonths[historyMonths.length - 1].year, historyMonths[historyMonths.length - 1].month);
-  const historyEnd = monthEnd(historyMonths[0].year, historyMonths[0].month);
+  // Meses-base conforme o modelo da reserva (mesma regra usada no cálculo).
+  const historyMonths = [...planReserveProjection(params.year, params.month, params.today, reserveSettings).months]
+    .sort((left, right) => left.key.localeCompare(right.key));
 
   const transactionsById = new Map<string, OverviewTransaction>();
   const addAll = (rows: OverviewTransaction[]) => rows.forEach((row) => transactionsById.set(row.id, row));
@@ -112,7 +117,11 @@ export async function loadFinancialOverviewInput(params: {
         .order("id").range(from, to)).then(addAll));
   }
 
-  if (historyAccounts.length > 0) {
+  if (historyAccounts.length > 0 && historyMonths.length > 0) {
+    const first = historyMonths[0];
+    const last = historyMonths[historyMonths.length - 1];
+    const historyStart = monthStart(first.year, first.month);
+    const historyEnd = monthEnd(last.year, last.month);
     tasks.push(fetchAllPages<OverviewTransaction>((from, to) =>
       supabase.from("transactions").select(TRANSACTION_FIELDS)
         .eq("owner_id", ownerId).eq("type", "Despesa")
@@ -223,7 +232,95 @@ export async function loadFinancialOverviewInput(params: {
     savingsGoal,
     cardTargets,
     categoryNames,
+    reserveSettings,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Modelo da reserva estimada (Configurações da Visão Financeira)
+// ---------------------------------------------------------------------------
+
+/** "YYYY-MM-DD" (primeiro dia, como gravado) -> "YYYY-MM". */
+const toMonthKey = (date: string) => date.slice(0, 7);
+/** "YYYY-MM" -> primeiro dia do mês, formato da coluna date. */
+const toMonthDate = (key: string) => `${key}-01`;
+
+export type ProjectionExcludedMonth = { month: string; note: string | null };
+
+async function fetchReserveProjectionSettings(ownerId: string): Promise<ReserveProjectionSettings> {
+  const [settingsResponse, excludedResponse] = await Promise.all([
+    supabase.from("financial_overview_settings")
+      .select("reserve_projection_model, reserve_reference_month")
+      .eq("owner_id", ownerId).maybeSingle(),
+    supabase.from("projection_excluded_months").select("month").eq("owner_id", ownerId),
+  ]);
+  const settings = throwIfError(settingsResponse) as
+    { reserve_projection_model: string; reserve_reference_month: string | null } | null;
+  const excluded = (throwIfError(excludedResponse) ?? []) as { month: string }[];
+  // Sem linha (usuário existente) = média ponderada, o comportamento original.
+  return {
+    model: isReserveProjectionModel(settings?.reserve_projection_model)
+      ? settings.reserve_projection_model
+      : DEFAULT_RESERVE_PROJECTION_SETTINGS.model,
+    referenceMonth: settings?.reserve_reference_month ? toMonthKey(settings.reserve_reference_month) : null,
+    excludedMonths: excluded.map((item) => toMonthKey(item.month)),
+  };
+}
+
+export async function loadReserveProjectionSettings(): Promise<{
+  settings: ReserveProjectionSettings;
+  excludedMonths: ProjectionExcludedMonth[];
+}> {
+  const ownerId = await getCurrentUserId();
+  const [settings, excludedResponse] = await Promise.all([
+    fetchReserveProjectionSettings(ownerId),
+    supabase.from("projection_excluded_months").select("month, note")
+      .eq("owner_id", ownerId).order("month", { ascending: false }),
+  ]);
+  const excludedMonths = ((throwIfError(excludedResponse) ?? []) as { month: string; note: string | null }[])
+    .map((item) => ({ month: toMonthKey(item.month), note: item.note }));
+  return { settings, excludedMonths };
+}
+
+/** Grava o modelo padrão; o mês de referência é obrigatório só no modelo reference_month. */
+export async function saveReserveProjectionModel(params: {
+  model: ReserveProjectionModel;
+  referenceMonth: string | null;
+}) {
+  if (params.model === "reference_month" && !params.referenceMonth) {
+    throw new Error("Escolha o mês de referência.");
+  }
+  const ownerId = await getCurrentUserId();
+  const { error } = await supabase.from("financial_overview_settings").upsert(
+    {
+      owner_id: ownerId,
+      reserve_projection_model: params.model,
+      reserve_reference_month: params.referenceMonth ? toMonthDate(params.referenceMonth) : null,
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: "owner_id" },
+  );
+  if (error) throw new Error(error.message);
+}
+
+export async function addProjectionExcludedMonth(params: { month: string; note: string | null }) {
+  const ownerId = await getCurrentUserId();
+  const { error } = await supabase.from("projection_excluded_months").insert({
+    owner_id: ownerId,
+    month: toMonthDate(params.month),
+    note: params.note?.trim() ? params.note.trim() : null,
+  });
+  if (error) {
+    if (error.code === "23505") throw new Error("Este mês já está desconsiderado.");
+    throw new Error(error.message);
+  }
+}
+
+export async function removeProjectionExcludedMonth(month: string) {
+  const ownerId = await getCurrentUserId();
+  const { error } = await supabase.from("projection_excluded_months").delete()
+    .eq("owner_id", ownerId).eq("month", toMonthDate(month));
+  if (error) throw new Error(error.message);
 }
 
 /** Meta de economia da competência: valor > 0 grava; vazio remove. */

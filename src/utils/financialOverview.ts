@@ -107,6 +107,8 @@ export type OverviewInput = {
   cardTargets: Record<string, number>;
   /** Nomes das categorias (id -> nome), para o detalhamento da reserva. */
   categoryNames?: Record<string, string>;
+  /** Modelo da reserva estimada. Ausente = média ponderada, sem meses desconsiderados. */
+  reserveSettings?: ReserveProjectionSettings;
 };
 
 export type Temporal = "past" | "current" | "future";
@@ -245,19 +247,157 @@ export type HistoryMonth = {
   weight: number;
 };
 
-export function getHistoryMonths(year: number, month: number, today: string): HistoryMonth[] {
-  // Meses COMPLETOS: antes do mês selecionado e nunca depois do mês atual.
+/** Mês a partir do qual o histórico conta para trás: o selecionado, nunca depois do atual. */
+function historyAnchor(year: number, month: number, today: string) {
   const currentYear = Number(today.slice(0, 4));
   const currentMonth = Number(today.slice(5, 7));
-  const reference =
-    year * 100 + month <= currentYear * 100 + currentMonth
-      ? { year, month }
-      : { year: currentYear, month: currentMonth };
+  return year * 100 + month <= currentYear * 100 + currentMonth
+    ? { year, month }
+    : { year: currentYear, month: currentMonth };
+}
 
-  return HISTORY_WEIGHTS.map((weight, index) => {
-    const shifted = shiftMonth(reference.year, reference.month, -(index + 1));
-    return { ...shifted, key: `${shifted.year}-${pad(shifted.month)}`, weight };
+/**
+ * Os `count` meses COMPLETOS mais recentes antes da âncora, pulando os meses
+ * desconsiderados (chaves YYYY-MM). A busca termina porque a lista de meses
+ * desconsiderados é finita.
+ */
+function collectValidMonths(anchor: { year: number; month: number }, count: number, excluded: ReadonlySet<string>) {
+  const result: { year: number; month: number; key: string }[] = [];
+  for (let offset = 1; result.length < count && offset <= count + excluded.size; offset += 1) {
+    const shifted = shiftMonth(anchor.year, anchor.month, -offset);
+    const key = `${shifted.year}-${pad(shifted.month)}`;
+    if (!excluded.has(key)) result.push({ ...shifted, key });
+  }
+  return result;
+}
+
+export function getHistoryMonths(
+  year: number,
+  month: number,
+  today: string,
+  excludedMonths: readonly string[] = [],
+): HistoryMonth[] {
+  // Meses COMPLETOS: antes do mês selecionado e nunca depois do mês atual.
+  // Meses desconsiderados são pulados; os pesos seguem a ordem dos válidos.
+  const months = collectValidMonths(historyAnchor(year, month, today), HISTORY_WEIGHTS.length, new Set(excludedMonths));
+  return months.map((item, index) => ({ ...item, weight: HISTORY_WEIGHTS[index] }));
+}
+
+// ---------------------------------------------------------------------------
+// Modelo de projeção da reserva (configuração global do usuário)
+// ---------------------------------------------------------------------------
+
+/** Identificadores estáveis (persistidos); a regra nunca depende dos rótulos. */
+export const RESERVE_PROJECTION_MODELS = ["weighted_average", "last_month", "reference_month"] as const;
+export type ReserveProjectionModel = (typeof RESERVE_PROJECTION_MODELS)[number];
+export const DEFAULT_RESERVE_PROJECTION_MODEL: ReserveProjectionModel = "weighted_average";
+
+export const RESERVE_PROJECTION_MODEL_LABELS: Record<ReserveProjectionModel, string> = {
+  weighted_average: "Média ponderada (3 meses)",
+  last_month: "Último mês",
+  reference_month: "Mês de referência",
+};
+
+export type ReserveProjectionSettings = {
+  model: ReserveProjectionModel;
+  /** YYYY-MM; usado somente no modelo "reference_month". */
+  referenceMonth: string | null;
+  /** Meses (YYYY-MM) que não entram em nenhuma projeção. */
+  excludedMonths: string[];
+};
+
+export const DEFAULT_RESERVE_PROJECTION_SETTINGS: ReserveProjectionSettings = {
+  model: DEFAULT_RESERVE_PROJECTION_MODEL,
+  referenceMonth: null,
+  excludedMonths: [],
+};
+
+export function isReserveProjectionModel(value: unknown): value is ReserveProjectionModel {
+  return typeof value === "string" && (RESERVE_PROJECTION_MODELS as readonly string[]).includes(value);
+}
+
+/**
+ * Por que o modelo escolhido não pôde ser usado. Nesses casos a projeção volta
+ * para o modelo padrão (média ponderada) e a interface avisa explicitamente.
+ */
+export type ReserveProjectionFallback =
+  | "reference_month_missing"
+  | "reference_month_excluded"
+  | "reference_month_incomplete";
+
+export type ReserveProjectionPlan = {
+  requestedModel: ReserveProjectionModel;
+  /** Modelo efetivamente usado (difere do pedido somente quando há fallback). */
+  model: ReserveProjectionModel;
+  fallback: ReserveProjectionFallback | null;
+  referenceMonth: string | null;
+  months: HistoryMonth[];
+};
+
+/** Meses-base da estimativa histórica conforme o modelo configurado. */
+export function planReserveProjection(
+  year: number,
+  month: number,
+  today: string,
+  settings: ReserveProjectionSettings = DEFAULT_RESERVE_PROJECTION_SETTINGS,
+): ReserveProjectionPlan {
+  const excluded = new Set(settings.excludedMonths);
+  const requestedModel = isReserveProjectionModel(settings.model) ? settings.model : DEFAULT_RESERVE_PROJECTION_MODEL;
+  const referenceMonth = settings.referenceMonth;
+  const base = { requestedModel, referenceMonth };
+  const weighted = (fallback: ReserveProjectionFallback | null): ReserveProjectionPlan => ({
+    ...base,
+    model: "weighted_average",
+    fallback,
+    months: getHistoryMonths(year, month, today, settings.excludedMonths),
   });
+
+  if (requestedModel === "last_month") {
+    const [last] = collectValidMonths(historyAnchor(year, month, today), 1, excluded);
+    return { ...base, model: "last_month", fallback: null, months: last ? [{ ...last, weight: 1 }] : [] };
+  }
+
+  if (requestedModel === "reference_month") {
+    if (!referenceMonth || !/^\d{4}-(0[1-9]|1[0-2])$/.test(referenceMonth)) return weighted("reference_month_missing");
+    if (excluded.has(referenceMonth)) return weighted("reference_month_excluded");
+    // Só mês completo: anterior ao mês atual.
+    if (referenceMonth >= today.slice(0, 7)) return weighted("reference_month_incomplete");
+    const [refYear, refMonth] = referenceMonth.split("-").map(Number);
+    return {
+      ...base,
+      model: "reference_month",
+      fallback: null,
+      months: [{ year: refYear, month: refMonth, key: referenceMonth, weight: 1 }],
+    };
+  }
+
+  return weighted(null);
+}
+
+const formatMonthLong = (key: string) => `${key.slice(5, 7)}/${key.slice(0, 4)}`;
+
+function joinPortuguese(items: string[]) {
+  if (items.length <= 1) return items.join("");
+  return `${items.slice(0, -1).join(", ")} e ${items[items.length - 1]}`;
+}
+
+/** Ex.: "Média ponderada — 09/2026, 08/2026 e 07/2026". */
+export function describeReserveProjectionBasis(plan: Pick<ReserveProjectionPlan, "model" | "months">) {
+  const label = plan.model === "weighted_average" ? "Média ponderada" : RESERVE_PROJECTION_MODEL_LABELS[plan.model];
+  const months = plan.months.map((item) => formatMonthLong(item.key));
+  return months.length > 0 ? `${label} — ${joinPortuguese(months)}` : `${label} — nenhum mês disponível`;
+}
+
+/** Aviso explícito quando o modelo escolhido não pôde ser usado. */
+export function describeReserveProjectionFallback(plan: Pick<ReserveProjectionPlan, "fallback" | "referenceMonth">) {
+  if (!plan.fallback) return null;
+  const month = plan.referenceMonth ? formatMonthLong(plan.referenceMonth) : "";
+  const reason = plan.fallback === "reference_month_excluded"
+    ? `O mês de referência ${month} está marcado como desconsiderado nas projeções.`
+    : plan.fallback === "reference_month_incomplete"
+      ? `O mês de referência ${month} ainda não está completo.`
+      : "Nenhum mês de referência foi escolhido.";
+  return `${reason} Enquanto isso, a reserva usa a média ponderada. Ajuste em Configurações da Visão Financeira.`;
 }
 
 /**
@@ -463,13 +603,19 @@ export function buildReserveCategoryBreakdown(params: {
 /**
  * Regra objetiva: sem contas de histórico -> indisponível; 0 meses completos
  * -> baixa; 1 ou 2 -> média; 3 -> alta. Usa o menor número de meses entre as
- * contas que entram no histórico.
+ * contas que entram no histórico. Modelos de um único mês (último mês / mês
+ * de referência) exigem 1 mês para "alta".
  */
-export function classifyConfidence(monthsAvailable: number | null): Confidence {
+export function classifyConfidence(monthsAvailable: number | null, monthsRequired: number = HISTORY_MONTHS): Confidence {
   if (monthsAvailable === null) return "indisponivel";
-  if (monthsAvailable >= HISTORY_MONTHS) return "alta";
+  if (monthsAvailable >= monthsRequired) return "alta";
   if (monthsAvailable >= 1) return "media";
   return "baixa";
+}
+
+/** Meses exigidos para confiança "alta" em cada modelo. */
+export function monthsRequiredFor(model: ReserveProjectionModel) {
+  return model === "weighted_average" ? HISTORY_MONTHS : 1;
 }
 
 export function roundMoney(value: number) {
@@ -524,6 +670,8 @@ export type FinancialOverview = {
     monthsAvailable: number | null;
     historyMonths: HistoryEstimate["months"];
     historyAccounts: number;
+    /** Modelo e meses-base que geraram a estimativa histórica. */
+    projection: ReserveProjectionPlan;
     /** Decomposição da MESMA reserva final por categoria (fecha em centavos). */
     categoryBreakdown: ReserveCategoryBreakdown;
   };
@@ -776,11 +924,13 @@ export function buildFinancialOverview(input: OverviewInput): FinancialOverview 
     commitments.recurringNotGenerated + commitments.transfersOut,
   );
 
-  // Reserva para gastos variáveis.
-  const historyMonths = getHistoryMonths(input.year, input.month, input.today);
+  // Reserva para gastos variáveis. O modelo configurado só escolhe os
+  // meses-base; o cálculo (período restante, disponibilidade por conta) e a
+  // proteção pelos já lançados são os mesmos para todos os modelos.
+  const projection = planReserveProjection(input.year, input.month, input.today, input.reserveSettings);
   const estimate = estimateVariableSpending({
     historyAccounts,
-    historyMonths,
+    historyMonths: projection.months,
     transactions: input.transactions,
     firstTransactionDateByAccount: input.firstTransactionDateByAccount,
     afterDay: temporal === "current" ? todayDay : 0,
@@ -797,9 +947,10 @@ export function buildFinancialOverview(input: OverviewInput): FinancialOverview 
     historicalMonthlyAverage: estimate.fullMonth,
     variableRealized: roundMoney(variableRealized),
     variableExpectedMonth: roundMoney(variableRealized + reserveTotal),
-    confidence: classifyConfidence(estimate.monthsAvailable),
+    confidence: classifyConfidence(estimate.monthsAvailable, monthsRequiredFor(projection.model)),
     monthsAvailable: estimate.monthsAvailable,
     historyMonths: estimate.months,
+    projection,
     historyAccounts: historyAccounts.length,
     // D1: a reserva é o maior entre histórico e já lançados. A composição
     // segue a mesma origem: se vale o histórico, decompõe o histórico (os
@@ -905,12 +1056,20 @@ export const CONFIDENCE_LABELS: Record<Confidence, string> = {
   indisponivel: "Indisponível",
 };
 
-export function describeConfidence(confidence: Confidence, monthsAvailable: number | null) {
+export function describeConfidence(
+  confidence: Confidence,
+  monthsAvailable: number | null,
+  model: ReserveProjectionModel = DEFAULT_RESERVE_PROJECTION_MODEL,
+) {
   if (confidence === "indisponivel") {
     return "Nenhuma conta está configurada para entrar no histórico de gastos.";
   }
   if (confidence === "baixa") {
-    return "Histórico insuficiente: nenhum mês completo disponível para estimar a reserva.";
+    return model === "weighted_average"
+      ? "Histórico insuficiente: nenhum mês completo disponível para estimar a reserva."
+      : "Histórico insuficiente: o mês usado como base não tem dados disponíveis nas contas do histórico.";
   }
+  if (model === "last_month") return "Baseada no último mês completo válido (mesmo período do mês).";
+  if (model === "reference_month") return "Baseada no mês de referência escolhido (mesmo período do mês).";
   return `Baseada em ${monthsAvailable} de ${HISTORY_MONTHS} meses completos de histórico (média ponderada, meses recentes pesam mais).`;
 }

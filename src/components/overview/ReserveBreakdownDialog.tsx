@@ -15,6 +15,7 @@ export function ReserveBreakdownDialog({
   breakdown,
   untilLabel,
   basisLabel,
+  basisWarning,
   isFutureMonth,
   formatCurrency,
 }: {
@@ -22,7 +23,10 @@ export function ReserveBreakdownDialog({
   onClose: () => void;
   breakdown: ReserveCategoryBreakdown;
   untilLabel: string;
-  basisLabel: string | null;
+  /** Modelo e meses que geraram a estimativa histórica (ex.: "Último mês — 09/2026"). */
+  basisLabel: string;
+  /** Aviso quando o modelo escolhido não pôde ser usado. */
+  basisWarning: string | null;
   isFutureMonth: boolean;
   formatCurrency: (value: number) => string;
 }) {
@@ -65,6 +69,10 @@ export function ReserveBreakdownDialog({
               {formatCurrency(breakdown.total)}
             </p>
             <p className="mt-1 text-xs text-slate-400">{subtitle}</p>
+            <p className="mt-2 text-xs text-slate-400">
+              Base da estimativa: <span className="font-semibold text-slate-200">{basisLabel}</span>
+            </p>
+            {basisWarning && <p className="mt-1 text-xs text-orange-300">{basisWarning}</p>}
           </div>
           <button ref={closeRef} type="button" onClick={onClose} aria-label="Fechar detalhamento"
             className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-slate-400 hover:bg-white/10 hover:text-white">
@@ -112,7 +120,6 @@ export function ReserveBreakdownDialog({
               : isFutureMonth
                 ? "Estimativa baseada no seu padrão de gastos para o mês."
                 : "Estimativa baseada no seu padrão de gastos para o período restante do mês."}
-            {basisLabel ? ` Base: ${basisLabel}.` : ""}
           </p>
         </div>
       </div>
