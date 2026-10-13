@@ -17,6 +17,14 @@ import {
 } from "lucide-react";
 import AppShell from "../../../components/layout/AppShell";
 import { getCurrentUserId, supabase } from "@/src/lib/supabase";
+import ViewModeToggle from "@/src/components/ui/viewMode/ViewModeToggle";
+import { useViewMode } from "@/src/components/ui/viewMode/useViewMode";
+import { VIEW_MODE_SCREENS } from "@/src/components/ui/viewMode/viewPreferences";
+import {
+  VIEW_MODE_TOGGLE_WRAPPER_CLASS,
+  viewModeCardsClass,
+  viewModeTableClass,
+} from "@/src/components/ui/viewMode/viewModeLayout";
 import { confirmAction, notify } from "@/src/components/ui/feedback/feedbackStore";
 
 type Vehicle = {
@@ -63,6 +71,12 @@ const emptyForm = {
 export default function VehiclesPage() {
   const mutation = useMutation();
   const router = useRouter();
+  const {
+    mode: viewMode,
+    setMode: setViewMode,
+    hasException: viewModeHasException,
+    defaultMode: defaultViewMode,
+  } = useViewMode(VIEW_MODE_SCREENS.fuelVehicles);
 
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -445,14 +459,26 @@ export default function VehiclesPage() {
             </p>
           </div>
 
-          <button
-            type="button"
-            onClick={openNewVehicleDrawer}
-            className="flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white hover:bg-blue-500 md:w-auto"
-          >
-            <Plus size={18} />
-            Novo veículo
-          </button>
+          <div className="flex flex-col gap-3 md:flex-row md:items-center">
+            {/* No celular a tela usa sempre cartões (a tabela tem 920px). */}
+            <div className={VIEW_MODE_TOGGLE_WRAPPER_CLASS}>
+              <ViewModeToggle
+                mode={viewMode}
+                onChange={setViewMode}
+                hasException={viewModeHasException}
+                defaultMode={defaultViewMode}
+              />
+            </div>
+
+            <button
+              type="button"
+              onClick={openNewVehicleDrawer}
+              className="flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white hover:bg-blue-500 md:w-auto"
+            >
+              <Plus size={18} />
+              Novo veículo
+            </button>
+          </div>
         </div>
 
         <div className="grid gap-4 md:grid-cols-3">
@@ -526,7 +552,155 @@ export default function VehiclesPage() {
           </select>
         </div>
 
-        <div className="w-full overflow-x-auto rounded-2xl border border-white/10 bg-slate-950/60">
+        <div className={viewModeCardsClass(viewMode)}>
+          {isLoading && (
+            <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-5 text-center text-sm text-slate-400 md:col-span-full">
+              Carregando veículos...
+            </div>
+          )}
+
+          {!isLoading &&
+            filteredVehicles.map((vehicle) => {
+              const brandModel = [vehicle.brand, vehicle.model]
+                .filter(Boolean)
+                .join(" ");
+
+              return (
+                <div
+                  key={vehicle.id}
+                  className={`rounded-2xl border bg-slate-950/60 p-4 ${
+                    vehicle.is_default && vehicle.active
+                      ? "border-amber-400/30"
+                      : "border-white/10"
+                  }`}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex min-w-0 items-start gap-3">
+                      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-500/10 text-blue-300">
+                        <Car size={18} aria-hidden="true" />
+                      </span>
+                      <div className="min-w-0">
+                        <h3 className="break-words font-semibold text-white">
+                          {vehicle.name}
+                        </h3>
+                        <p className="mt-0.5 truncate text-xs text-slate-400">
+                          {[brandModel, vehicle.model_year]
+                            .filter(Boolean)
+                            .join(" · ") || "Marca e modelo não informados"}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex shrink-0 gap-1">
+                  {vehicle.active &&
+                    !vehicle.is_default && (
+                      <ProcessingButton busy={mutation.pending === ("setDefaultVehicle" + ":" + (vehicle).id)} disabled={mutation.isPending}
+                        type="button"
+                        onClick={() =>
+                          setDefaultVehicle(vehicle)
+                        }
+                        title="Definir como veículo padrão"
+                        className="rounded-lg p-2 text-amber-300 hover:bg-amber-500/10"
+                      >
+                        <Star size={18} />
+                      </ProcessingButton>
+                    )}
+
+                  <button
+                    type="button"
+                    onClick={() =>
+                      openEditVehicleDrawer(vehicle)
+                    }
+                    title="Editar"
+                    className="rounded-lg p-2 text-blue-400 hover:bg-blue-500/10 hover:text-blue-300"
+                  >
+                    <Pencil size={18} />
+                  </button>
+
+                  <ProcessingButton busy={mutation.pending === ("toggleVehicleStatus" + ":" + (vehicle).id)} disabled={mutation.isPending}
+                    type="button"
+                    onClick={() =>
+                      toggleVehicleStatus(vehicle)
+                    }
+                    title={
+                      vehicle.active
+                        ? "Inativar"
+                        : "Ativar"
+                    }
+                    className={`rounded-lg p-2 ${
+                      vehicle.active
+                        ? "text-red-400 hover:bg-red-500/10"
+                        : "text-emerald-400 hover:bg-emerald-500/10"
+                    }`}
+                  >
+                    {vehicle.active ? (
+                      <PowerOff size={18} />
+                    ) : (
+                      <Power size={18} />
+                    )}
+                  </ProcessingButton>
+                    </div>
+                  </div>
+
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {vehicle.is_default && vehicle.active && (
+                      <span
+                        title="Veículo padrão"
+                        className="inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-2.5 py-1 text-xs font-semibold text-amber-300"
+                      >
+                        <Star size={12} className="fill-amber-300" aria-hidden="true" />
+                        Padrão
+                      </span>
+                    )}
+                    <span
+                      className={`rounded-full px-2.5 py-1 text-xs font-semibold ${
+                        vehicle.active
+                          ? "bg-emerald-500/10 text-emerald-300"
+                          : "bg-slate-500/10 text-slate-400"
+                      }`}
+                    >
+                      {vehicle.active ? "Ativo" : "Inativo"}
+                    </span>
+                  </div>
+
+                  <div className="mt-3 grid grid-cols-3 gap-2 text-sm">
+                    <div className="min-w-0 rounded-xl bg-white/[0.03] p-2.5">
+                      <p className="text-xs text-slate-500">Placa</p>
+                      <p className="mt-0.5 truncate font-semibold text-slate-200">
+                        {vehicle.plate ?? "-"}
+                      </p>
+                    </div>
+                    <div className="min-w-0 rounded-xl bg-white/[0.03] p-2.5">
+                      <p className="text-xs text-slate-500">Combustível</p>
+                      <p className="mt-0.5 truncate font-semibold text-slate-200">
+                        {vehicle.fuel_type}
+                      </p>
+                    </div>
+                    <div className="min-w-0 rounded-xl bg-white/[0.03] p-2.5">
+                      <p className="text-xs text-slate-500">Tanque</p>
+                      <p className="mt-0.5 truncate font-semibold text-slate-200">
+                        {vehicle.tank_capacity !== null
+                          ? `${Number(
+                              vehicle.tank_capacity
+                            ).toLocaleString("pt-BR")} L`
+                          : "-"}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+
+          {!isLoading && filteredVehicles.length === 0 && (
+            <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-5 text-center text-sm text-slate-400 md:col-span-full">
+              Nenhum veículo encontrado.
+            </div>
+          )}
+        </div>
+
+        <div
+          className={`${viewModeTableClass(viewMode)} w-full overflow-x-auto rounded-2xl border border-white/10 bg-slate-950/60`}
+        >
           <table className="min-w-[920px] w-full text-left text-sm">
             <thead className="bg-slate-900 text-slate-300">
               <tr>

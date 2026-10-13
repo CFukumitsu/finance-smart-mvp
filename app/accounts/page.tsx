@@ -24,6 +24,8 @@ import {
   parseMoneyInput,
   SUPPORTED_CURRENCIES,
 } from "@/src/utils/currencies";
+import ViewModeToggle from "@/src/components/ui/viewMode/ViewModeToggle";
+import { useViewMode } from "@/src/components/ui/viewMode/useViewMode";
 import { confirmAction, notify } from "@/src/components/ui/feedback/feedbackStore";
 
 type Competence = {
@@ -68,6 +70,12 @@ const initialForm = {
 
 export default function AccountsPage() {
   const mutation = useMutation();
+  const {
+    mode: viewMode,
+    setMode: setViewMode,
+    hasException: viewModeHasException,
+    defaultMode: defaultViewMode,
+  } = useViewMode("accounts");
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [competences, setCompetences] = useState<Competence[]>([]);
   const [selectedCompetenceId, setSelectedCompetenceId] = useState("");
@@ -493,12 +501,24 @@ export default function AccountsPage() {
             </p>
           </div>
 
-          <button disabled={mutation.isPending}
-            onClick={openNewDrawer}
-            className="w-full rounded-xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white hover:bg-blue-500 md:w-auto"
-          >
-            Nova conta/cartão
-          </button>
+          <div className="flex flex-col gap-3 md:flex-row md:items-center">
+            {/* No celular a tela usa sempre cartões (a tabela tem 1100px). */}
+            <div className="hidden md:block">
+              <ViewModeToggle
+                mode={viewMode}
+                onChange={setViewMode}
+                hasException={viewModeHasException}
+                defaultMode={defaultViewMode}
+              />
+            </div>
+
+            <button disabled={mutation.isPending}
+              onClick={openNewDrawer}
+              className="w-full rounded-xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white hover:bg-blue-500 md:w-auto"
+            >
+              Nova conta/cartão
+            </button>
+          </div>
         </div>
 
         {loadError && !isLoading && (
@@ -510,9 +530,15 @@ export default function AccountsPage() {
           </div>
         )}
 
-        <div className="grid gap-3 md:hidden">
+        <div
+          className={
+            viewMode === "cards"
+              ? "grid gap-3 md:grid-cols-2 xl:grid-cols-3 min-[1600px]:grid-cols-4"
+              : "grid gap-3 md:hidden"
+          }
+        >
           {isLoading && (
-            <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-5 text-center text-sm text-slate-400">
+            <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-5 text-center text-sm text-slate-400 md:col-span-full">
               Carregando contas/cartões...
             </div>
           )}
@@ -524,8 +550,8 @@ export default function AccountsPage() {
                 className="rounded-2xl border border-white/10 bg-slate-950/60 p-4"
               >
                 <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <h3 className="font-semibold text-white">{account.name}</h3>
+                  <div className="min-w-0">
+                    <h3 className="break-words font-semibold text-white">{account.name}</h3>
 
                     <div className="mt-2 flex flex-wrap gap-2">
                       <span
@@ -552,10 +578,15 @@ export default function AccountsPage() {
                       >
                         {account.currency ?? "Moeda não confirmada"}
                       </span>
+                      {account.investment_account_kind === "BALANCE" && (
+                        <span className="rounded-full bg-cyan-500/10 px-3 py-1 text-xs font-bold text-cyan-300">
+                          Investimento por saldo
+                        </span>
+                      )}
                     </div>
                   </div>
 
-                  <div className="flex gap-2">
+                  <div className="flex shrink-0 gap-2">
                     <button
                       title="Planejamento"
                       onClick={() => openPlanningModal(account)}
@@ -590,6 +621,8 @@ export default function AccountsPage() {
                   </div>
                 </div>
 
+                {/* Fechamento e vencimento só existem para cartões. */}
+                {(account.closing_day || account.due_day) && (
                 <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
                   <div className="rounded-xl bg-white/[0.03] p-3">
                     <p className="text-xs text-slate-500">Fechamento</p>
@@ -605,17 +638,20 @@ export default function AccountsPage() {
                     </p>
                   </div>
                 </div>
+                )}
               </div>
             ))}
 
           {!isLoading && accounts.length === 0 && (
-            <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-5 text-center text-sm text-slate-400">
+            <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-5 text-center text-sm text-slate-400 md:col-span-full">
               Nenhuma conta/cartão cadastrada.
             </div>
           )}
         </div>
 
-        <div className="hidden w-full overflow-x-auto rounded-2xl border border-white/10 bg-slate-950/60 md:block">
+        <div
+          className={`${viewMode === "cards" ? "hidden" : "hidden md:block"} w-full overflow-x-auto rounded-2xl border border-white/10 bg-slate-950/60`}
+        >
           <table className="finance-table-compact min-w-[1100px] w-full text-left text-sm">
             <thead className="bg-white/5 text-slate-300">
               <tr>

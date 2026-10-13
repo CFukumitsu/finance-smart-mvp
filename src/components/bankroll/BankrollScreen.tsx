@@ -68,6 +68,14 @@ import type {
   EligibleFinanceAccount,
   FinanceAccount,
 } from "@/src/types/bankroll";
+import ViewModeToggle from "@/src/components/ui/viewMode/ViewModeToggle";
+import { useViewMode } from "@/src/components/ui/viewMode/useViewMode";
+import { VIEW_MODE_SCREENS } from "@/src/components/ui/viewMode/viewPreferences";
+import {
+  VIEW_MODE_TOGGLE_WRAPPER_CLASS,
+  viewModeCardsClass,
+  viewModeTableClass,
+} from "@/src/components/ui/viewMode/viewModeLayout";
 import { confirmAction, notify } from "@/src/components/ui/feedback/feedbackStore";
 
 type View = "dashboard" | "wallets" | "sessions" | "transactions";
@@ -552,6 +560,12 @@ function Wallets({
   reload: () => Promise<void>;
 }) {
   const mutation = useMutation();
+  const {
+    mode: viewMode,
+    setMode: setViewMode,
+    hasException: viewModeHasException,
+    defaultMode: defaultViewMode,
+  } = useViewMode(VIEW_MODE_SCREENS.bankrollWallets);
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("active");
   const [editing, setEditing] = useState<BankrollWallet | null>(null);
@@ -572,6 +586,13 @@ function Wallets({
         w.name.toLowerCase().includes(search.toLowerCase()),
     )
     .sort((a, b) => a.name.localeCompare(b.name));
+  // Um único cálculo por carteira, usado pela tabela e pelos cartões.
+  const balances = new Map(
+    rows.map((w) => [
+      w.id,
+      calculateWalletBalance(w, data.transactions, data.sessions),
+    ]),
+  );
   const currencyLocked = Boolean(
     editing &&
     (data.transactions.some((item) => item.wallet_id === editing.id) ||
@@ -663,8 +684,69 @@ function Wallets({
           <option value="inactive">Inativas</option>
           <option value="all">Todas</option>
         </select>
+        {/* No celular a tela usa sempre cartões (a tabela tem 900px). */}
+        <div className={VIEW_MODE_TOGGLE_WRAPPER_CLASS}>
+          <ViewModeToggle
+            mode={viewMode}
+            onChange={setViewMode}
+            hasException={viewModeHasException}
+            defaultMode={defaultViewMode}
+          />
+        </div>
         <Add disabled={mutation.isPending} onClick={() => show()}>Nova carteira</Add>
       </Toolbar>
+      <div className={viewModeCardsClass(viewMode)}>
+        {rows.map((w) => {
+          const balance = balances.get(w.id) ?? 0;
+          return (
+            <div
+              key={w.id}
+              className="rounded-2xl border border-white/10 bg-slate-950/60 p-4"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex min-w-0 items-start gap-3">
+                  <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-cyan-500/10 text-cyan-300">
+                    <WalletCards size={18} aria-hidden="true" />
+                  </span>
+                  <div className="min-w-0">
+                    <h3 className="break-words font-bold text-white">{w.name}</h3>
+                    <p className="mt-0.5 text-xs text-slate-400">
+                      {labels[w.wallet_type]}
+                    </p>
+                  </div>
+                </div>
+                <Actions disabled={mutation.isPending} busy={mutation.pending === ("removeWalletEntry" + ":" + (w).id)}
+                  onEdit={() => show(w)}
+                  onDelete={() => removeWalletEntry(w)}
+                />
+              </div>
+              <div className="mt-3 rounded-xl bg-white/[0.03] p-3">
+                <p className="text-xs text-slate-500">Saldo atual</p>
+                <p
+                  className={`mt-0.5 text-lg font-black ${balance < 0 ? "text-red-300" : "text-white"}`}
+                >
+                  {money(balance, w.currency)}
+                </p>
+              </div>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <span className="rounded-full bg-cyan-500/10 px-2.5 py-1 text-xs font-bold text-cyan-300">
+                  {w.currency}
+                </span>
+                <span
+                  className={`rounded-full px-2.5 py-1 text-xs font-bold ${
+                    w.active
+                      ? "bg-emerald-500/10 text-emerald-300"
+                      : "bg-slate-500/10 text-slate-400"
+                  }`}
+                >
+                  {w.active ? "Ativa" : "Inativa"}
+                </span>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      <div className={viewModeTableClass(viewMode)}>
       <Table
         headers={["Nome", "Tipo", "Moeda", "Saldo atual", "Status", "Ações"]}
       >
@@ -673,12 +755,7 @@ function Wallets({
             <Td strong>{w.name}</Td>
             <Td>{labels[w.wallet_type]}</Td>
             <Td>{w.currency}</Td>
-            <Td>
-              {money(
-                calculateWalletBalance(w, data.transactions, data.sessions),
-                w.currency,
-              )}
-            </Td>
+            <Td>{money(balances.get(w.id) ?? 0, w.currency)}</Td>
             <Td>{w.active ? "Ativa" : "Inativa"}</Td>
             <Td>
               <Actions disabled={mutation.isPending} busy={mutation.pending === ("removeWalletEntry" + ":" + (w).id)}
@@ -689,6 +766,7 @@ function Wallets({
           </tr>
         ))}
       </Table>
+      </div>
       {!rows.length && (
         <Empty
           title="Nenhuma carteira encontrada"

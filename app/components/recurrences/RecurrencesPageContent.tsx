@@ -18,6 +18,8 @@ import {
     RecurringTransactionFormData,
     RecurrenceType,
 } from "@/src/types/recurrence";
+import ViewModeToggle from "@/src/components/ui/viewMode/ViewModeToggle";
+import { useViewMode } from "@/src/components/ui/viewMode/useViewMode";
 import { confirmAction, notify } from "@/src/components/ui/feedback/feedbackStore";
 
 type SelectOption = {
@@ -58,6 +60,12 @@ function parseCurrencyInput(value: string) {
 
 export default function RecurrencesPageContent() {
   const mutation = useMutation();
+  const {
+    mode: viewMode,
+    setMode: setViewMode,
+    hasException: viewModeHasException,
+    defaultMode: defaultViewMode,
+  } = useViewMode("recurrences");
     const [items, setItems] = useState<RecurringTransaction[]>([]);
     const [accounts, setAccounts] = useState<AccountOption[]>([]);
 
@@ -301,13 +309,25 @@ export default function RecurrencesPageContent() {
                         </p>
                     </div>
 
-                    <button disabled={mutation.isPending}
-                        type="button"
-                        onClick={openCreateDrawer}
-                        className="w-full rounded-xl bg-emerald-500 px-4 py-3 text-sm font-semibold text-slate-950 transition hover:bg-emerald-400 md:w-auto"
-                    >
-                        Nova recorrência
-                    </button>
+                    <div className="flex flex-col gap-3 md:flex-row md:items-center">
+                        {/* No celular a tela usa sempre cartões (a tabela tem 1000px). */}
+                        <div className="hidden md:block">
+                            <ViewModeToggle
+                                mode={viewMode}
+                                onChange={setViewMode}
+                                hasException={viewModeHasException}
+                                defaultMode={defaultViewMode}
+                            />
+                        </div>
+
+                        <button disabled={mutation.isPending}
+                            type="button"
+                            onClick={openCreateDrawer}
+                            className="w-full rounded-xl bg-emerald-500 px-4 py-3 text-sm font-semibold text-slate-950 transition hover:bg-emerald-400 md:w-auto"
+                        >
+                            Nova recorrência
+                        </button>
+                    </div>
                 </div>
 
                 <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/5 p-5">
@@ -350,9 +370,15 @@ export default function RecurrencesPageContent() {
                     </div>
                 </div>
 
-                <div className="grid gap-3 md:hidden">
+                <div
+                    className={
+                        viewMode === "cards"
+                            ? "grid gap-3 md:grid-cols-2 xl:grid-cols-3 min-[1600px]:grid-cols-4"
+                            : "grid gap-3 md:hidden"
+                    }
+                >
                     {isLoading && (
-                        <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-5 text-center text-sm text-slate-400">
+                        <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-5 text-center text-sm text-slate-400 md:col-span-full">
                             Carregando recorrências...
                         </div>
                     )}
@@ -364,8 +390,8 @@ export default function RecurrencesPageContent() {
                                 className="rounded-2xl border border-white/10 bg-slate-950/60 p-4"
                             >
                                 <div className="flex items-start justify-between gap-3">
-                                    <div>
-                                        <h3 className="font-semibold text-white">
+                                    <div className="min-w-0">
+                                        <h3 className="break-words font-semibold text-white">
                                             {item.description}
                                         </h3>
 
@@ -398,17 +424,24 @@ export default function RecurrencesPageContent() {
                                 </div>
 
                                 <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
-                                    <div className="rounded-xl bg-white/[0.03] p-3">
-                                        <p className="text-xs text-slate-500">Frequência</p>
-                                        <p className="mt-1 font-semibold text-slate-200">
-                                            Mensal
+                                    <div className="col-span-2 min-w-0 rounded-xl bg-white/[0.03] p-3">
+                                        <p className="text-xs text-slate-500">Conta / Cartão</p>
+                                        <p className="mt-1 truncate font-semibold text-slate-200" title={accountName(item.account_id)}>
+                                            {accountName(item.account_id)}
                                         </p>
                                     </div>
 
                                     <div className="rounded-xl bg-white/[0.03] p-3">
-                                        <p className="text-xs text-slate-500">Status</p>
+                                        <p className="text-xs text-slate-500">Dia</p>
                                         <p className="mt-1 font-semibold text-slate-200">
-                                            {item.status === "active" ? "Ativa" : "Cancelada"}
+                                            Dia {item.day_of_month}
+                                        </p>
+                                    </div>
+
+                                    <div className="rounded-xl bg-white/[0.03] p-3">
+                                        <p className="text-xs text-slate-500">Frequência</p>
+                                        <p className="mt-1 font-semibold text-slate-200">
+                                            Mensal
                                         </p>
                                     </div>
                                 </div>
@@ -436,13 +469,15 @@ export default function RecurrencesPageContent() {
                         ))}
 
                     {!isLoading && items.length === 0 && (
-                        <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-5 text-center text-sm text-slate-400">
+                        <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-5 text-center text-sm text-slate-400 md:col-span-full">
                             Nenhuma recorrência cadastrada.
                         </div>
                     )}
                 </div>
 
-                <div className="overflow-hidden rounded-2xl border border-white/10 bg-slate-950/60">
+                <div
+                    className={`${viewMode === "cards" ? "hidden" : "hidden md:block"} overflow-x-auto rounded-2xl border border-white/10 bg-slate-950/60`}
+                >
                     <table className="w-full min-w-[1000px] text-left text-sm">
                         <thead className="border-b border-white/10 bg-white/[0.03] text-slate-400">
                             <tr>

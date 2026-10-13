@@ -19,8 +19,6 @@ import {
   GraduationCap,
   HeartPulse,
   House,
-  LayoutGrid,
-  List,
   Lock,
   PawPrint,
   Pencil,
@@ -131,6 +129,8 @@ import {
 } from "@/src/utils/paymentConfirmation";
 import { ensureCompetenceIsOpen } from "@/src/utils/competenceLock";
 import ConfirmPaymentDialog from "../components/transactions/ConfirmPaymentDialog";
+import ViewModeToggle from "@/src/components/ui/viewMode/ViewModeToggle";
+import { useViewMode } from "@/src/components/ui/viewMode/useViewMode";
 import {
   confirmAction,
   notify,
@@ -285,19 +285,6 @@ function SummaryCard({
     </div>
   );
 }
-
-type TransactionsViewMode = "list" | "cards";
-
-const viewModeStorageKeyPrefix = "finance-smart-transactions-view";
-
-const viewModeOptions: {
-  value: TransactionsViewMode;
-  label: string;
-  icon: LucideIcon;
-}[] = [
-  { value: "list", label: "Lista", icon: List },
-  { value: "cards", label: "Cartões", icon: LayoutGrid },
-];
 
 const badgeBaseClass =
   "inline-flex items-center whitespace-nowrap rounded-full px-2 py-0.5 text-[11px] font-medium leading-4";
@@ -454,8 +441,12 @@ function TransactionsPageContent() {
   const [detailTransactionId, setDetailTransactionId] = useState<
     string | null
   >(null);
-  const [viewMode, setViewMode] = useState<TransactionsViewMode>("list");
-  const viewModeStorageKey = useRef<string | null>(null);
+  const {
+    mode: viewMode,
+    setMode: changeViewMode,
+    hasException: viewModeHasException,
+    defaultMode: defaultViewMode,
+  } = useViewMode("transactions");
   const [plannedCardLimit, setPlannedCardLimit] = useState(0);
   const [accountClosures, setAccountClosures] = useState<AccountClosure[]>([]);
   const loadTransactionsRequestIdRef = useRef(0);
@@ -1032,30 +1023,6 @@ function TransactionsPageContent() {
 
   useEffect(() => {
     loadReferenceData();
-  }, []);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    // Local session lookup (no network) so the stored view applies right away.
-    void supabase.auth.getSession().then(({ data }) => {
-      const userId = data.session?.user.id;
-      if (cancelled || !userId) return;
-
-      const key = `${viewModeStorageKeyPrefix}:${userId}`;
-      viewModeStorageKey.current = key;
-
-      try {
-        const stored = localStorage.getItem(key);
-        if (stored === "list" || stored === "cards") setViewMode(stored);
-      } catch {
-        // Storage unavailable: keep the default list view.
-      }
-    });
-
-    return () => {
-      cancelled = true;
-    };
   }, []);
 
   useEffect(() => {
@@ -2645,17 +2612,6 @@ function TransactionsPageContent() {
     void openEditDrawer(transaction);
   }
 
-  function changeViewMode(nextViewMode: TransactionsViewMode) {
-    setViewMode(nextViewMode);
-    if (!viewModeStorageKey.current) return;
-
-    try {
-      localStorage.setItem(viewModeStorageKey.current, nextViewMode);
-    } catch {
-      // Storage unavailable: the choice still applies to this visit.
-    }
-  }
-
   function openTransactionDetail(transaction: Transaction) {
     setDetailTransactionId(transaction.id);
   }
@@ -2950,34 +2906,12 @@ function TransactionsPageContent() {
               )}
             </button>
 
-            <div
-              role="group"
-              aria-label="Visualização"
-              className="theme-field flex h-10 items-center gap-0.5 rounded-xl border p-0.5"
-            >
-              {viewModeOptions.map((option) => {
-                const active = viewMode === option.value;
-                const OptionIcon = option.icon;
-
-                return (
-                  <button
-                    key={option.value}
-                    type="button"
-                    aria-pressed={active}
-                    onClick={() => changeViewMode(option.value)}
-                    title={`Visualizar em ${option.label.toLocaleLowerCase("pt-BR")}`}
-                    className={`flex h-full flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-[10px] px-3 text-sm transition-colors ${
-                      active
-                        ? "bg-blue-600 font-semibold text-white shadow-sm"
-                        : "theme-muted theme-hover font-medium"
-                    }`}
-                  >
-                    <OptionIcon size={15} aria-hidden="true" />
-                    {option.label}
-                  </button>
-                );
-              })}
-            </div>
+            <ViewModeToggle
+              mode={viewMode}
+              onChange={changeViewMode}
+              hasException={viewModeHasException}
+              defaultMode={defaultViewMode}
+            />
           </div>
 
           <div className="theme-divider mt-2 flex flex-wrap items-center gap-x-4 gap-y-2 border-t px-1 pt-2">

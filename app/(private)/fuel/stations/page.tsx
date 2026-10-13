@@ -26,6 +26,14 @@ import {
   searchNearbyFuelStations,
 } from "@/src/services/fuelService";
 import type { NearbyFuelStation } from "@/src/types/fuel";
+import ViewModeToggle from "@/src/components/ui/viewMode/ViewModeToggle";
+import { useViewMode } from "@/src/components/ui/viewMode/useViewMode";
+import { VIEW_MODE_SCREENS } from "@/src/components/ui/viewMode/viewPreferences";
+import {
+  VIEW_MODE_TOGGLE_WRAPPER_CLASS,
+  viewModeCardsClass,
+  viewModeTableClass,
+} from "@/src/components/ui/viewMode/viewModeLayout";
 import NearbyFuelStationsMap from "@/src/components/fuel/NearbyFuelStationsMap";
 import {
   isMissingFuelStationTypeColumn,
@@ -93,6 +101,12 @@ const emptyForm = {
 
 export default function FuelStationsPage() {
   const mutation = useMutation();
+  const {
+    mode: viewMode,
+    setMode: setViewMode,
+    hasException: viewModeHasException,
+    defaultMode: defaultViewMode,
+  } = useViewMode(VIEW_MODE_SCREENS.fuelStations);
   const [stations, setStations] = useState<FuelStation[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
@@ -873,14 +887,26 @@ export default function FuelStationsPage() {
             </p>
           </div>
 
-          <button
-            type="button"
-            onClick={openNewStationDrawer}
-            className="flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white hover:bg-blue-500 md:w-auto"
-          >
-            <Plus size={18} />
-            Novo posto
-          </button>
+          <div className="flex flex-col gap-3 md:flex-row md:items-center">
+            {/* No celular a tela usa sempre cartões (a tabela tem 980px). */}
+            <div className={VIEW_MODE_TOGGLE_WRAPPER_CLASS}>
+              <ViewModeToggle
+                mode={viewMode}
+                onChange={setViewMode}
+                hasException={viewModeHasException}
+                defaultMode={defaultViewMode}
+              />
+            </div>
+
+            <button
+              type="button"
+              onClick={openNewStationDrawer}
+              className="flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white hover:bg-blue-500 md:w-auto"
+            >
+              <Plus size={18} />
+              Novo posto
+            </button>
+          </div>
         </div>
 
         <div className="grid gap-4 md:grid-cols-2">
@@ -938,7 +964,121 @@ export default function FuelStationsPage() {
           </select>
         </div>
 
-        <div className="w-full overflow-x-auto rounded-2xl border border-white/10 bg-slate-950/60">
+        {/* Endereço ocupa espaço: no máximo 3 colunas. */}
+        <div className={viewModeCardsClass(viewMode, 3)}>
+          {isLoading && (
+            <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-5 text-center text-sm text-slate-400 md:col-span-full">
+              Carregando postos...
+            </div>
+          )}
+
+          {!isLoading &&
+            filteredStations.map((station) => {
+              const hasLocation =
+                station.latitude !== null && station.longitude !== null;
+              const cityState = [station.city, station.state]
+                .filter(Boolean)
+                .join(" / ");
+
+              return (
+                <div
+                  key={station.id}
+                  className="rounded-2xl border border-white/10 bg-slate-950/60 p-4"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex min-w-0 items-start gap-3">
+                      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-amber-500/10 text-amber-300">
+                        <MapPin size={18} aria-hidden="true" />
+                      </span>
+                      <div className="min-w-0">
+                        <h3 className="break-words font-semibold text-white">
+                          {station.name}
+                        </h3>
+                        <p className="mt-0.5 truncate text-xs text-slate-400">
+                          {station.brand ?? "Bandeira não informada"}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex shrink-0 gap-1">
+                    <button
+                      type="button"
+                      onClick={() => openEditStationDrawer(station)}
+                      title="Editar"
+                      className="rounded-lg p-2 text-blue-400 hover:bg-blue-500/10 hover:text-blue-300"
+                    >
+                      <Pencil size={18} />
+                    </button>
+
+                    <ProcessingButton busy={mutation.pending === ("toggleStationStatus" + ":" + (station).id)} disabled={mutation.isPending}
+                      type="button"
+                      onClick={() => toggleStationStatus(station)}
+                      title={station.active ? "Inativar" : "Ativar"}
+                      className={`rounded-lg p-2 ${
+                        station.active
+                          ? "text-red-400 hover:bg-red-500/10"
+                          : "text-emerald-400 hover:bg-emerald-500/10"
+                      }`}
+                    >
+                      {station.active ? (
+                        <PowerOff size={18} />
+                      ) : (
+                        <Power size={18} />
+                      )}
+                    </ProcessingButton>
+                    </div>
+                  </div>
+
+                  <div className="mt-3 rounded-xl bg-white/[0.03] p-2.5 text-sm">
+                    <p className="text-xs text-slate-500">Endereço</p>
+                    <p className="mt-0.5 break-words font-medium text-slate-200">
+                      {station.address ?? "-"}
+                    </p>
+                    {cityState && (
+                      <p className="mt-0.5 text-xs text-slate-400">{cityState}</p>
+                    )}
+                  </div>
+
+                  <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+                    <span
+                      className={`rounded-full px-2.5 py-1 text-xs font-semibold ${
+                        station.active
+                          ? "bg-emerald-500/10 text-emerald-300"
+                          : "bg-slate-500/10 text-slate-400"
+                      }`}
+                    >
+                      {station.active ? "Ativo" : "Inativo"}
+                    </span>
+
+                    {hasLocation ? (
+                      <button
+                        type="button"
+                        onClick={() => openStationMap(station)}
+                        className="inline-flex items-center gap-2 rounded-lg bg-cyan-500/10 px-3 py-1.5 text-xs font-semibold text-cyan-300 hover:bg-cyan-500/20"
+                      >
+                        <MapPin size={14} />
+                        Ver mapa
+                      </button>
+                    ) : (
+                      <span className="text-xs text-slate-500">
+                        Localização não informada
+                      </span>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+
+          {!isLoading && filteredStations.length === 0 && (
+            <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-5 text-center text-sm text-slate-400 md:col-span-full">
+              Nenhum posto encontrado.
+            </div>
+          )}
+        </div>
+
+        <div
+          className={`${viewModeTableClass(viewMode)} w-full overflow-x-auto rounded-2xl border border-white/10 bg-slate-950/60`}
+        >
           <table className="min-w-[980px] w-full text-left text-sm">
             <thead className="bg-slate-900 text-slate-300">
               <tr>

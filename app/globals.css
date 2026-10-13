@@ -884,3 +884,24 @@ a,
 .fs-button-secondary:hover:not(:disabled) {
   background: var(--surface-hover);
 }
+
+/* Seletor Lista | Cartões (ViewModeToggle), igual em qualquer tela. */
+.view-mode-toggle {
+  border-color: var(--border);
+  background: var(--field);
+  color: var(--foreground);
+}
+
+.view-mode-option {
+  color: var(--muted);
+}
+
+.view-mode-option:hover {
+  background: var(--surface-hover);
+  color: var(--foreground);
+}
+
+.view-mode-toggle button:focus-visible {
+  outline: 2px solid #3b82f6;
+  outline-offset: 1px;
+}

@@ -20,6 +20,8 @@ import {
   type CategoryFormType,
 } from "@/src/utils/categoryForm";
 import { formatMoney, PRIMARY_CURRENCY } from "@/src/utils/currencies";
+import ViewModeToggle from "@/src/components/ui/viewMode/ViewModeToggle";
+import { useViewMode } from "@/src/components/ui/viewMode/useViewMode";
 import { confirmAction, notify } from "@/src/components/ui/feedback/feedbackStore";
 
 type Competence = {
@@ -52,6 +54,12 @@ const initialForm = {
 
 export default function CategoriesPage() {
   const mutation = useMutation();
+  const {
+    mode: viewMode,
+    setMode: setViewMode,
+    hasException: viewModeHasException,
+    defaultMode: defaultViewMode,
+  } = useViewMode("categories");
   const isMutationLocked = mutation.isLocked;
   const [categories, setCategories] = useState<Category[]>([]);
   const [competences, setCompetences] = useState<Competence[]>([]);
@@ -509,12 +517,24 @@ export default function CategoriesPage() {
             </p>
           </div>
 
-          <button disabled={mutation.isPending}
-            onClick={openNewDrawer}
-            className="w-full rounded-xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white hover:bg-blue-500 md:w-auto"
-          >
-            Nova categoria
-          </button>
+          <div className="flex flex-col gap-3 md:flex-row md:items-center">
+            {/* No celular a tela usa sempre cartões (a tabela tem 950px). */}
+            <div className="hidden md:block">
+              <ViewModeToggle
+                mode={viewMode}
+                onChange={setViewMode}
+                hasException={viewModeHasException}
+                defaultMode={defaultViewMode}
+              />
+            </div>
+
+            <button disabled={mutation.isPending}
+              onClick={openNewDrawer}
+              className="w-full rounded-xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white hover:bg-blue-500 md:w-auto"
+            >
+              Nova categoria
+            </button>
+          </div>
         </div>
 
         <div className="flex flex-col gap-3 rounded-2xl border border-white/10 bg-slate-950/60 p-4 md:flex-row">
@@ -536,9 +556,15 @@ export default function CategoriesPage() {
           </select>
         </div>
 
-        <div className="grid gap-3 md:hidden">
+        <div
+          className={
+            viewMode === "cards"
+              ? "grid gap-3 md:grid-cols-2 xl:grid-cols-3 min-[1600px]:grid-cols-4"
+              : "grid gap-3 md:hidden"
+          }
+        >
           {isLoading && (
-            <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-5 text-center text-sm text-slate-400">
+            <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-5 text-center text-sm text-slate-400 md:col-span-full">
               Carregando categorias...
             </div>
           )}
@@ -550,8 +576,8 @@ export default function CategoriesPage() {
                 className="rounded-2xl border border-white/10 bg-slate-950/60 p-4"
               >
                 <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <h3 className="font-semibold text-white">
+                  <div className="min-w-0">
+                    <h3 className="break-words font-semibold text-white">
                       {category.name}
                     </h3>
                     <div className="mt-2 flex flex-wrap gap-2">
@@ -575,7 +601,7 @@ export default function CategoriesPage() {
                     </div>
                   </div>
 
-                  <div className="flex gap-2">
+                  <div className="flex shrink-0 gap-2">
                     <ProcessingButton busy={mutation.pending === ("toggleShowOnDashboard" + ":" + (category).id)} disabled={mutation.isPending}
                       title={
                         category.show_on_dashboard
@@ -643,13 +669,15 @@ export default function CategoriesPage() {
             ))}
 
           {!isLoading && categories.length === 0 && (
-            <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-5 text-center text-sm text-slate-400">
+            <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-5 text-center text-sm text-slate-400 md:col-span-full">
               Nenhuma categoria cadastrada.
             </div>
           )}
         </div>
 
-        <div className="hidden overflow-x-auto rounded-2xl border border-white/10 bg-slate-950/60 md:block">
+        <div
+          className={`${viewMode === "cards" ? "hidden" : "hidden md:block"} overflow-x-auto rounded-2xl border border-white/10 bg-slate-950/60`}
+        >
           <table className="finance-table-compact min-w-[950px] w-full text-left text-sm">
             <thead className="bg-white/5 text-slate-300">
               <tr>

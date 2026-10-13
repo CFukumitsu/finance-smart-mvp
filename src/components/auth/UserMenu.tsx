@@ -10,7 +10,7 @@ import { signOut } from "@/src/services/authService";
 import type { UserProfile } from "@/src/types/identity";
 import { getAvatarUrl, getFullName, getRoleLabel } from "@/src/utils/identity";
 import ProfileAvatar from "./ProfileAvatar";
-import ThemeSelector from "@/src/components/theme/ThemeSelector";
+import AppearanceSettings from "@/src/components/theme/AppearanceSettings";
 
 export default function UserMenu() {
   const router = useRouter();
@@ -65,7 +65,7 @@ export default function UserMenu() {
           <MenuLink href="/account/security" icon={ShieldCheck} label="Segurança" close={() => setOpen(false)} />
           {profile?.role === "admin" && <MenuLink href="/admin/users" icon={Users} label="Usuários" close={() => setOpen(false)} />}
           <div className="my-1 border-t border-white/10" />
-          <ThemeSelector />
+          <AppearanceSettings />
           <div className="my-1 border-t border-white/10" />
           <button type="button" role="menuitem" onClick={handleLogout} className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold text-red-300 hover:bg-red-500/10"><LogOut size={17} /> Sair</button>
         </div>
