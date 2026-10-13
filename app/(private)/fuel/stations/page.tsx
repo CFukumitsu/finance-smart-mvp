@@ -40,6 +40,7 @@ import {
   NEARBY_HIGH_ACCURACY_TIMEOUT_MS,
   PREFERRED_NEARBY_LOCATION_ACCURACY_METERS,
 } from "@/src/utils/fuelStationProximity";
+import { confirmAction, notify } from "@/src/components/ui/feedback/feedbackStore";
 
 type FuelStation = {
   id: string;
@@ -212,7 +213,7 @@ export default function FuelStationsPage() {
     } catch (error) {
       console.error("Erro ao carregar postos:", error);
 
-      alert(
+      notify.error(
         error instanceof Error ? error.message : "Erro ao carregar postos.",
       );
     } finally {
@@ -610,9 +611,12 @@ export default function FuelStationsPage() {
       setLocationMessage("Este posto já está cadastrado na sua conta.");
 
       if (
-        window.confirm(
-          "Este posto já está cadastrado. Deseja carregar o cadastro existente para edição?",
-        )
+        await confirmAction({
+          title: "Posto já cadastrado",
+          message:
+            "Este posto já está cadastrado. Deseja carregar o cadastro existente para edição?",
+          confirmLabel: "Carregar cadastro",
+        })
       ) {
         loadExistingStation(existingStation);
       }
@@ -670,7 +674,7 @@ export default function FuelStationsPage() {
     const longitude = parseCoordinate(form.longitude);
 
     if (!name) {
-      alert("Informe o nome do posto.");
+      notify.warning("Informe o nome do posto.");
       return;
     }
 
@@ -678,7 +682,7 @@ export default function FuelStationsPage() {
       form.latitude.trim() &&
       (latitude === null || latitude < -90 || latitude > 90)
     ) {
-      alert("Informe uma latitude válida.");
+      notify.warning("Informe uma latitude válida.");
       return;
     }
 
@@ -686,7 +690,7 @@ export default function FuelStationsPage() {
       form.longitude.trim() &&
       (longitude === null || longitude < -180 || longitude > 180)
     ) {
-      alert("Informe uma longitude válida.");
+      notify.warning("Informe uma longitude válida.");
       return;
     }
 
@@ -694,7 +698,7 @@ export default function FuelStationsPage() {
       (latitude === null && longitude !== null) ||
       (latitude !== null && longitude === null)
     ) {
-      alert("Informe latitude e longitude juntas.");
+      notify.warning("Informe latitude e longitude juntas.");
       return;
     }
 
@@ -724,9 +728,12 @@ export default function FuelStationsPage() {
 
           if (
             existingStation &&
-            window.confirm(
-              "Este posto já está cadastrado. Deseja carregar o cadastro existente para edição?",
-            )
+            (await confirmAction({
+              title: "Posto já cadastrado",
+              message:
+                "Este posto já está cadastrado. Deseja carregar o cadastro existente para edição?",
+              confirmLabel: "Carregar cadastro",
+            }))
           ) {
             loadExistingStation(existingStation);
           }
@@ -782,7 +789,7 @@ export default function FuelStationsPage() {
     } catch (error) {
       console.error("Erro ao salvar posto:", error);
 
-      alert(error instanceof Error ? error.message : "Erro ao salvar posto.");
+      notify.error(error instanceof Error ? error.message : "Erro ao salvar posto.");
     } finally {
       setIsSaving(false);
     }
@@ -796,9 +803,12 @@ export default function FuelStationsPage() {
 
     const action = station.active ? "inativar" : "ativar";
 
-    const confirmed = window.confirm(
-      `Tem certeza que deseja ${action} o posto "${station.name}"?`,
-    );
+    const confirmed = await confirmAction({
+      title: station.active ? "Inativar posto" : "Ativar posto",
+      message: `Tem certeza que deseja ${action} o posto "${station.name}"?`,
+      tone: station.active ? "warning" : "default",
+      confirmLabel: station.active ? "Inativar" : "Ativar",
+    });
 
     if (!confirmed) {
       return;
@@ -822,7 +832,7 @@ export default function FuelStationsPage() {
       await loadStations();
     } catch (error) {
       console.error("Erro ao alterar status do posto:", error);
-      alert("Erro ao alterar status do posto.");
+      notify.error("Erro ao alterar status do posto.");
     }
 
     });
@@ -830,7 +840,7 @@ export default function FuelStationsPage() {
 
   function openStationMap(station: FuelStation) {
     if (station.latitude === null || station.longitude === null) {
-      alert("Este posto não possui localização cadastrada.");
+      notify.warning("Este posto não possui localização cadastrada.");
       return;
     }
 

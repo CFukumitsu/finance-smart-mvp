@@ -28,6 +28,7 @@ import type {
 import { buildTransactionView, getTransactionEffect } from "@/src/utils/bankrollCalculations";
 import { createBankrollFinanceIdempotencyKey, filterEligibleFinanceAccountsForWallet, getFinanceAccountEmptyMessage, getNewBankrollMovementSelection, isEligibleFinanceAccount, shouldLoadFinanceAccounts, validateBankrollFinanceForm } from "@/src/utils/bankrollFinanceIntegration";
 import { requireBankrollMoney } from "@/src/utils/bankrollMoney";
+import { confirmAction, notify } from "@/src/components/ui/feedback/feedbackStore";
 
 type Data = {
   wallets: BankrollWallet[];
@@ -193,7 +194,7 @@ export default function BankrollFinanceTransactions({ data, reload }: { data: Da
       setOpen(false);
       await reload();
     } catch (error) {
-      alert(error instanceof Error ? error.message : "Não foi possível concluir a operação.");
+      notify.error(error instanceof Error ? error.message : "Não foi possível concluir a operação.");
     } finally {
       setSaving(false);
     }
@@ -206,9 +207,9 @@ export default function BankrollFinanceTransactions({ data, reload }: { data: Da
     return mutation.run("remove" + ":" + (transaction).id, async () => {
 
     const question = transaction.finance_link ? "Excluir a operação integrada nos dois módulos?" : "Excluir esta movimentação?";
-    if (!confirm(question)) return;
+    if (!(await confirmAction({ title: "Excluir movimentação", message: question, tone: "danger", confirmLabel: "Excluir" }))) return;
     try { await deleteTransaction(transaction); await reload(); }
-    catch (error) { alert(error instanceof Error ? error.message : "Erro ao excluir."); }
+    catch (error) { notify.error(error instanceof Error ? error.message : "Erro ao excluir."); }
 
     });
   }

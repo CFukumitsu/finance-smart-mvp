@@ -20,6 +20,7 @@ import {
   type CategoryFormType,
 } from "@/src/utils/categoryForm";
 import { formatMoney, PRIMARY_CURRENCY } from "@/src/utils/currencies";
+import { confirmAction, notify } from "@/src/components/ui/feedback/feedbackStore";
 
 type Competence = {
   id: string;
@@ -118,7 +119,7 @@ export default function CategoriesPage() {
 
     if (error) {
       console.error("Erro ao carregar categorias:", error);
-      alert("Erro ao carregar categorias.");
+      notify.error("Erro ao carregar categorias.");
       setIsLoading(false);
       return;
     }
@@ -177,7 +178,7 @@ export default function CategoriesPage() {
 
     if (error) {
       console.error("Erro ao carregar planejamento:", error);
-      alert("Erro ao carregar planejamento mensal.");
+      notify.error("Erro ao carregar planejamento mensal.");
       return;
     }
 
@@ -229,7 +230,7 @@ export default function CategoriesPage() {
 
     if (error) {
       console.error("Erro ao salvar planejamento:", error);
-      alert("Erro ao salvar planejamento mensal.");
+      notify.error("Erro ao salvar planejamento mensal.");
       return;
     }
 
@@ -326,7 +327,7 @@ export default function CategoriesPage() {
     const ownerId = await getCurrentUserId();
 
     if (!form.name || !form.type) {
-      alert("Preencha nome e tipo.");
+      notify.warning("Preencha nome e tipo.");
       return;
     }
 
@@ -361,7 +362,7 @@ export default function CategoriesPage() {
 
     if (error) {
       console.error("Erro ao salvar categoria:", error);
-      alert(error.message);
+      notify.error(error.message);
       return;
     }
 
@@ -387,7 +388,7 @@ export default function CategoriesPage() {
 
     if (error) {
       console.error("Erro ao alterar exibição no dashboard:", error);
-      alert(error.message);
+      notify.error(error.message);
       return;
     }
 
@@ -412,7 +413,7 @@ export default function CategoriesPage() {
 
     if (error) {
       console.error("Erro ao alterar status:", error);
-      alert(error.message);
+      notify.error(error.message);
       return;
     }
 
@@ -425,9 +426,12 @@ export default function CategoriesPage() {
     return mutation.run("deleteCategory" + ":" + (category).id, async () => {
 
     const ownerId = await getCurrentUserId();
-    const confirmed = window.confirm(
-      `Tem certeza que deseja excluir "${category.name}"? Se já existir lançamento usando essa categoria, o banco pode bloquear.`,
-    );
+    const confirmed = await confirmAction({
+      title: "Excluir categoria",
+      message: `Tem certeza que deseja excluir "${category.name}"? Se já existir lançamento usando essa categoria, o banco pode bloquear.`,
+      tone: "danger",
+      confirmLabel: "Excluir",
+    });
 
     if (!confirmed) return;
 
@@ -439,7 +443,7 @@ export default function CategoriesPage() {
 
     if (error) {
       console.error("Erro ao excluir categoria:", error);
-      alert(
+      notify.error(
         "Não foi possível excluir. Use Inativar se já houver lançamentos vinculados.",
       );
       return;

@@ -24,6 +24,7 @@ import {
   InvestmentToolbar,
   investmentField,
 } from "./InvestmentUi";
+import { confirmAction, notify } from "@/src/components/ui/feedback/feedbackStore";
 
 const emptyForm = {
   name: "",
@@ -116,10 +117,10 @@ export default function InvestmentAssets({
     const assetType = form.assetType.trim();
     const currency = form.currency.trim().toUpperCase();
 
-    if (!name) return alert("Informe o nome do ativo.");
-    if (!assetType) return alert("Informe o tipo do ativo.");
+    if (!name) return notify.warning("Informe o nome do ativo.");
+    if (!assetType) return notify.warning("Informe o tipo do ativo.");
     if (!/^[A-Z]{3}$/.test(currency))
-      return alert("Informe uma moeda com três letras, como BRL ou USD.");
+      return notify.warning("Informe uma moeda com três letras, como BRL ou USD.");
 
     try {
       submissionLock.current = true;
@@ -137,7 +138,7 @@ export default function InvestmentAssets({
       setOpen(false);
       await reload();
     } catch (value) {
-      alert(
+      notify.error(
         value instanceof Error ? value.message : "Não foi possível salvar.",
       );
     } finally {
@@ -152,13 +153,13 @@ export default function InvestmentAssets({
   async function remove(asset: InvestmentAsset) {
     return mutation.run("remove" + ":" + (asset).id, async () => {
 
-    if (!confirm(`Excluir o ativo "${asset.name}"?`)) return;
+    if (!(await confirmAction({ title: "Excluir ativo", message: `Excluir o ativo "${asset.name}"?`, tone: "danger", confirmLabel: "Excluir" }))) return;
 
     try {
       await deleteInvestmentAsset(asset.id);
       await reload();
     } catch (value) {
-      alert(
+      notify.error(
         value instanceof Error ? value.message : "Não foi possível excluir.",
       );
     }

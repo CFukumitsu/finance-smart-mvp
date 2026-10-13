@@ -7,6 +7,7 @@ import { MailPlus, RefreshCw, ShieldCheck, UserRound, X } from "lucide-react";
 import AppShell from "@/app/components/layout/AppShell";
 import { useModalShortcuts } from "@/src/hooks/useModalShortcuts";
 import type { AdminUserListItem, UserRole, UserStatus } from "@/src/types/identity";
+import { notify } from "@/src/components/ui/feedback/feedbackStore";
 
 const roleLabel = (role: UserRole) => role === "admin" ? "Administrador" : role === "manager" ? "Gerente" : "Usuário";
 const statusLabel: Record<UserStatus, string> = { invited: "Convite pendente", active: "Ativo", disabled: "Desativado", deleted: "Excluído" };
@@ -65,7 +66,7 @@ function RoleSelect({ user, changeRole, busy, disabled }: { busy: boolean; disab
     const response = await fetch("/api/admin/users", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ userId: user.id }) });
     const body = await response.json().catch(() => ({}));
     setResending(false);
-    alert(body.message ?? body.error ?? "Não foi possível reenviar o convite.");
+    notify.error(body.message ?? body.error ?? "Não foi possível reenviar o convite.");
 
       } finally { setResending(false); }
     });

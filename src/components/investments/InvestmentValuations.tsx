@@ -22,6 +22,7 @@ import {
   investmentField,
   parseInvestmentDecimal,
 } from "./InvestmentUi";
+import { confirmAction, notify } from "@/src/components/ui/feedback/feedbackStore";
 
 const currentMonth = () => new Date().toISOString().slice(0, 7);
 
@@ -122,13 +123,13 @@ export default function InvestmentValuations({ data, exchangeContext, reload }: 
     const unitValue = parseInvestmentDecimal(form.unitValue);
     const totalValue = parseInvestmentDecimal(form.totalValue);
     const validationError = validateInvestmentValuation({ assetId: form.assetId, referenceMonth: form.month, quantity: snapshot.quantity, currentUnitValue: unitValue, currentValue: totalValue });
-    if (validationError) return alert(validationError);
-    if (!Number.isFinite(result.currentUnitValue) || !Number.isFinite(result.currentValue)) return alert("Não foi possível calcular uma valorização válida.");
-    if (!editing && data.valuations.some((valuation) => valuation.asset_id === form.assetId && valuation.reference_month.slice(0, 7) === form.month)) return alert("Já existe uma valorização desse ativo para o mês.");
+    if (validationError) return notify.warning(validationError);
+    if (!Number.isFinite(result.currentUnitValue) || !Number.isFinite(result.currentValue)) return notify.error("Não foi possível calcular uma valorização válida.");
+    if (!editing && data.valuations.some((valuation) => valuation.asset_id === form.assetId && valuation.reference_month.slice(0, 7) === form.month)) return notify.warning("Já existe uma valorização desse ativo para o mês.");
     const valuationCurrency = editing?.currency ?? selectedAsset?.currency;
     const consolidationCurrency = editing?.consolidation_currency ?? exchangeContext.consolidationCurrency;
     const exchangeRate = editing?.exchange_rate ?? (valuationCurrency ? resolveExchangeRate(valuationCurrency, consolidationCurrency, exchangeContext.rates) : null);
-    if (!valuationCurrency || exchangeRate === null) return alert("Não existe cotação disponível para preservar este snapshot na moeda de consolidação.");
+    if (!valuationCurrency || exchangeRate === null) return notify.warning("Não existe cotação disponível para preservar este snapshot na moeda de consolidação.");
 
     try {
       submissionLock.current = true;
@@ -148,7 +149,7 @@ export default function InvestmentValuations({ data, exchangeContext, reload }: 
       setOpen(false);
       await reload();
     } catch (value) {
-      alert(value instanceof Error ? value.message : "Não foi possível salvar.");
+      notify.error(value instanceof Error ? value.message : "Não foi possível salvar.");
     } finally {
       submissionLock.current = false;
       setSaving(false);
@@ -162,9 +163,9 @@ export default function InvestmentValuations({ data, exchangeContext, reload }: 
     return mutation.run("remove" + ":" + (valuation).id, async () => {
 
     const asset = assetsById.get(valuation.asset_id);
-    if (!confirm(`Excluir a valorização de ${asset?.name ?? "este ativo"} em ${formatInvestmentMonth(valuation.reference_month)}?`)) return;
+    if (!(await confirmAction({ title: "Excluir valorização", message: `Excluir a valorização de ${asset?.name ?? "este ativo"} em ${formatInvestmentMonth(valuation.reference_month)}?`, tone: "danger", confirmLabel: "Excluir" }))) return;
     try { await deleteInvestmentValuation(valuation.id); await reload(); }
-    catch (value) { alert(value instanceof Error ? value.message : "Não foi possível excluir."); }
+    catch (value) { notify.error(value instanceof Error ? value.message : "Não foi possível excluir."); }
 
     });
   }

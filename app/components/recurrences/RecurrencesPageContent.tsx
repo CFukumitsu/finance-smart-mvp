@@ -18,6 +18,7 @@ import {
     RecurringTransactionFormData,
     RecurrenceType,
 } from "@/src/types/recurrence";
+import { confirmAction, notify } from "@/src/components/ui/feedback/feedbackStore";
 
 type SelectOption = {
     id: string;
@@ -226,7 +227,7 @@ export default function RecurrencesPageContent() {
             closeDrawer();
         } catch (error) {
             console.error("Erro ao salvar recorrência:", error);
-            alert("Não foi possível salvar a recorrência.");
+            notify.error("Não foi possível salvar a recorrência.");
         }
 
     });
@@ -235,7 +236,13 @@ export default function RecurrencesPageContent() {
     async function handleCancel(id: string) {
     return mutation.run("handleCancel" + ":" + (id), async () => {
 
-        const confirmed = confirm("Deseja cancelar esta recorrência?");
+        const confirmed = await confirmAction({
+            title: "Cancelar recorrência",
+            message: "Deseja cancelar esta recorrência?",
+            tone: "danger",
+            confirmLabel: "Cancelar recorrência",
+            cancelLabel: "Voltar",
+        });
         if (!confirmed) return;
 
         try {
@@ -243,7 +250,7 @@ export default function RecurrencesPageContent() {
             await loadRecurrences();
         } catch (error) {
             console.error("Erro ao cancelar recorrência:", error);
-            alert("Não foi possível cancelar a recorrência.");
+            notify.error("Não foi possível cancelar a recorrência.");
         }
 
     });
@@ -253,7 +260,7 @@ export default function RecurrencesPageContent() {
     return mutation.run("handleGenerateRecurringTransactions", async () => {
 
         if (!selectedCompetenceId) {
-            alert("Selecione uma competência.");
+            notify.warning("Selecione uma competência.");
             return;
         }
 
@@ -267,13 +274,13 @@ export default function RecurrencesPageContent() {
                 )?.name,
             });
 
-            alert(
+            notify.info(
                 `Processamento concluído.\n\nCriados: ${result.created}\nIgnorados: ${result.ignored}`
             );
         } catch (error) {
             console.error(error);
 
-            alert("Erro ao gerar recorrências.");
+            notify.error("Erro ao gerar recorrências.");
         } finally {
             setIsGenerating(false);
         }

@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { sendPasswordResetEmail } from "@/src/services/authService";
+import { notify } from "@/src/components/ui/feedback/feedbackStore";
 
 export default function ForgotPasswordForm() {
   const [email, setEmail] = useState("");
@@ -13,7 +14,7 @@ export default function ForgotPasswordForm() {
     event.preventDefault();
 
     if (!email) {
-      alert("Informe seu e-mail.");
+      notify.warning("Informe seu e-mail.");
       return;
     }
 
@@ -24,7 +25,7 @@ export default function ForgotPasswordForm() {
     setIsSubmitting(false);
 
     if (error) {
-      alert(error.message);
+      notify.error(error.message);
       return;
     }
 

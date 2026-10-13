@@ -30,6 +30,7 @@ import {
   type Tone,
 } from "@/src/components/overview/OverviewWidgets";
 import { ReserveBreakdownDialog } from "@/src/components/overview/ReserveBreakdownDialog";
+import { notify } from "@/src/components/ui/feedback/feedbackStore";
 
 const money = (value: number) => formatMoney(value, PRIMARY_CURRENCY);
 const percent = (value: number) =>
@@ -119,7 +120,7 @@ export default function FinancialOverviewPage() {
       setIsLoading(true);
       setReloadToken((current) => current + 1);
     } catch (error) {
-      alert(error instanceof Error ? error.message : "Erro ao salvar a meta.");
+      notify.error(error instanceof Error ? error.message : "Erro ao salvar a meta.");
     } finally {
       setIsSavingGoal(false);
     }

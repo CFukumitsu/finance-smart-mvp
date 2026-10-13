@@ -24,6 +24,7 @@ import {
   parseMoneyInput,
   SUPPORTED_CURRENCIES,
 } from "@/src/utils/currencies";
+import { confirmAction, notify } from "@/src/components/ui/feedback/feedbackStore";
 
 type Competence = {
   id: string;
@@ -130,7 +131,7 @@ export default function AccountsPage() {
         error instanceof Error ? error.message : "Erro desconhecido.";
       console.error("Erro ao carregar contas/cartões:", error);
       setLoadError(message);
-      alert("Erro ao carregar contas/cartões.");
+      notify.error("Erro ao carregar contas/cartões.");
     } finally {
       setIsLoading(false);
     }
@@ -205,7 +206,7 @@ export default function AccountsPage() {
 
     if (error) {
       console.error("Erro ao carregar planejamento:", error);
-      alert("Erro ao carregar planejamento mensal.");
+      notify.error("Erro ao carregar planejamento mensal.");
       return;
     }
 
@@ -260,7 +261,7 @@ export default function AccountsPage() {
     if (error) {
       console.error("Erro ao salvar planejamento:", error);
 
-      alert(
+      notify.error(
         `Erro ao salvar planejamento:\n\n${error.message}\n\n${error.details ?? ""}`,
       );
 
@@ -309,7 +310,7 @@ export default function AccountsPage() {
 
     const ownerId = await getCurrentUserId();
     if (!form.name || !form.type || !form.currency) {
-      alert(
+      notify.warning(
         !form.currency
           ? "Confirme a moeda desta conta antes de salvar."
           : "Preencha nome e tipo.",
@@ -358,7 +359,7 @@ export default function AccountsPage() {
 
     if (error) {
       console.error("Erro ao salvar conta/cartão:", error);
-      alert(error.message);
+      notify.error(error.message);
       return;
     }
 
@@ -381,7 +382,7 @@ export default function AccountsPage() {
 
       if (targetError) {
         console.error("Erro ao salvar planejamento:", targetError);
-        alert("Conta/cartão salvo, mas houve erro ao salvar o planejamento.");
+        notify.error("Conta/cartão salvo, mas houve erro ao salvar o planejamento.");
         return;
       }
     }
@@ -407,7 +408,7 @@ export default function AccountsPage() {
 
     if (error) {
       console.error("Erro ao alterar status:", error);
-      alert(error.message);
+      notify.error(error.message);
       return;
     }
 
@@ -420,9 +421,12 @@ export default function AccountsPage() {
     return mutation.run("deleteAccount" + ":" + (account).id, async () => {
 
     const ownerId = await getCurrentUserId();
-    const confirmed = window.confirm(
-      `Tem certeza que deseja excluir "${account.name}"? Se já existir lançamento usando essa conta/cartão, o banco pode bloquear.`,
-    );
+    const confirmed = await confirmAction({
+      title: "Excluir conta/cartão",
+      message: `Tem certeza que deseja excluir "${account.name}"? Se já existir lançamento usando essa conta/cartão, o banco pode bloquear.`,
+      tone: "danger",
+      confirmLabel: "Excluir",
+    });
 
     if (!confirmed) return;
 
@@ -434,7 +438,7 @@ export default function AccountsPage() {
 
     if (error) {
       console.error("Erro ao excluir conta/cartão:", error);
-      alert(
+      notify.error(
         "Não foi possível excluir. Use Inativar se já houver lançamentos vinculados.",
       );
       return;

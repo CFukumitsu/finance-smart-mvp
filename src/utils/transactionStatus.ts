@@ -2,13 +2,16 @@ export function getTodayIsoDate() {
   return new Date().toISOString().split("T")[0];
 }
 
-/** Status automático pela data: futuro é Pendente; senão Recebido (Receita) ou Pago. */
+/**
+ * Status automático pela data: futuro é Pendente; senão Recebido (Receita) ou
+ * Pago. Pagamento de Fatura sempre nasce Pendente: só a confirmação quita.
+ */
 export function getAutomaticTransactionStatus(
   type: string,
   dueDate: string,
   today: string = getTodayIsoDate(),
 ) {
-  if (dueDate > today) {
+  if (type === "Pagamento de Fatura" || dueDate > today) {
     return "Pendente";
   }
 
@@ -33,6 +36,11 @@ export function getStatusAfterDateChange(params: {
   today?: string;
 }) {
   if (params.isEditing && params.type === "Transferência") {
+    return params.currentStatus;
+  }
+
+  // Trocar a data de um pagamento de fatura não quita nem reabre o pagamento.
+  if (params.isEditing && params.type === "Pagamento de Fatura") {
     return params.currentStatus;
   }
 

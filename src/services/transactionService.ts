@@ -1,5 +1,6 @@
 import { getCurrentUserId, supabase } from "@/src/lib/supabase";
 import { ensureCompetenceIsOpen } from "@/src/utils/competenceLock";
+import { LINKED_INVOICE_PAYMENT_DELETE_MESSAGE } from "@/src/utils/invoicePayment";
 
 type ServiceResult = {
   success: boolean;
@@ -42,6 +43,30 @@ export async function deleteTransaction(id: string): Promise<ServiceResult> {
     return {
       success: false,
       message: "Esta transferência é vinculada e deve ser excluída como uma transferência completa.",
+    };
+  }
+
+  // Pagamento de fatura vinculado: a fatura referencia o lançamento e só a
+  // reabertura (Conciliação) pode removê-lo junto.
+  const { data: linkedStatement, error: linkedStatementError } = await supabase
+    .from("credit_card_statements")
+    .select("id")
+    .eq("owner_id", ownerId)
+    .eq("payment_transaction_id", id)
+    .limit(1)
+    .maybeSingle();
+
+  if (linkedStatementError) {
+    return {
+      success: false,
+      message: linkedStatementError.message,
+    };
+  }
+
+  if (linkedStatement) {
+    return {
+      success: false,
+      message: LINKED_INVOICE_PAYMENT_DELETE_MESSAGE,
     };
   }
 

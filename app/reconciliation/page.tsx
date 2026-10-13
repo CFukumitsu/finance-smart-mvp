@@ -24,6 +24,12 @@ import {
 } from "@/src/utils/currencies";
 import { ensureCompetenceExists } from "@/src/services/competenceService";
 import { blockLinkedTransferIndividualChange } from "@/src/utils/linkedTransfers";
+import { getInvoicePaymentStatusOnReclose } from "@/src/utils/invoicePayment";
+import {
+  chooseAction,
+  confirmAction,
+  notify,
+} from "@/src/components/ui/feedback/feedbackStore";
 
 type Account = {
   id: string;
@@ -922,7 +928,7 @@ export default function ReconciliationPage() {
         .order("name", { ascending: true });
 
       if (error) {
-        alert("Erro ao carregar contas/cartões.");
+        notify.error("Erro ao carregar contas/cartões.");
         return;
       }
 
@@ -940,7 +946,7 @@ export default function ReconciliationPage() {
           setActiveLayout(await loadActiveImportLayout(defaultAccount.id));
         } catch (layoutError) {
           console.error("Erro ao carregar layout ativo:", layoutError);
-          alert("Não foi possível carregar o layout desta conta/cartão.");
+          notify.error("Não foi possível carregar o layout desta conta/cartão.");
         }
       }
     }
@@ -955,7 +961,7 @@ export default function ReconciliationPage() {
         .order("month", { ascending: false });
 
       if (error) {
-        alert("Erro ao carregar competências.");
+        notify.error("Erro ao carregar competências.");
         return;
       }
 
@@ -974,7 +980,7 @@ export default function ReconciliationPage() {
         .order("name", { ascending: true });
 
       if (error) {
-        alert("Erro ao carregar categorias.");
+        notify.error("Erro ao carregar categorias.");
         return;
       }
 
@@ -1282,7 +1288,7 @@ export default function ReconciliationPage() {
     return mutation.run("loadSelectedReconciliation", async () => {
 
     if (!selectedAccountId || !selectedCompetenceId) {
-      alert("Selecione conta/cartão e competência.");
+      notify.warning("Selecione conta/cartão e competência.");
       return;
     }
 
@@ -1294,7 +1300,13 @@ export default function ReconciliationPage() {
       ? `Você está conciliando o cartão/conta "${selectedAccount?.name}" na competência "${selectedCompetence?.name}" com o arquivo "${selectedFile.name}". Deseja continuar?`
       : `Você está carregando a conferência salva do cartão/conta "${selectedAccount?.name}" na competência "${selectedCompetence?.name}". Deseja continuar?`;
 
-    if (!confirm(confirmationMessage)) {
+    if (
+      !(await confirmAction({
+        title: selectedFile ? "Conciliar arquivo" : "Carregar conferência",
+        message: confirmationMessage,
+        confirmLabel: "Continuar",
+      }))
+    ) {
       return;
     }
 
@@ -1310,7 +1322,7 @@ export default function ReconciliationPage() {
       await loadPersistedStatement(selectedAccountId, selectedCompetenceId);
     } catch (error) {
       console.error("Erro ao carregar conferência:", error);
-      alert("Erro ao carregar conferência.");
+      notify.error("Erro ao carregar conferência.");
     } finally {
       setIsProcessing(false);
     }
@@ -1444,7 +1456,7 @@ export default function ReconciliationPage() {
 
   async function handleFileUpload(file: File) {
     if (!selectedAccountId || !selectedCompetenceId) {
-      alert("Selecione uma conta/cartão e uma competência antes de importar a fatura.");
+      notify.warning("Selecione uma conta/cartão e uma competência antes de importar a fatura.");
       return;
     }
 
@@ -1547,7 +1559,7 @@ export default function ReconciliationPage() {
       } else {
         setLayoutAction("create");
         openLayoutMapping(rows);
-        alert(
+        notify.info(
           "Não encontrei um modelo salvo para este cartão. Faça o mapeamento das colunas uma vez e eu salvo para as próximas importações."
         );
         return;
@@ -1732,20 +1744,24 @@ export default function ReconciliationPage() {
       }
     } catch (error) {
       console.error("Erro ao processar fatura:", error);
-      alert(error instanceof Error ? error.message : "Erro ao processar fatura.");
+      notify.error(error instanceof Error ? error.message : "Erro ao processar fatura.");
     } finally {
       setIsProcessing(false);
     }
   }
 
-  function beginReplaceLayout() {
+  async function beginReplaceLayout() {
     if (!activeLayout) return;
-    const confirmed = window.confirm(
-      "Este novo layout substituirá o layout atualmente utilizado para esta conta/cartão."
-    );
+    const confirmed = await confirmAction({
+      title: "Substituir layout",
+      message:
+        "Este novo layout substituirá o layout atualmente utilizado para esta conta/cartão.",
+      tone: "warning",
+      confirmLabel: "Substituir",
+    });
     if (!confirmed) return;
     if (pendingLayoutRows.length === 0) {
-      alert("Carregue primeiro o arquivo que será usado para mapear o novo layout.");
+      notify.warning("Carregue primeiro o arquivo que será usado para mapear o novo layout.");
       return;
     }
     setLayoutAction("replace");
@@ -1756,9 +1772,13 @@ export default function ReconciliationPage() {
     return mutation.run("removeCurrentLayout", async () => {
 
     if (!activeLayout || !selectedAccountId) return;
-    const confirmed = window.confirm(
-      "O layout deixará de ser utilizado nas próximas importações. Os dados já importados permanecerão inalterados."
-    );
+    const confirmed = await confirmAction({
+      title: "Remover layout",
+      message:
+        "O layout deixará de ser utilizado nas próximas importações. Os dados já importados permanecerão inalterados.",
+      tone: "warning",
+      confirmLabel: "Remover layout",
+    });
     if (!confirmed) return;
 
     setIsManagingLayout(true);
@@ -1766,10 +1786,10 @@ export default function ReconciliationPage() {
       await removeActiveImportLayout(selectedAccountId);
       setActiveLayout(null);
       setLayoutAction("create");
-      alert("Layout removido das próximas importações.");
+      notify.success("Layout removido das próximas importações.");
     } catch (removeError) {
       console.error("Erro ao remover layout de importação:", removeError);
-      alert(`Erro ao remover layout: ${getErrorMessage(removeError)}`);
+      notify.error(`Erro ao remover layout: ${getErrorMessage(removeError)}`);
     } finally {
       setIsManagingLayout(false);
     }
@@ -1781,7 +1801,7 @@ export default function ReconciliationPage() {
     return mutation.run("saveImportLayout", async () => {
 
     if (!selectedAccountId) {
-      alert("Selecione uma conta/cartão.");
+      notify.warning("Selecione uma conta/cartão.");
       return;
     }
 
@@ -1790,7 +1810,7 @@ export default function ReconciliationPage() {
       !layoutForm.description_header ||
       !layoutForm.value_header
     ) {
-      alert("Mapeie Data, Descrição e Valor.");
+      notify.warning("Mapeie Data, Descrição e Valor.");
       return;
     }
 
@@ -1813,11 +1833,11 @@ export default function ReconciliationPage() {
       if (selectedFile) {
         await handleFileUpload(selectedFile);
       } else if (pendingLayoutRows.length > 0) {
-        alert("Modelo salvo. Agora carregue novamente a conferência.");
+        notify.info("Modelo salvo. Agora carregue novamente a conferência.");
       }
     } catch (error) {
       console.error("Erro ao salvar modelo de importação:", error);
-      alert(`Erro ao salvar modelo de importação: ${getErrorMessage(error)}`);
+      notify.error(`Erro ao salvar modelo de importação: ${getErrorMessage(error)}`);
     } finally {
       setIsManagingLayout(false);
     }
@@ -1846,7 +1866,7 @@ export default function ReconciliationPage() {
     const ownerId = await getCurrentUserId();
 
     if (!selectedAccountId || !selectedCompetenceId) {
-      alert("Selecione conta/cartão e competência.");
+      notify.warning("Selecione conta/cartão e competência.");
       return;
     }
 
@@ -1856,7 +1876,7 @@ export default function ReconciliationPage() {
       !createForm.due_date ||
       !createForm.category_id
     ) {
-      alert("Preencha todos os campos obrigatórios.");
+      notify.warning("Preencha todos os campos obrigatórios.");
       return;
     }
 
@@ -1881,7 +1901,7 @@ export default function ReconciliationPage() {
 
     if (error || !createdTransaction) {
       console.error("Erro ao criar lançamento:", error);
-      alert("Erro ao criar lançamento.");
+      notify.error("Erro ao criar lançamento.");
       return;
     }
 
@@ -1896,7 +1916,7 @@ export default function ReconciliationPage() {
       await saveReconciliation(itemToCreateTransaction, newTransaction.id);
     } catch (reconciliationError) {
       console.error("Erro ao gravar conciliação:", reconciliationError);
-      alert("Lançamento criado, mas erro ao gravar conciliação.");
+      notify.error("Lançamento criado, mas erro ao gravar conciliação.");
       return;
     }
 
@@ -1921,11 +1941,11 @@ export default function ReconciliationPage() {
 
   function openEditTransactionDrawer(item: ImportedItem) {
     if (!item.matchedTransaction) {
-      alert("Nenhum lançamento vinculado para corrigir.");
+      notify.warning("Nenhum lançamento vinculado para corrigir.");
       return;
     }
 
-    if (blockLinkedTransferIndividualChange(item.matchedTransaction, alert)) {
+    if (blockLinkedTransferIndividualChange(item.matchedTransaction, notify.warning)) {
       return;
     }
 
@@ -1946,7 +1966,7 @@ export default function ReconciliationPage() {
     if (
       blockLinkedTransferIndividualChange(
         itemToEditTransaction.matchedTransaction,
-        alert,
+        notify.warning,
       )
     ) {
       setItemToEditTransaction(null);
@@ -1971,7 +1991,7 @@ export default function ReconciliationPage() {
 
     if (error || !updatedTransaction) {
       console.error("Erro ao corrigir lançamento:", error);
-      alert("Erro ao corrigir lançamento.");
+      notify.error("Erro ao corrigir lançamento.");
       return;
     }
 
@@ -2094,7 +2114,7 @@ export default function ReconciliationPage() {
     return mutation.run("manuallyReconcile:" + item.id + ":" + transactionId, async () => {
 
     if (!selectedAccountId || !selectedCompetenceId) {
-      alert("Selecione conta/cartão e competência.");
+      notify.warning("Selecione conta/cartão e competência.");
       return;
     }
 
@@ -2103,7 +2123,7 @@ export default function ReconciliationPage() {
     );
 
     if (!selectedTransaction) {
-      alert("Lançamento do Finance não encontrado.");
+      notify.warning("Lançamento do Finance não encontrado.");
       return;
     }
 
@@ -2113,14 +2133,14 @@ export default function ReconciliationPage() {
       : Number(inputValue.replace(/\D/g, "")) / 100;
     const valueChanged = Math.round(reconciledValue * 100) !== Math.round(Number(selectedTransaction.value) * 100);
     if (valueChanged && (!Number.isFinite(reconciledValue) || reconciledValue <= 0 || reconciledValue > 9999999999.99)) {
-      alert("Informe um valor conciliado válido, maior que zero.");
+      notify.warning("Informe um valor conciliado válido, maior que zero.");
       return;
     }
 
     // Só vincular não altera o lançamento; mudar o valor alteraria uma ponta.
     if (
       valueChanged &&
-      blockLinkedTransferIndividualChange(selectedTransaction, alert)
+      blockLinkedTransferIndividualChange(selectedTransaction, notify.warning)
     ) {
       return;
     }
@@ -2150,7 +2170,7 @@ export default function ReconciliationPage() {
     } catch (error) {
       const message = getErrorMessage(error);
       console.error("Erro ao gravar conciliação:", message, error);
-      alert(`Erro ao gravar conciliação: ${message}`);
+      notify.error(`Erro ao gravar conciliação: ${message}`);
       return;
     }
 
@@ -2180,15 +2200,19 @@ export default function ReconciliationPage() {
     return mutation.run("reconcileAndAdjustLinkedTotal:" + item.id + ":" + transaction.id, async () => {
 
     // Bloqueia antes de vincular: o ajuste mudaria o valor de uma só ponta.
-    if (blockLinkedTransferIndividualChange(transaction, alert)) return;
+    if (blockLinkedTransferIndividualChange(transaction, notify.warning)) return;
 
     const adjustedValue = calculateAdjustedTransactionValue(transaction.alreadyReconciled, item.value);
 
-    const confirmed = window.confirm(
-      `Este lançamento já possui ${formatCurrency(transaction.alreadyReconciled)} ` +
-      `vinculado. O valor no Finance será ajustado de ${formatCurrency(Number(transaction.value))} ` +
-      `para ${formatCurrency(adjustedValue)}, somando os itens vinculados. Continuar?`
-    );
+    const confirmed = await confirmAction({
+      title: "Ajustar valor do lançamento",
+      message:
+        `Este lançamento já possui ${formatCurrency(transaction.alreadyReconciled)} ` +
+        `vinculado. O valor no Finance será ajustado de ${formatCurrency(Number(transaction.value))} ` +
+        `para ${formatCurrency(adjustedValue)}, somando os itens vinculados. Continuar?`,
+      tone: "warning",
+      confirmLabel: "Ajustar e conciliar",
+    });
 
     if (!confirmed) return;
 
@@ -2200,7 +2224,7 @@ export default function ReconciliationPage() {
     } catch (reconciliationError) {
       const message = getErrorMessage(reconciliationError);
       console.error("Erro ao gravar conciliação:", message, reconciliationError);
-      alert(`Erro ao gravar conciliação: ${message}`);
+      notify.error(`Erro ao gravar conciliação: ${message}`);
       return;
     }
 
@@ -2222,14 +2246,14 @@ export default function ReconciliationPage() {
       } catch (restoreError) {
         const restoreMessage = getErrorMessage(restoreError);
         console.error("Erro ao restaurar conciliação:", restoreMessage, restoreError);
-        alert(
+        notify.error(
           `Não foi possível ajustar o valor (${message}) nem restaurar o vínculo anterior (${restoreMessage}).`
         );
         return;
       }
 
       console.error("Erro ao ajustar lançamento:", message, error);
-      alert(`Não foi possível ajustar o valor. O vínculo anterior foi restaurado: ${message}`);
+      notify.error(`Não foi possível ajustar o valor. O vínculo anterior foi restaurado: ${message}`);
       return;
     }
 
@@ -2276,7 +2300,7 @@ export default function ReconciliationPage() {
       await saveReconciliation(item, null);
     } catch (error) {
       console.error("Erro ao desfazer conciliação:", error);
-      alert("Erro ao desfazer conciliação.");
+      notify.error("Erro ao desfazer conciliação.");
       return;
     }
 
@@ -2306,7 +2330,7 @@ export default function ReconciliationPage() {
       await saveReconciliation(item, null, true);
     } catch (error) {
       console.error("Erro ao ignorar item:", error);
-      alert("Erro ao ignorar item.");
+      notify.error("Erro ao ignorar item.");
       return;
     }
 
@@ -2336,13 +2360,27 @@ export default function ReconciliationPage() {
 
     const ownerId = await getCurrentUserId();
     if (!closedStatement?.id) {
-      alert("Nenhuma fatura fechada encontrada.");
+      notify.warning("Nenhuma fatura fechada encontrada.");
       return;
     }
 
-    const shouldDeletePayment = confirm(
-      "Deseja reabrir esta fatura e excluir também o lançamento de Pagamento de Fatura?"
-    );
+    // O confirm() antigo reabria a fatura nos dois botões (Cancelar só
+    // mantinha o pagamento). As duas saídas continuam, agora nomeadas, e
+    // Cancelar passa a não alterar nada.
+    const reopenChoice = await chooseAction({
+      title: "Reabrir fatura",
+      message:
+        "A fatura será reaberta. Deseja excluir também o lançamento de Pagamento de Fatura vinculado?",
+      tone: "warning",
+      choices: [
+        { value: "keep-payment", label: "Reabrir e manter pagamento" },
+        { value: "delete-payment", label: "Reabrir e excluir pagamento", tone: "danger" },
+      ],
+    });
+
+    if (!reopenChoice) return;
+
+    const shouldDeletePayment = reopenChoice === "delete-payment";
 
     try {
       const paymentTransactionId = closedStatement.payment_transaction_id;
@@ -2373,10 +2411,10 @@ export default function ReconciliationPage() {
 
       await loadPersistedStatement(selectedAccountId, selectedCompetenceId);
 
-      alert("Fatura reaberta com sucesso. As conciliações foram mantidas.");
+      notify.success("Fatura reaberta com sucesso. As conciliações foram mantidas.");
     } catch (error) {
       console.error("Erro ao reabrir fatura:", error);
-      alert("Erro ao reabrir fatura.");
+      notify.error("Erro ao reabrir fatura.");
     }
 
     });
@@ -2393,12 +2431,12 @@ export default function ReconciliationPage() {
     await new Promise((resolve) => setTimeout(resolve, 50));
 
     if (!selectedAccountId || !selectedCompetenceId) {
-      alert("Selecione cartão e competência.");
+      notify.warning("Selecione cartão e competência.");
       return;
     }
 
     if (!paymentAccountId) {
-      alert("Selecione a conta de pagamento.");
+      notify.warning("Selecione a conta de pagamento.");
       return;
     }
 
@@ -2408,12 +2446,12 @@ export default function ReconciliationPage() {
     );
 
     if (!paymentCurrencyCheck.allowed) {
-      alert(paymentCurrencyCheck.message);
+      notify.warning(paymentCurrencyCheck.message);
       return;
     }
 
     if (!paymentDueDate) {
-      alert("Informe a data de pagamento.");
+      notify.warning("Informe a data de pagamento.");
       return;
     }
 
@@ -2422,7 +2460,7 @@ export default function ReconciliationPage() {
     );
 
     if (hasPendingStatementItems || Math.abs(totalDifference) >= 0.01) {
-      alert("A fatura só pode ser fechada quando todos os itens estiverem conciliados e a diferença estiver zerada.");
+      notify.warning("A fatura só pode ser fechada quando todos os itens estiverem conciliados e a diferença estiver zerada.");
       return;
     }
 
@@ -2443,7 +2481,7 @@ export default function ReconciliationPage() {
     const statementTotal = Math.abs(totalImported);
 
     if (statementTotal <= 0) {
-      alert("Valor da fatura inválido.");
+      notify.warning("Valor da fatura inválido.");
       return;
     }
 
@@ -2480,6 +2518,19 @@ export default function ReconciliationPage() {
         null;
 
       if (paymentTransactionId) {
+        // Pagamento já confirmado continua Pago ao fechar a fatura de novo.
+        const { data: currentPayment, error: currentPaymentError } =
+          await supabase
+            .from("transactions")
+            .select("status")
+            .eq("id", paymentTransactionId)
+            .eq("owner_id", ownerId)
+            .maybeSingle();
+
+        if (currentPaymentError) {
+          throw currentPaymentError;
+        }
+
         const { error: updatePaymentError } = await supabase
           .from("transactions")
           .update({
@@ -2487,7 +2538,7 @@ export default function ReconciliationPage() {
             value: statementTotal,
             due_date: paymentDueDate,
             type: "Pagamento de Fatura",
-            status: "Pendente",
+            status: getInvoicePaymentStatusOnReclose(currentPayment?.status),
             account_id: paymentAccountId,
             competence_id: paymentCompetenceId,
           })
@@ -2573,14 +2624,14 @@ export default function ReconciliationPage() {
       }
 
       setClosedStatement(savedStatement);
-      alert(
+      notify.success(
         existingStatement
           ? "Pagamento da fatura atualizado com sucesso."
           : "Fatura fechada e pagamento programado com sucesso."
       );
     } catch (error: unknown) {
       console.error("Erro ao fechar/atualizar fatura:", error);
-      alert(
+      notify.error(
         error instanceof Error
           ? error.message
           : "Erro ao salvar fatura."
@@ -2602,7 +2653,14 @@ export default function ReconciliationPage() {
   async function unlinkAllReconciliations() {
     return mutation.run("unlinkAllReconciliations", async () => {
 
-                  if (!confirm("Deseja realmente desfazer TODAS as conciliações desta competência?")) {
+                  if (
+                    !(await confirmAction({
+                      title: "Desfazer todas as conciliações",
+                      message: "Deseja realmente desfazer TODAS as conciliações desta competência?",
+                      tone: "danger",
+                      confirmLabel: "Desfazer todas",
+                    }))
+                  ) {
                     return;
                   }
 
@@ -2623,7 +2681,7 @@ export default function ReconciliationPage() {
                     .in("statement_item_id", statementItemIds);
 
                   if (deleteLinksError) {
-                    alert("Erro ao desfazer as conciliações.");
+                    notify.error("Erro ao desfazer as conciliações.");
                     return;
                   }
 
@@ -2638,7 +2696,7 @@ export default function ReconciliationPage() {
                     .in("id", statementItemIds);
 
                   if (error) {
-                    alert("Erro ao desfazer as conciliações.");
+                    notify.error("Erro ao desfazer as conciliações.");
                     return;
                   }
 
@@ -2652,7 +2710,7 @@ export default function ReconciliationPage() {
                     }))
                   );
 
-                  alert("Conciliações removidas com sucesso.");
+                  notify.success("Conciliações removidas com sucesso.");
 
     });
   }
@@ -2666,13 +2724,13 @@ export default function ReconciliationPage() {
                   }
 
                   if (!selectedAccountId || !selectedCompetenceId) {
-                    alert("Selecione conta/cartão e competência.");
+                    notify.warning("Selecione conta/cartão e competência.");
                     return;
                   }
 
                   await loadPersistedStatement(selectedAccountId, selectedCompetenceId).catch((error) => {
                     console.error("Erro ao recarregar conferência:", error);
-                    alert("Erro ao recarregar conferência.");
+                    notify.error("Erro ao recarregar conferência.");
                   });
 
     });
@@ -2707,7 +2765,7 @@ export default function ReconciliationPage() {
                   setActiveLayout(await loadActiveImportLayout(accountId));
                 } catch (layoutError) {
                   console.error("Erro ao carregar layout ativo:", layoutError);
-                  alert("Não foi possível carregar o layout desta conta/cartão.");
+                  notify.error("Não foi possível carregar o layout desta conta/cartão.");
                 }
               }
             }}

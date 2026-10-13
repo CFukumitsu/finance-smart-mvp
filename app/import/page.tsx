@@ -8,6 +8,7 @@ import AppShell from "../components/layout/AppShell";
 import { getCurrentUserId, supabase } from "@/src/lib/supabase";
 import { ensureCompetencesExist } from "@/src/services/competenceService";
 import * as XLSX from "xlsx";
+import { confirmAction, notify } from "@/src/components/ui/feedback/feedbackStore";
 
 type AccessAccount = {
   ID_PAGAMENTO: number;
@@ -92,9 +93,13 @@ export default function ImportAccessPage() {
   async function clearDatabase() {
     return mutation.run("clearDatabase", async () => {
 
-    const confirmed = window.confirm(
-      "Atenção: isso vai apagar lançamentos, competências, categorias e contas do banco atual. Confirma?"
-    );
+    const confirmed = await confirmAction({
+      title: "Limpar base",
+      message:
+        "Atenção: isso vai apagar lançamentos, competências, categorias e contas do banco atual. Confirma?",
+      tone: "danger",
+      confirmLabel: "Apagar dados",
+    });
 
     if (!confirmed) return;
 
@@ -141,13 +146,16 @@ export default function ImportAccessPage() {
     return mutation.run("importAccessData", async () => {
 
     if (!pagamentoFile || !tipoGastoFile || !transacaoFile) {
-      alert("Selecione os três arquivos: PAGAMENTO, TIPOGASTO e TRANSACAO.");
+      notify.warning("Selecione os três arquivos: PAGAMENTO, TIPOGASTO e TRANSACAO.");
       return;
     }
 
-    const confirmed = window.confirm(
-      "Confirma a importação? O ideal é limpar a base antes de importar."
-    );
+    const confirmed = await confirmAction({
+      title: "Importar dados",
+      message: "Confirma a importação? O ideal é limpar a base antes de importar.",
+      tone: "warning",
+      confirmLabel: "Importar",
+    });
 
     if (!confirmed) return;
 

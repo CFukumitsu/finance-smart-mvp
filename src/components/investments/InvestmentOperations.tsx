@@ -33,6 +33,7 @@ import {
   investmentField,
   parseInvestmentDecimal,
 } from "./InvestmentUi";
+import { confirmAction, notify } from "@/src/components/ui/feedback/feedbackStore";
 
 const today = () => new Date().toISOString().slice(0, 10);
 
@@ -200,18 +201,18 @@ export default function InvestmentOperations({
     const unitPrice = parseInvestmentMoney(form.unitPrice);
     const fees = parseInvestmentMoney(form.fees || "0");
 
-    if (!form.date) return alert("Informe a data da operação.");
-    if (!form.assetId) return alert("Informe o ativo.");
+    if (!form.date) return notify.warning("Informe a data da operação.");
+    if (!form.assetId) return notify.warning("Informe o ativo.");
     if (!form.accountId)
-      return alert(
+      return notify.warning(
         "Selecione uma conta ativa, com moeda compatível e marcada para Investimentos.",
       );
     if (!Number.isFinite(quantity) || quantity <= 0)
-      return alert("Informe uma quantidade maior que zero.");
+      return notify.warning("Informe uma quantidade maior que zero.");
     if (!Number.isFinite(unitPrice) || unitPrice <= 0)
-      return alert("Informe um preço unitário maior que zero.");
+      return notify.warning("Informe um preço unitário maior que zero.");
     if (!Number.isFinite(fees) || fees < 0)
-      return alert("As taxas não podem ser negativas.");
+      return notify.warning("As taxas não podem ser negativas.");
 
     try {
       submissionLock.current = true;
@@ -232,7 +233,7 @@ export default function InvestmentOperations({
       setOpen(false);
       await reload();
     } catch (value) {
-      alert(
+      notify.error(
         value instanceof Error ? value.message : "Não foi possível salvar.",
       );
     } finally {
@@ -247,13 +248,13 @@ export default function InvestmentOperations({
   async function remove(operation: InvestmentOperation) {
     return mutation.run("remove" + ":" + (operation).id, async () => {
 
-    if (!confirm("Excluir esta operação? A posição será recalculada.")) return;
+    if (!(await confirmAction({ title: "Excluir operação", message: "Excluir esta operação? A posição será recalculada.", tone: "danger", confirmLabel: "Excluir" }))) return;
 
     try {
       await deleteInvestmentOperation(operation.id);
       await reload();
     } catch (value) {
-      alert(
+      notify.error(
         value instanceof Error ? value.message : "Não foi possível excluir.",
       );
     }

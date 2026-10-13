@@ -62,7 +62,6 @@ test("Receita e Despesa preservam o status automático atual ao editar a data", 
     assert.equal(change("Receita", "Recebido", future), "Pendente");
     assert.equal(change("Despesa", "Pendente", today), "Pago");
     assert.equal(change("Despesa", "Pago", future), "Pendente");
-    assert.equal(change("Pagamento de Fatura", "Pago", future), "Pendente");
   }
 });
 
@@ -87,4 +86,39 @@ test("status automático preserva a regra anterior", () => {
   assert.equal(getAutomaticTransactionStatus("Despesa", past, today), "Pago");
   assert.equal(getAutomaticTransactionStatus("Transferência", past, today), "Pago");
   assert.equal(getAutomaticTransactionStatus("Transferência", future, today), "Pendente");
+});
+
+test("pagamento de fatura novo nasce Pendente em qualquer data", () => {
+  for (const date of [past, today, future]) {
+    assert.equal(getAutomaticTransactionStatus("Pagamento de Fatura", date, today), "Pendente");
+  }
+});
+
+test("pagamento de fatura: editar a data não quita nem reabre", () => {
+  const edit = (currentStatus: string, newDueDate: string) =>
+    getStatusAfterDateChange({
+      type: "Pagamento de Fatura",
+      currentStatus,
+      newDueDate,
+      isEditing: true,
+      today,
+    });
+
+  assert.equal(edit("Pendente", past), "Pendente");
+  assert.equal(edit("Pendente", today), "Pendente");
+  assert.equal(edit("Pago", future), "Pago");
+  assert.equal(edit("Pago", past), "Pago");
+});
+
+test("pagamento de fatura: trocar a data na criação continua Pendente", () => {
+  assert.equal(
+    getStatusAfterDateChange({
+      type: "Pagamento de Fatura",
+      currentStatus: "Pendente",
+      newDueDate: past,
+      isEditing: false,
+      today,
+    }),
+    "Pendente",
+  );
 });

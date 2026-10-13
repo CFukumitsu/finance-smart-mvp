@@ -9,6 +9,7 @@ import {
   ArrowLeftRight,
   ArrowUpRight,
   Car,
+  Check,
   ChevronLeft,
   ChevronRight,
   CreditCard,
@@ -18,13 +19,14 @@ import {
   GraduationCap,
   HeartPulse,
   House,
+  LayoutGrid,
+  List,
   Lock,
   PawPrint,
   Pencil,
   Plane,
   Plus,
   Receipt,
-  Rows3,
   Search,
   Shirt,
   ShoppingCart,
@@ -102,6 +104,7 @@ import {
   isFinancialLedgerAccount,
 } from "@/src/utils/closingAccounts";
 import {
+  checkCardPaymentCurrencies,
   checkTransferCurrencies,
   formatMoney,
   formatMoneyInput,
@@ -112,7 +115,28 @@ import { summarizeTransactionTotalsByCurrency } from "@/src/utils/transactionCur
 import {
   getAutomaticTransactionStatus,
   getStatusAfterDateChange,
+  getTodayIsoDate,
 } from "@/src/utils/transactionStatus";
+import {
+  checkLinkedInvoicePaymentEdit,
+  INVOICE_PAYMENT_ACCOUNT_MESSAGE,
+  isInvoicePaymentOverdue,
+  LINKED_INVOICE_PAYMENT_DELETE_MESSAGE,
+} from "@/src/utils/invoicePayment";
+import {
+  canConfirmPayment,
+  getInvoiceDivergence,
+  validatePaymentConfirmation,
+  type InvoiceDivergence,
+} from "@/src/utils/paymentConfirmation";
+import { ensureCompetenceIsOpen } from "@/src/utils/competenceLock";
+import ConfirmPaymentDialog from "../components/transactions/ConfirmPaymentDialog";
+import {
+  confirmAction,
+  notify,
+  showNotice,
+  showToast,
+} from "@/src/components/ui/feedback/feedbackStore";
 
 type Account = {
   id: string;
@@ -169,6 +193,17 @@ type Transaction = {
   investment_integration_group_id?: string | null;
   investment_event_type?: "application" | "redemption" | null;
   transfer_group_id?: string | null;
+};
+
+// Fatura fechada. payment_transaction_id liga a fatura (cartão = account_id)
+// ao lançamento "Pagamento de Fatura", que fica na conta pagadora.
+type CardStatement = {
+  id: string;
+  account_id: string;
+  competence_id: string;
+  payment_transaction_id: string | null;
+  payment_account_id: string | null;
+  statement_total: number | null;
 };
 
 type AccountClosure = {
@@ -250,6 +285,19 @@ function SummaryCard({
     </div>
   );
 }
+
+type TransactionsViewMode = "list" | "cards";
+
+const viewModeStorageKeyPrefix = "finance-smart-transactions-view";
+
+const viewModeOptions: {
+  value: TransactionsViewMode;
+  label: string;
+  icon: LucideIcon;
+}[] = [
+  { value: "list", label: "Lista", icon: List },
+  { value: "cards", label: "Cartões", icon: LayoutGrid },
+];
 
 const badgeBaseClass =
   "inline-flex items-center whitespace-nowrap rounded-full px-2 py-0.5 text-[11px] font-medium leading-4";
@@ -406,14 +454,19 @@ function TransactionsPageContent() {
   const [detailTransactionId, setDetailTransactionId] = useState<
     string | null
   >(null);
-  const [density, setDensity] = useState<"compact" | "comfortable">("compact");
+  const [viewMode, setViewMode] = useState<TransactionsViewMode>("list");
+  const viewModeStorageKey = useRef<string | null>(null);
   const [plannedCardLimit, setPlannedCardLimit] = useState(0);
   const [accountClosures, setAccountClosures] = useState<AccountClosure[]>([]);
   const loadTransactionsRequestIdRef = useRef(0);
 
-  const [cardStatements, setCardStatements] = useState<
-    { account_id: string; competence_id: string }[]
-  >([]);
+  const [cardStatements, setCardStatements] = useState<CardStatement[]>([]);
+  const [confirmingPayment, setConfirmingPayment] = useState<{
+    transaction: Transaction;
+    effectiveDate: string;
+    divergence: InvoiceDivergence | null;
+    error: string | null;
+  } | null>(null);
 
   const transactionDefaultsKey = "finance-smart-transaction-defaults";
 
@@ -496,8 +549,44 @@ function TransactionsPageContent() {
   });
   const financialAccounts = accounts.filter(isFinancialAccount);
   const financialLedgerAccounts = accounts.filter(isFinancialLedgerAccount);
+  // Pagamento de fatura sai de conta bancária; um registro legado gravado num
+  // cartão continua visível para que a troca seja explícita.
+  const invoicePaymentAccountOptions = [
+    ...financialAccounts,
+    ...accounts.filter(
+      (account) =>
+        account.id === form.account_id &&
+        !financialAccounts.some((item) => item.id === account.id),
+    ),
+  ];
   const formAccountOptions =
-    form.type === "Transferência" ? financialAccounts : financialLedgerAccounts;
+    form.type === "Transferência"
+      ? financialAccounts
+      : form.type === "Pagamento de Fatura"
+        ? invoicePaymentAccountOptions
+        : financialLedgerAccounts;
+
+  function getLinkedStatement(transactionId: string | null | undefined) {
+    if (!transactionId) return null;
+    return (
+      cardStatements.find(
+        (statement) => statement.payment_transaction_id === transactionId,
+      ) ?? null
+    );
+  }
+
+  function getStatementLabel(statement: CardStatement | null) {
+    if (!statement) return null;
+    const cardName =
+      accounts.find((account) => account.id === statement.account_id)?.name ??
+      "Cartão";
+    const competenceName = competences.find(
+      (competence) => competence.id === statement.competence_id,
+    )?.name;
+    return competenceName
+      ? `${cardName} · ${formatCompetenceLabel(competenceName)}`
+      : cardName;
+  }
 
   function getCurrentCompetenceId(list: Competence[]) {
     const today = new Date();
@@ -816,7 +905,7 @@ function TransactionsPageContent() {
 
     if (error) {
       console.error("Erro ao carregar lançamentos:", error);
-      alert("Erro ao carregar lançamentos.");
+      notify.error("Erro ao carregar lançamentos.");
       setIsLoading(false);
       return;
     }
@@ -848,7 +937,9 @@ function TransactionsPageContent() {
         supabase.from("account_closures").select("*").eq("owner_id", ownerId),
         supabase
           .from("credit_card_statements")
-          .select("account_id, competence_id")
+          .select(
+            "id, account_id, competence_id, payment_transaction_id, payment_account_id, statement_total",
+          )
           .eq("owner_id", ownerId),
       ],
     );
@@ -944,12 +1035,27 @@ function TransactionsPageContent() {
   }, []);
 
   useEffect(() => {
-    const storedDensity = localStorage.getItem(
-      "finance-smart-transactions-density",
-    );
-    if (storedDensity === "compact" || storedDensity === "comfortable") {
-      setDensity(storedDensity);
-    }
+    let cancelled = false;
+
+    // Local session lookup (no network) so the stored view applies right away.
+    void supabase.auth.getSession().then(({ data }) => {
+      const userId = data.session?.user.id;
+      if (cancelled || !userId) return;
+
+      const key = `${viewModeStorageKeyPrefix}:${userId}`;
+      viewModeStorageKey.current = key;
+
+      try {
+        const stored = localStorage.getItem(key);
+        if (stored === "list" || stored === "cards") setViewMode(stored);
+      } catch {
+        // Storage unavailable: keep the default list view.
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -1093,9 +1199,11 @@ function TransactionsPageContent() {
 
   async function openEditDrawer(transaction: Transaction) {
     if (transaction.bankroll_integration_group_id) {
-      alert(
-        "Esta operação está vinculada ao Financeiro e deve ser editada pelo módulo Bankroll.",
-      );
+      await showNotice({
+        tone: "warning",
+        message:
+          "Esta operação está vinculada ao Financeiro e deve ser editada pelo módulo Bankroll.",
+      });
       router.push(
         `/bankroll/transactions?action=${transaction.bankroll_operation_type ?? "deposit"}`,
       );
@@ -1103,9 +1211,11 @@ function TransactionsPageContent() {
     }
 
     if (transaction.investment_integration_group_id) {
-      alert(
-        "Esta transferência pertence a uma conta por saldo e deve ser editada pelo módulo de Investimentos.",
-      );
+      await showNotice({
+        tone: "warning",
+        message:
+          "Esta transferência pertence a uma conta por saldo e deve ser editada pelo módulo de Investimentos.",
+      });
       router.push("/investments/operations");
       return;
     }
@@ -1116,7 +1226,7 @@ function TransactionsPageContent() {
     }
 
     if (isTransactionLocked(transaction)) {
-      alert("Esta conta/cartão já está fechado nesta competência.");
+      notify.warning("Esta conta/cartão já está fechado nesta competência.");
       return;
     }
 
@@ -1175,12 +1285,12 @@ function TransactionsPageContent() {
       legs = await loadLinkedTransferLegs(transaction.transfer_group_id ?? "");
     } catch (error) {
       console.error("Erro ao carregar transferência vinculada:", error);
-      alert(LINKED_TRANSFER_INCONSISTENT_MESSAGE);
+      notify.warning(LINKED_TRANSFER_INCONSISTENT_MESSAGE);
       return;
     }
 
     if (!legs) {
-      alert(LINKED_TRANSFER_INCONSISTENT_MESSAGE);
+      notify.warning(LINKED_TRANSFER_INCONSISTENT_MESSAGE);
       return;
     }
 
@@ -1188,7 +1298,7 @@ function TransactionsPageContent() {
       isTransactionLocked({ ...transaction, ...legs.outgoing }) ||
       isTransactionLocked({ ...transaction, ...legs.incoming })
     ) {
-      alert("Esta conta/cartão já está fechado nesta competência.");
+      notify.warning("Esta conta/cartão já está fechado nesta competência.");
       return;
     }
 
@@ -1281,7 +1391,7 @@ function TransactionsPageContent() {
             !selectedDestination ||
             !isFinancialAccount(selectedDestination)))
       ) {
-        alert(
+        notify.warning(
           "Contas de investimento devem ser movimentadas exclusivamente pelo módulo Investimentos.",
         );
         return;
@@ -1302,8 +1412,53 @@ function TransactionsPageContent() {
           form.type !== "Pagamento de Fatura" &&
           !form.category_id)
       ) {
-        alert("Preencha todos os campos obrigatórios.");
+        notify.warning("Preencha todos os campos obrigatórios.");
         return;
+      }
+
+      // Pagamento de fatura: a conta pagadora é bancária e, quando o
+      // lançamento está vinculado a uma fatura, valor e tipo seguem a fatura.
+      const editingOriginal = editingTransactionId
+        ? transactions.find(
+            (transaction) => transaction.id === editingTransactionId,
+          )
+        : undefined;
+      const linkedStatement =
+        editingOriginal?.type === "Pagamento de Fatura"
+          ? getLinkedStatement(editingTransactionId)
+          : null;
+
+      if (
+        form.type === "Pagamento de Fatura" &&
+        !isFinancialAccount(selectedAccount)
+      ) {
+        notify.warning(INVOICE_PAYMENT_ACCOUNT_MESSAGE);
+        return;
+      }
+
+      if (linkedStatement && editingOriginal) {
+        const editCheck = checkLinkedInvoicePaymentEdit({
+          originalValue: Number(editingOriginal.value),
+          newValue: numericValue,
+          newType: form.type,
+          statementTotal: Number(linkedStatement.statement_total ?? 0),
+          currency: selectedAccount.currency,
+        });
+
+        if (!editCheck.ok) {
+          notify.warning(editCheck.message);
+          return;
+        }
+
+        const paymentCurrencyCheck = checkCardPaymentCurrencies(
+          getAccountCurrency(linkedStatement.account_id),
+          selectedAccount.currency,
+        );
+
+        if (!paymentCurrencyCheck.allowed) {
+          notify.warning(paymentCurrencyCheck.message);
+          return;
+        }
       }
 
       // Transferências vinculadas (novas ou em edição) aceitam moedas
@@ -1321,7 +1476,7 @@ function TransactionsPageContent() {
         : null;
 
       if (transferCurrencyMode?.mode === "blocked") {
-        alert(transferCurrencyMode.message);
+        notify.warning(transferCurrencyMode.message);
         return;
       }
 
@@ -1340,7 +1495,7 @@ function TransactionsPageContent() {
           transferCurrencyMode,
         );
         if (!conversionResult.ok) {
-          alert(conversionResult.message);
+          notify.warning(conversionResult.message);
           return;
         }
         conversionInput = conversionResult.conversion;
@@ -1370,7 +1525,7 @@ function TransactionsPageContent() {
           : null;
 
         if (currencyCheck && !currencyCheck.allowed) {
-          alert(currencyCheck.message);
+          notify.warning(currencyCheck.message);
           return;
         }
       }
@@ -1379,7 +1534,7 @@ function TransactionsPageContent() {
         form.mode === "parcelado" &&
         (!installmentCount || installmentCount < 2)
       ) {
-        alert("Informe uma quantidade de parcelas maior que 1.");
+        notify.warning("Informe uma quantidade de parcelas maior que 1.");
         return;
       }
 
@@ -1405,7 +1560,7 @@ function TransactionsPageContent() {
             price <= 0 ||
             numericValue <= 0
           ) {
-            alert("Preencha todos os dados obrigatórios do abastecimento.");
+            notify.warning("Preencha todos os dados obrigatórios do abastecimento.");
             return;
           }
           const { data: last } = await supabase
@@ -1419,9 +1574,12 @@ function TransactionsPageContent() {
           if (
             last &&
             odometer < Number(last.odometer) &&
-            !window.confirm(
-              `O hodômetro é inferior ao último registro (${last.odometer} km). Deseja continuar?`,
-            )
+            !(await confirmAction({
+              title: "Hodômetro menor que o último registro",
+              message: `O hodômetro é inferior ao último registro (${last.odometer} km). Deseja continuar?`,
+              tone: "warning",
+              confirmLabel: "Continuar",
+            }))
           )
             return;
           const lock = await ensureAccountIsOpen({
@@ -1429,7 +1587,7 @@ function TransactionsPageContent() {
             competenceId: effectiveCompetenceId,
           });
           if (!lock.allowed) {
-            alert(lock.message);
+            notify.warning(lock.message);
             return;
           }
           const transactionPayload = {
@@ -1515,7 +1673,7 @@ function TransactionsPageContent() {
             form.destination_account_id,
           ]) {
             if (!accountId) {
-              alert("Conta/cartão inválido para validar fechamento.");
+              notify.warning("Conta/cartão inválido para validar fechamento.");
               return;
             }
 
@@ -1525,7 +1683,7 @@ function TransactionsPageContent() {
             });
 
             if (!lock.allowed) {
-              alert(lock.message);
+              notify.warning(lock.message);
               return;
             }
           }
@@ -1573,6 +1731,13 @@ function TransactionsPageContent() {
           return;
         }
 
+        // Pagamento de fatura novo nasce Pendente; na edição o status atual é
+        // mantido (só "Confirmar pagamento" quita).
+        const savedStatus =
+          form.type === "Pagamento de Fatura" && !editingTransactionId
+            ? "Pendente"
+            : form.status;
+
         const installmentDates =
           form.mode === "parcelado" && !editingTransactionId
             ? Array.from({ length: installmentCount }, (_, index) =>
@@ -1602,7 +1767,7 @@ function TransactionsPageContent() {
                   due_date: dueDate,
                   type: form.type,
                   mode: form.mode,
-                  status: form.status,
+                  status: savedStatus,
                   account_id: form.account_id,
                   category_id:
                     form.type === "Transferência" ||
@@ -1630,7 +1795,7 @@ function TransactionsPageContent() {
                   due_date: form.due_date,
                   type: form.type,
                   mode: form.mode,
-                  status: form.status,
+                  status: savedStatus,
                   account_id: form.account_id,
                   category_id:
                     form.type === "Transferência" ||
@@ -1652,7 +1817,7 @@ function TransactionsPageContent() {
 
         for (const transaction of transactionsToSave) {
           if (!transaction.account_id) {
-            alert("Conta/cartão inválido para validar fechamento.");
+            notify.warning("Conta/cartão inválido para validar fechamento.");
             return;
           }
 
@@ -1662,7 +1827,7 @@ function TransactionsPageContent() {
           });
 
           if (!lock.allowed) {
-            alert(lock.message);
+            notify.warning(lock.message);
             return;
           }
         }
@@ -1677,6 +1842,36 @@ function TransactionsPageContent() {
 
         if (error) {
           throw new Error(error.message);
+        }
+
+        // A fatura acompanha a conta pagadora do lançamento vinculado; o
+        // vínculo (payment_transaction_id) e o total não mudam.
+        if (
+          linkedStatement &&
+          linkedStatement.payment_account_id !== form.account_id
+        ) {
+          const { error: statementError } = await supabase
+            .from("credit_card_statements")
+            .update({
+              payment_account_id: form.account_id,
+              updated_at: new Date().toISOString(),
+            })
+            .eq("id", linkedStatement.id)
+            .eq("owner_id", ownerId);
+
+          if (statementError) {
+            throw new Error(
+              `Pagamento salvo, mas não foi possível atualizar a conta pagadora da fatura: ${statementError.message}`,
+            );
+          }
+
+          setCardStatements((current) =>
+            current.map((statement) =>
+              statement.id === linkedStatement.id
+                ? { ...statement, payment_account_id: form.account_id }
+                : statement,
+            ),
+          );
         }
 
         if (editingTransactionId)
@@ -1700,7 +1895,7 @@ function TransactionsPageContent() {
       } catch (error) {
         console.error("Erro ao salvar lançamento:", error);
 
-        alert(
+        notify.error(
           error instanceof Error ? error.message : "Erro ao salvar lançamento.",
         );
       }
@@ -1716,14 +1911,23 @@ function TransactionsPageContent() {
           return;
         }
 
-        const confirmed = window.confirm(
-          "Tem certeza que deseja excluir este lançamento? Se ele estiver conciliado, a conciliação será desfeita automaticamente.",
-        );
-
-        if (isTransactionLocked(transaction)) {
-          alert("Esta conta/cartão já está fechado nesta competência.");
+        if (getLinkedStatement(transaction.id)) {
+          notify.warning(LINKED_INVOICE_PAYMENT_DELETE_MESSAGE);
           return;
         }
+
+        if (isTransactionLocked(transaction)) {
+          notify.warning("Esta conta/cartão já está fechado nesta competência.");
+          return;
+        }
+
+        const confirmed = await confirmAction({
+          title: "Excluir lançamento",
+          message:
+            "Tem certeza que deseja excluir este lançamento? Se ele estiver conciliado, a conciliação será desfeita automaticamente.",
+          tone: "danger",
+          confirmLabel: "Excluir",
+        });
 
         if (!confirmed) return;
 
@@ -1731,7 +1935,7 @@ function TransactionsPageContent() {
           const result = await deleteTransactionService(transaction.id);
 
           if (!result.success) {
-            alert(result.message ?? "Erro ao excluir lançamento.");
+            notify.error(result.message ?? "Erro ao excluir lançamento.");
             return;
           }
 
@@ -1747,7 +1951,7 @@ function TransactionsPageContent() {
         } catch (error) {
           console.error("Erro ao excluir lançamento:", error);
 
-          alert(
+          notify.error(
             error instanceof Error
               ? error.message
               : "Erro ao excluir lançamento.",
@@ -1755,6 +1959,209 @@ function TransactionsPageContent() {
         }
       },
     );
+  }
+
+  function getPaymentConfirmationContext(transaction: Transaction) {
+    const account = accounts.find((item) => item.id === transaction.account_id);
+    return {
+      isBankAccount: account ? isFinancialAccount(account) : false,
+      isFuel: getCategorySpecialType(transaction) === "fuel",
+    };
+  }
+
+  function canConfirm(transaction: Transaction) {
+    return canConfirmPayment(
+      transaction,
+      getPaymentConfirmationContext(transaction),
+    );
+  }
+
+  function getStatementTotal(transactionId: string) {
+    const statement = getLinkedStatement(transactionId);
+    return statement && statement.statement_total !== null
+      ? Number(statement.statement_total)
+      : null;
+  }
+
+  function openConfirmPayment(transaction: Transaction) {
+    setConfirmingPayment({
+      transaction,
+      effectiveDate: getTodayIsoDate(),
+      // Divergência conhecida já aparece ao abrir; confirmar com ela visível
+      // é a confirmação explícita.
+      divergence:
+        transaction.type === "Pagamento de Fatura"
+          ? getInvoiceDivergence(
+              Number(transaction.value),
+              getStatementTotal(transaction.id),
+              getAccountCurrency(transaction.account_id),
+            )
+          : null,
+      error: null,
+    });
+  }
+
+  function closeConfirmPayment() {
+    setConfirmingPayment(null);
+  }
+
+  // Confirmação rápida: só status = "Pago" e due_date = data efetiva. Conta,
+  // competência, valor e vínculo com a fatura são preservados; o saldo segue a
+  // regra por data, então não há segundo débito nem ajuste automático.
+  async function confirmPayment() {
+    if (!confirmingPayment) return;
+    const { transaction, effectiveDate } = confirmingPayment;
+    const divergenceShown = confirmingPayment.divergence !== null;
+
+    const fail = (message: string) =>
+      setConfirmingPayment((current) =>
+        current ? { ...current, error: message } : current,
+      );
+
+    return mutation.run(`confirmPayment:${transaction.id}`, async () => {
+      try {
+        setConfirmingPayment((current) =>
+          current ? { ...current, error: null } : current,
+        );
+        const ownerId = await getCurrentUserId();
+
+        // Revalida com os dados atuais do banco (outra aba pode ter mudado).
+        const { data: current, error: currentError } = await supabase
+          .from("transactions")
+          .select(
+            "id, type, status, due_date, value, account_id, competence_id, category_id, bankroll_integration_group_id, investment_integration_group_id, transfer_group_id",
+          )
+          .eq("id", transaction.id)
+          .eq("owner_id", ownerId)
+          .single();
+
+        if (currentError || !current) {
+          fail("Lançamento não encontrado. Atualize a lista e tente novamente.");
+          return;
+        }
+
+        let statementTotal: number | null = null;
+        if (current.type === "Pagamento de Fatura") {
+          const { data: statement, error: statementError } = await supabase
+            .from("credit_card_statements")
+            .select("statement_total")
+            .eq("owner_id", ownerId)
+            .eq("payment_transaction_id", transaction.id)
+            .limit(1)
+            .maybeSingle();
+
+          if (statementError) throw new Error(statementError.message);
+          statementTotal =
+            statement && statement.statement_total !== null
+              ? Number(statement.statement_total)
+              : null;
+        }
+
+        const validation = validatePaymentConfirmation({
+          transaction: { ...current, value: Number(current.value) },
+          context: getPaymentConfirmationContext({ ...transaction, ...current }),
+          effectiveDate,
+          today: getTodayIsoDate(),
+          statementTotal,
+          currency: getAccountCurrency(current.account_id),
+          divergenceAcknowledged: divergenceShown,
+        });
+
+        if (!validation.ok) {
+          if (validation.reason === "divergence") {
+            // Divergência que não estava na tela: mostra e pede novo clique.
+            const { divergence } = validation;
+            setConfirmingPayment((state) =>
+              state ? { ...state, divergence, error: null } : state,
+            );
+            return;
+          }
+          fail(validation.message);
+          return;
+        }
+
+        // Fechamentos: competência original e a do mês da data efetiva (o
+        // saldo é por data, então um mês fechado não pode mudar por aqui).
+        const effectiveCompetenceId = competences.find(
+          (competence) => competence.name === toCompetenceKey(effectiveDate),
+        )?.id;
+        const competenceIds = Array.from(
+          new Set(
+            [current.competence_id, effectiveCompetenceId].filter(
+              (id): id is string => Boolean(id),
+            ),
+          ),
+        );
+
+        for (const competenceId of competenceIds) {
+          const competenceLock = await ensureCompetenceIsOpen(competenceId);
+          if (!competenceLock.allowed) {
+            fail(competenceLock.message);
+            return;
+          }
+
+          const accountLock = await ensureAccountIsOpen({
+            accountId: current.account_id,
+            competenceId,
+          });
+          if (!accountLock.allowed) {
+            fail(accountLock.message);
+            return;
+          }
+        }
+
+        // O filtro por status impede confirmação duplicada (clique duplo,
+        // outra aba): só um UPDATE encontra a linha ainda Pendente.
+        const { data: updated, error: updateError } = await supabase
+          .from("transactions")
+          .update({ status: "Pago", due_date: effectiveDate })
+          .eq("id", transaction.id)
+          .eq("owner_id", ownerId)
+          .eq("status", "Pendente")
+          .select("id");
+
+        if (updateError) throw new Error(updateError.message);
+
+        const wasUpdated = Boolean(updated && updated.length > 0);
+
+        // Atualiza a tela sem recarregar a lista inteira.
+        setTransactions((list) =>
+          statusFilter === "Pendente"
+            ? list.filter((item) => item.id !== transaction.id)
+            : list.map((item) =>
+                item.id === transaction.id
+                  ? {
+                      ...item,
+                      status: "Pago",
+                      due_date: wasUpdated ? effectiveDate : item.due_date,
+                    }
+                  : item,
+              ),
+        );
+        setConfirmingPayment(null);
+
+        if (wasUpdated) {
+          showToast(
+            "success",
+            "Pagamento confirmado",
+            `Marcado como pago em ${formatFullDate(effectiveDate)}.`,
+          );
+        } else {
+          showToast(
+            "info",
+            "Pagamento já confirmado",
+            "Este lançamento já estava pago. Nada foi alterado.",
+          );
+        }
+      } catch (error) {
+        console.error("Erro ao confirmar pagamento:", error);
+        fail(
+          error instanceof Error
+            ? error.message
+            : "Não foi possível confirmar o pagamento. Tente novamente.",
+        );
+      }
+    });
   }
 
   async function saveNewConversionProvider() {
@@ -1771,7 +2178,7 @@ function TransactionsPageContent() {
       setConversionForm((current) => ({ ...current, providerId: provider.id }));
       setNewProviderName(null);
     } catch (error) {
-      alert(error instanceof Error ? error.message : "Erro ao criar provedor.");
+      notify.error(error instanceof Error ? error.message : "Erro ao criar provedor.");
     } finally {
       setIsSavingProvider(false);
     }
@@ -1781,11 +2188,19 @@ function TransactionsPageContent() {
   // duas pontas e remove ambas na mesma transação.
   async function deleteLinkedTransferFromList(transaction: Transaction) {
     if (isTransactionLocked(transaction)) {
-      alert("Esta conta/cartão já está fechado nesta competência.");
+      notify.warning("Esta conta/cartão já está fechado nesta competência.");
       return;
     }
 
-    if (!window.confirm(LINKED_TRANSFER_DELETE_CONFIRMATION)) return;
+    if (
+      !(await confirmAction({
+        title: "Excluir transferência",
+        message: LINKED_TRANSFER_DELETE_CONFIRMATION,
+        tone: "danger",
+        confirmLabel: "Excluir",
+      }))
+    )
+      return;
 
     try {
       await deleteLinkedTransfer(transaction.transfer_group_id ?? "");
@@ -1802,7 +2217,7 @@ function TransactionsPageContent() {
     } catch (error) {
       console.error("Erro ao excluir transferência:", error);
 
-      alert(
+      notify.error(
         error instanceof Error ? error.message : "Erro ao excluir transferência.",
       );
     }
@@ -2230,10 +2645,123 @@ function TransactionsPageContent() {
     void openEditDrawer(transaction);
   }
 
-  function toggleDensity() {
-    const nextDensity = density === "compact" ? "comfortable" : "compact";
-    setDensity(nextDensity);
-    localStorage.setItem("finance-smart-transactions-density", nextDensity);
+  function changeViewMode(nextViewMode: TransactionsViewMode) {
+    setViewMode(nextViewMode);
+    if (!viewModeStorageKey.current) return;
+
+    try {
+      localStorage.setItem(viewModeStorageKey.current, nextViewMode);
+    } catch {
+      // Storage unavailable: the choice still applies to this visit.
+    }
+  }
+
+  function openTransactionDetail(transaction: Transaction) {
+    setDetailTransactionId(transaction.id);
+  }
+
+  // Shared by the list and card views so both keep identical edit/delete behavior.
+  function renderTransactionActions(transaction: Transaction, isLocked: boolean) {
+    if (isLocked) {
+      return (
+        <span
+          className="inline-flex h-8 w-8 items-center justify-center text-slate-400"
+          title="Conta/cartão fechado nesta competência"
+        >
+          <Lock size={14} aria-hidden="true" />
+          <span className="sr-only">Fechada</span>
+        </span>
+      );
+    }
+
+    return (
+      <div className="flex items-center justify-end gap-1">
+        {canConfirm(transaction) && (
+          <button
+            type="button"
+            disabled={mutation.isPending}
+            onClick={(event) => {
+              event.stopPropagation();
+              openConfirmPayment(transaction);
+            }}
+            onKeyDown={(event) => event.stopPropagation()}
+            title="Confirmar pagamento"
+            aria-label="Confirmar pagamento"
+            className="transaction-action inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-emerald-400 transition-colors hover:bg-emerald-500/10 hover:text-emerald-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/40 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            <Check size={16} strokeWidth={2.25} aria-hidden="true" />
+          </button>
+        )}
+
+        <button
+          type="button"
+          disabled={mutation.isPending}
+          onClick={(event) => {
+            event.stopPropagation();
+            void openEditDrawer(transaction);
+          }}
+          onKeyDown={(event) => event.stopPropagation()}
+          title="Editar"
+          aria-label="Editar lançamento"
+          className="transaction-action inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-blue-400 transition-colors hover:bg-blue-500/10 hover:text-blue-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          <Pencil size={15} strokeWidth={2} aria-hidden="true" />
+        </button>
+
+        <button
+          type="button"
+          disabled={mutation.isPending}
+          onClick={(event) => {
+            event.stopPropagation();
+            void handleDeleteTransaction(transaction);
+          }}
+          onKeyDown={(event) => event.stopPropagation()}
+          title="Excluir"
+          aria-label="Excluir lançamento"
+          className="transaction-action inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-red-400 transition-colors hover:bg-red-500/10 hover:text-red-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500/40 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          <Trash2 size={15} strokeWidth={2} aria-hidden="true" />
+        </button>
+      </div>
+    );
+  }
+
+  // Status salvo + indicação visual "Vencido" (não altera o status gravado).
+  function renderStatusBadges(transaction: Transaction) {
+    return (
+      <>
+        <span
+          className={`${badgeBaseClass} ${getStatusBadgeClass(transaction.status)}`}
+        >
+          {transaction.status ?? "-"}
+        </span>
+        {isInvoicePaymentOverdue(transaction, getTodayIsoDate()) && (
+          <span
+            className={`${badgeBaseClass} border border-red-500/30 text-red-300`}
+            title="Pagamento pendente com data anterior a hoje"
+          >
+            Vencido
+          </span>
+        )}
+      </>
+    );
+  }
+
+  function renderOriginBadges(transaction: Transaction) {
+    return (
+      <>
+        {transaction.bankroll_integration_group_id && (
+          <span className={`${badgeBaseClass} bg-cyan-500/10 text-cyan-300`}>
+            Origem: Bankroll Poker
+          </span>
+        )}
+        {transaction.investment_integration_group_id && (
+          <span className={`${badgeBaseClass} bg-cyan-500/10 text-cyan-300`}>
+            Origem: Investimentos
+          </span>
+        )}
+      </>
+    );
   }
 
   function changeTransactionType(newType: string) {
@@ -2265,7 +2793,7 @@ function TransactionsPageContent() {
   return (
     <AppShell>
       <div
-        className={`transactions-page transactions-density-${density} space-y-4`}
+        className="transactions-page transactions-density-compact space-y-4"
       >
         <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
           <div className="min-w-0">
@@ -2422,18 +2950,34 @@ function TransactionsPageContent() {
               )}
             </button>
 
-            <button
-              type="button"
-              onClick={toggleDensity}
-              aria-pressed={density === "compact"}
-              className="theme-field theme-hover flex h-10 items-center justify-center gap-2 whitespace-nowrap rounded-xl border px-3.5 text-sm font-medium transition-colors"
-              title={`Modo atual: ${density === "compact" ? "Compacto" : "Confortável"}`}
+            <div
+              role="group"
+              aria-label="Visualização"
+              className="theme-field flex h-10 items-center gap-0.5 rounded-xl border p-0.5"
             >
-              <Rows3 size={16} aria-hidden="true" />
-              <span className="sm:hidden lg:inline">
-                {density === "compact" ? "Compacto" : "Confortável"}
-              </span>
-            </button>
+              {viewModeOptions.map((option) => {
+                const active = viewMode === option.value;
+                const OptionIcon = option.icon;
+
+                return (
+                  <button
+                    key={option.value}
+                    type="button"
+                    aria-pressed={active}
+                    onClick={() => changeViewMode(option.value)}
+                    title={`Visualizar em ${option.label.toLocaleLowerCase("pt-BR")}`}
+                    className={`flex h-full flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-[10px] px-3 text-sm transition-colors ${
+                      active
+                        ? "bg-blue-600 font-semibold text-white shadow-sm"
+                        : "theme-muted theme-hover font-medium"
+                    }`}
+                  >
+                    <OptionIcon size={15} aria-hidden="true" />
+                    {option.label}
+                  </button>
+                );
+              })}
+            </div>
           </div>
 
           <div className="theme-divider mt-2 flex flex-wrap items-center gap-x-4 gap-y-2 border-t px-1 pt-2">
@@ -2647,6 +3191,7 @@ function TransactionsPageContent() {
               : ""
           }
         >
+          {viewMode === "list" ? (
           <div className="transactions-surface w-full overflow-x-auto rounded-2xl border shadow-sm">
             <table className="transactions-table min-w-[620px] w-full table-fixed text-left text-sm md:min-w-[1080px]">
               <thead className="sticky top-0 z-10">
@@ -2670,7 +3215,7 @@ function TransactionsPageContent() {
                   <th className="hidden w-[116px] px-3 py-4 font-semibold md:table-cell">
                     Status
                   </th>
-                  <th className="w-[84px] px-2 py-4 text-right font-semibold md:w-[92px] md:px-4">
+                  <th className="w-[116px] px-2 py-4 text-right font-semibold md:w-[124px] md:px-4">
                     Ações
                   </th>
                 </tr>
@@ -2702,12 +3247,12 @@ function TransactionsPageContent() {
                         key={`${transaction.id}-${index}`}
                         tabIndex={0}
                         aria-selected={isSelected}
-                        onClick={() => setDetailTransactionId(transaction.id)}
+                        onClick={() => openTransactionDetail(transaction)}
                         onKeyDown={(event) => {
                           if (event.target !== event.currentTarget) return;
                           if (event.key !== "Enter" && event.key !== " ") return;
                           event.preventDefault();
-                          setDetailTransactionId(transaction.id);
+                          openTransactionDetail(transaction);
                         }}
                         className={`cursor-pointer outline-none transition-colors focus-visible:bg-blue-500/5 ${
                           isSelected ? "bg-blue-500/10" : ""
@@ -2731,25 +3276,15 @@ function TransactionsPageContent() {
                           <div className="flex min-w-0 items-center gap-3">
                             <span
                               aria-hidden="true"
-                              className={`inline-flex shrink-0 items-center justify-center rounded-lg ${
-                                density === "compact" ? "h-7 w-7" : "h-8 w-8"
-                              } ${getTypeBadgeClass(transaction.type)}`}
+                              className={`inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg ${getTypeBadgeClass(transaction.type)}`}
                             >
                               <TransactionIcon size={15} strokeWidth={2} />
                             </span>
 
                             <div className="min-w-0 flex-1">
-                              <div
-                                className={
-                                  density === "compact"
-                                    ? "flex min-w-0 items-center gap-2 overflow-hidden"
-                                    : "min-w-0"
-                                }
-                              >
+                              <div className="flex min-w-0 items-center gap-2 overflow-hidden">
                                 <div
-                                  className={`theme-text truncate text-[13px] font-medium md:text-sm ${
-                                    density === "compact" ? "min-w-0 flex-1" : ""
-                                  }`}
+                                  className="theme-text min-w-0 flex-1 truncate text-[13px] font-medium md:text-sm"
                                   title={transaction.description}
                                 >
                                   {transaction.description}
@@ -2757,27 +3292,8 @@ function TransactionsPageContent() {
 
                                 {(transaction.bankroll_integration_group_id ||
                                   transaction.investment_integration_group_id) && (
-                                  <div
-                                    className={`transaction-badges flex ${
-                                      density === "compact"
-                                        ? "shrink-0 flex-nowrap items-center gap-1"
-                                        : "mt-1 flex-wrap items-center gap-1.5"
-                                    }`}
-                                  >
-                                    {transaction.bankroll_integration_group_id && (
-                                      <span
-                                        className={`${badgeBaseClass} bg-cyan-500/10 text-cyan-300`}
-                                      >
-                                        Origem: Bankroll Poker
-                                      </span>
-                                    )}
-                                    {transaction.investment_integration_group_id && (
-                                      <span
-                                        className={`${badgeBaseClass} bg-cyan-500/10 text-cyan-300`}
-                                      >
-                                        Origem: Investimentos
-                                      </span>
-                                    )}
+                                  <div className="transaction-badges flex shrink-0 flex-nowrap items-center gap-1">
+                                    {renderOriginBadges(transaction)}
                                   </div>
                                 )}
                               </div>
@@ -2788,11 +3304,7 @@ function TransactionsPageContent() {
                                 >
                                   {transaction.type}
                                 </span>
-                                <span
-                                  className={`${badgeBaseClass} ${getStatusBadgeClass(transaction.status)}`}
-                                >
-                                  {transaction.status ?? "-"}
-                                </span>
+                                {renderStatusBadges(transaction)}
                               </div>
                             </div>
                           </div>
@@ -2833,11 +3345,7 @@ function TransactionsPageContent() {
 
                         <td className="hidden w-[116px] px-3 py-4 md:table-cell">
                           <div className="flex flex-wrap items-center gap-1">
-                            <span
-                              className={`${badgeBaseClass} ${getStatusBadgeClass(transaction.status)}`}
-                            >
-                              {transaction.status ?? "-"}
-                            </span>
+                            {renderStatusBadges(transaction)}
                             {isLocked && (
                               <span
                                 className={`${badgeBaseClass} gap-1 border border-white/10 text-slate-400`}
@@ -2850,48 +3358,8 @@ function TransactionsPageContent() {
                           </div>
                         </td>
 
-                        <td className="w-[84px] px-2 py-4 text-right md:w-[92px] md:px-4">
-                          {isLocked ? (
-                            <span
-                              className="inline-flex h-8 w-8 items-center justify-center text-slate-400"
-                              title="Conta/cartão fechado nesta competência"
-                            >
-                              <Lock size={14} aria-hidden="true" />
-                              <span className="sr-only">Fechada</span>
-                            </span>
-                          ) : (
-                            <div className="flex items-center justify-end gap-1">
-                              <button
-                                type="button"
-                                disabled={mutation.isPending}
-                                onClick={(event) => {
-                                  event.stopPropagation();
-                                  void openEditDrawer(transaction);
-                                }}
-                                onKeyDown={(event) => event.stopPropagation()}
-                                title="Editar"
-                                aria-label="Editar lançamento"
-                                className="transaction-action inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-blue-400 transition-colors hover:bg-blue-500/10 hover:text-blue-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 disabled:cursor-not-allowed disabled:opacity-40"
-                              >
-                                <Pencil size={15} strokeWidth={2} aria-hidden="true" />
-                              </button>
-
-                              <button
-                                type="button"
-                                disabled={mutation.isPending}
-                                onClick={(event) => {
-                                  event.stopPropagation();
-                                  void handleDeleteTransaction(transaction);
-                                }}
-                                onKeyDown={(event) => event.stopPropagation()}
-                                title="Excluir"
-                                aria-label="Excluir lançamento"
-                                className="transaction-action inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-red-400 transition-colors hover:bg-red-500/10 hover:text-red-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500/40 disabled:cursor-not-allowed disabled:opacity-40"
-                              >
-                                <Trash2 size={15} strokeWidth={2} aria-hidden="true" />
-                              </button>
-                            </div>
-                          )}
+                        <td className="w-[116px] px-2 py-4 text-right md:w-[124px] md:px-4">
+                          {renderTransactionActions(transaction, isLocked)}
                         </td>
                       </tr>
                     );
@@ -2913,6 +3381,129 @@ function TransactionsPageContent() {
               </tbody>
             </table>
           </div>
+          ) : (
+            <div className="transactions-cards">
+              {isLoading && (
+                <div className="transactions-surface rounded-2xl border px-5 py-12 text-center text-sm text-slate-400 shadow-sm">
+                  Carregando lançamentos...
+                </div>
+              )}
+
+              {!isLoading && transactions.length === 0 && (
+                <div className="transactions-surface rounded-2xl border px-5 py-12 text-center shadow-sm">
+                  <p className="theme-text text-sm font-medium">
+                    Nenhum lançamento encontrado.
+                  </p>
+                  <p className="mt-1 text-xs text-slate-400">
+                    Ajuste a competência ou os filtros para ver outros
+                    lançamentos.
+                  </p>
+                </div>
+              )}
+
+              {!isLoading && transactions.length > 0 && (
+                <ul className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3 min-[1600px]:grid-cols-4">
+                  {transactions.map((transaction, index) => {
+                    const isLocked = isTransactionLocked(transaction);
+                    const isSelected = transaction.id === detailTransactionId;
+                    const TransactionIcon = getTransactionIcon(
+                      transaction,
+                      getCategorySpecialType(transaction),
+                    );
+
+                    return (
+                      <li
+                        key={`${transaction.id}-${index}`}
+                        tabIndex={0}
+                        aria-current={isSelected ? "true" : undefined}
+                        aria-label={`${transaction.description}, ${formatMoney(
+                          transaction.value,
+                          transaction.account?.currency,
+                        )}`}
+                        onClick={() => openTransactionDetail(transaction)}
+                        onKeyDown={(event) => {
+                          if (event.target !== event.currentTarget) return;
+                          if (event.key !== "Enter" && event.key !== " ") return;
+                          event.preventDefault();
+                          openTransactionDetail(transaction);
+                        }}
+                        className={`transactions-surface flex min-w-0 cursor-pointer flex-col gap-2.5 rounded-2xl border p-3 shadow-sm outline-none transition-colors hover:border-blue-500/30 focus-visible:ring-2 focus-visible:ring-blue-500/40 ${
+                          isSelected ? "border-blue-500/40 bg-blue-500/10" : ""
+                        }`}
+                      >
+                        <div className="flex min-w-0 items-start gap-2.5">
+                          <span
+                            aria-hidden="true"
+                            className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${getTypeBadgeClass(transaction.type)}`}
+                          >
+                            <TransactionIcon size={16} strokeWidth={2} />
+                          </span>
+
+                          <div className="min-w-0 flex-1">
+                            <p
+                              className="theme-text truncate text-sm font-semibold leading-5"
+                              title={transaction.description}
+                            >
+                              {transaction.description}
+                            </p>
+                            <p
+                              className="truncate text-xs leading-4 text-slate-400"
+                              title={transaction.category?.name ?? undefined}
+                            >
+                              {transaction.category?.name ??
+                                (transaction.type === "Transferência"
+                                  ? "Transferência"
+                                  : "Sem categoria")}
+                            </p>
+                          </div>
+
+                          <p
+                            className={`shrink-0 whitespace-nowrap text-right text-sm font-semibold leading-5 tabular-nums ${getValueColorClass(
+                              transaction.type,
+                            )}`}
+                          >
+                            {formatMoney(
+                              transaction.value,
+                              transaction.account?.currency,
+                            )}
+                          </p>
+                        </div>
+
+                        <div className="flex min-w-0 items-center justify-between gap-2 text-xs text-slate-400">
+                          <span
+                            className="min-w-0 truncate"
+                            title={transaction.account?.name ?? undefined}
+                          >
+                            {transaction.account?.name ?? "-"}
+                          </span>
+                          <span className="shrink-0 tabular-nums">
+                            {formatFullDate(transaction.due_date)} ·{" "}
+                            {formatWeekday(transaction.due_date, "short")}
+                          </span>
+                        </div>
+
+                        <div className="theme-divider flex min-w-0 items-center justify-between gap-2 border-t pt-2">
+                          <div className="flex min-w-0 flex-wrap items-center gap-1">
+                            <span
+                              className={`${badgeBaseClass} ${getTypeBadgeClass(transaction.type)}`}
+                            >
+                              {transaction.type}
+                            </span>
+                            {renderStatusBadges(transaction)}
+                            {renderOriginBadges(transaction)}
+                          </div>
+
+                          <div className="-my-1 shrink-0">
+                            {renderTransactionActions(transaction, isLocked)}
+                          </div>
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </div>
+          )}
 
           {detailTransaction &&
             (() => {
@@ -2985,11 +3576,7 @@ function TransactionsPageContent() {
                         >
                           {detailTransaction.type}
                         </span>
-                        <span
-                          className={`${badgeBaseClass} ${getStatusBadgeClass(detailTransaction.status)}`}
-                        >
-                          {detailTransaction.status ?? "-"}
-                        </span>
+                        {renderStatusBadges(detailTransaction)}
                         {isDetailLocked && (
                           <span
                             className={`${badgeBaseClass} gap-1 border border-white/10 text-slate-400`}
@@ -3040,6 +3627,16 @@ function TransactionsPageContent() {
                           label="Conta / Cartão"
                           value={detailTransaction.account?.name ?? "-"}
                         />
+                        {detailTransaction.type === "Pagamento de Fatura" && (
+                          <DetailField
+                            label="Fatura vinculada"
+                            value={
+                              getStatementLabel(
+                                getLinkedStatement(detailTransaction.id),
+                              ) ?? "Nenhuma fatura vinculada"
+                            }
+                          />
+                        )}
                         <DetailField
                           label="Categoria"
                           value={detailTransaction.category?.name ?? "-"}
@@ -3064,8 +3661,29 @@ function TransactionsPageContent() {
                       )}
                     </div>
 
+                    {!isDetailLocked &&
+                      canConfirm(detailTransaction) && (
+                        <div className="theme-divider border-t px-5 pt-4">
+                          <button
+                            type="button"
+                            disabled={mutation.isPending}
+                            onClick={() => openConfirmPayment(detailTransaction)}
+                            className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 text-sm font-semibold text-white transition-colors hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            <Check size={15} aria-hidden="true" />
+                            Confirmar pagamento
+                          </button>
+                        </div>
+                      )}
+
                     {!isDetailLocked && (
-                      <div className="theme-divider flex flex-col gap-2 border-t px-5 py-4 sm:flex-row">
+                      <div
+                        className={`theme-divider flex flex-col gap-2 px-5 py-4 sm:flex-row ${
+                          canConfirm(detailTransaction)
+                            ? "pt-2"
+                            : "border-t"
+                        }`}
+                      >
                         <button
                           type="button"
                           disabled={mutation.isPending}
@@ -3097,6 +3715,51 @@ function TransactionsPageContent() {
             })()}
         </div>
       </div>
+
+      {confirmingPayment &&
+        (() => {
+          const { transaction } = confirmingPayment;
+          const isInvoice = transaction.type === "Pagamento de Fatura";
+
+          return (
+            <ConfirmPaymentDialog
+              description={transaction.description}
+              accountName={transaction.account?.name ?? "-"}
+              value={Number(transaction.value)}
+              currency={getAccountCurrency(transaction.account_id)}
+              dueDateLabel={formatFullDate(transaction.due_date)}
+              competenceLabel={
+                transaction.competence?.name
+                  ? formatCompetenceLabel(transaction.competence.name)
+                  : "-"
+              }
+              statementLabel={
+                isInvoice
+                  ? getStatementLabel(getLinkedStatement(transaction.id))
+                  : undefined
+              }
+              effectiveDate={confirmingPayment.effectiveDate}
+              maxDate={getTodayIsoDate()}
+              divergence={confirmingPayment.divergence}
+              error={confirmingPayment.error}
+              busy={mutation.pending === `confirmPayment:${transaction.id}`}
+              disabled={mutation.isPending}
+              onEffectiveDateChange={(effectiveDate) =>
+                setConfirmingPayment((current) =>
+                  current ? { ...current, effectiveDate, error: null } : current,
+                )
+              }
+              onCancel={closeConfirmPayment}
+              onConfirm={() => void confirmPayment()}
+              onEditTransaction={() => {
+                closeConfirmPayment();
+                setDetailTransactionId(null);
+                void openEditDrawer(transaction);
+              }}
+            />
+          );
+        })()}
+
 
       {showFilters && (
         <div
@@ -3774,9 +4437,7 @@ function TransactionsPageContent() {
                       }
                     >
                       <label className="theme-muted-strong mb-1.5 block text-sm font-semibold">
-                        {form.type === "Pagamento de Fatura"
-                          ? "Cartão"
-                          : "Conta / Cartão"}
+                        Conta / Cartão
                       </label>
 
                       <select
@@ -3807,32 +4468,28 @@ function TransactionsPageContent() {
                   </div>
                 )}
 
-                {form.type === "Pagamento de Fatura" && (
-                  <div>
-                    <label className="theme-muted-strong mb-1.5 block text-sm font-semibold">
-                      Conta utilizada no pagamento
-                    </label>
+                {form.type === "Pagamento de Fatura" &&
+                  (() => {
+                    const linkedStatement =
+                      getLinkedStatement(editingTransactionId);
 
-                    <select
-                      value={form.card_payment_account_id}
-                      onChange={(event) =>
-                        setForm({
-                          ...form,
-                          card_payment_account_id: event.target.value,
-                        })
-                      }
-                      className="theme-field w-full rounded-xl border px-4 py-3 text-sm outline-none"
-                    >
-                      <option value="">Selecione</option>
-
-                      {financialAccounts.map((account) => (
-                        <option key={account.id} value={account.id}>
-                          {account.name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                )}
+                    return (
+                      <div className="theme-field rounded-xl border px-4 py-3 text-sm">
+                        <span className="theme-muted block text-xs font-semibold">
+                          Fatura vinculada
+                        </span>
+                        <span className="theme-text mt-0.5 block font-medium">
+                          {getStatementLabel(linkedStatement) ??
+                            "Nenhuma fatura vinculada"}
+                        </span>
+                        <span className="theme-muted mt-1 block text-xs">
+                          {form.status === "Pago"
+                            ? "Pagamento confirmado."
+                            : "Pendente até a confirmação do pagamento."}
+                        </span>
+                      </div>
+                    );
+                  })()}
 
                 {isFuelCategory && (
                   <FuelTransactionFields

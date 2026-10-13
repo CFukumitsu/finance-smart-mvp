@@ -35,7 +35,7 @@ test("corrigir lançamento: bloqueado ao abrir e antes do UPDATE", () => {
 test("ajustar total vinculado: bloqueado antes de vincular e do UPDATE de valor", () => {
   assertGuardBefore(
     functionBody("async function reconcileAndAdjustLinkedTotal("),
-    ["window.confirm(", "saveReconciliation(item, transaction.id)", ".update({"],
+    ["confirmAction(", "saveReconciliation(item, transaction.id)", ".update({"],
     "ajustar total",
   );
 });

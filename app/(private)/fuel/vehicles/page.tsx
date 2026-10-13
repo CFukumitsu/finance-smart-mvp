@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import AppShell from "../../../components/layout/AppShell";
 import { getCurrentUserId, supabase } from "@/src/lib/supabase";
+import { confirmAction, notify } from "@/src/components/ui/feedback/feedbackStore";
 
 type Vehicle = {
   id: string;
@@ -122,7 +123,7 @@ export default function VehiclesPage() {
     } catch (error) {
       console.error("Erro ao carregar veículos:", error);
 
-      alert(
+      notify.error(
         error instanceof Error
           ? error.message
           : "Erro ao carregar veículos."
@@ -254,7 +255,7 @@ export default function VehiclesPage() {
     const initialOdometer = parseDecimalInput(form.initial_odometer);
 
     if (!name) {
-      alert("Informe o nome do veículo.");
+      notify.warning("Informe o nome do veículo.");
       return;
     }
 
@@ -266,7 +267,7 @@ export default function VehiclesPage() {
         modelYear > 2200
       )
     ) {
-      alert("Informe um ano válido.");
+      notify.warning("Informe um ano válido.");
       return;
     }
 
@@ -274,7 +275,7 @@ export default function VehiclesPage() {
       form.tank_capacity.trim() &&
       (tankCapacity === null || tankCapacity <= 0)
     ) {
-      alert("Informe uma capacidade de tanque válida.");
+      notify.warning("Informe uma capacidade de tanque válida.");
       return;
     }
 
@@ -282,7 +283,7 @@ export default function VehiclesPage() {
       form.initial_odometer.trim() &&
       (initialOdometer === null || initialOdometer < 0)
     ) {
-      alert("Informe um hodômetro inicial válido.");
+      notify.warning("Informe um hodômetro inicial válido.");
       return;
     }
 
@@ -320,7 +321,7 @@ export default function VehiclesPage() {
           error.code === "23505" &&
           error.message.toLowerCase().includes("plate")
         ) {
-          alert("Já existe um veículo cadastrado com esta placa.");
+          notify.warning("Já existe um veículo cadastrado com esta placa.");
           return;
         }
 
@@ -332,7 +333,7 @@ export default function VehiclesPage() {
     } catch (error) {
       console.error("Erro ao salvar veículo:", error);
 
-      alert(
+      notify.error(
         error instanceof Error
           ? error.message
           : "Erro ao salvar veículo."
@@ -349,7 +350,7 @@ export default function VehiclesPage() {
     return mutation.run("setDefaultVehicle" + ":" + (vehicle).id, async () => {
 
     if (!vehicle.active) {
-      alert("Ative o veículo antes de defini-lo como padrão.");
+      notify.warning("Ative o veículo antes de defini-lo como padrão.");
       return;
     }
 
@@ -375,7 +376,7 @@ export default function VehiclesPage() {
       await loadVehicles();
     } catch (error) {
       console.error("Erro ao definir veículo padrão:", error);
-      alert("Erro ao definir veículo padrão.");
+      notify.error("Erro ao definir veículo padrão.");
     }
 
     });
@@ -386,9 +387,12 @@ export default function VehiclesPage() {
 
     const action = vehicle.active ? "inativar" : "ativar";
 
-    const confirmed = window.confirm(
-      `Tem certeza que deseja ${action} o veículo "${vehicle.name}"?`
-    );
+    const confirmed = await confirmAction({
+      title: vehicle.active ? "Inativar veículo" : "Ativar veículo",
+      message: `Tem certeza que deseja ${action} o veículo "${vehicle.name}"?`,
+      tone: vehicle.active ? "warning" : "default",
+      confirmLabel: vehicle.active ? "Inativar" : "Ativar",
+    });
 
     if (!confirmed) {
       return;
@@ -413,7 +417,7 @@ export default function VehiclesPage() {
       await loadVehicles();
     } catch (error) {
       console.error("Erro ao alterar status do veículo:", error);
-      alert("Erro ao alterar status do veículo.");
+      notify.error("Erro ao alterar status do veículo.");
     }
 
     });

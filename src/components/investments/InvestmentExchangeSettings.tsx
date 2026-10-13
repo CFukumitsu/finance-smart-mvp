@@ -11,6 +11,7 @@ import {
 import type { InvestmentData, InvestmentExchangeContext } from "@/src/types/investments";
 import { isExchangeRateStale } from "@/src/utils/exchangeRateCalculations";
 import { formatInvestmentMoney, investmentCard, investmentField, parseInvestmentDecimal } from "./InvestmentUi";
+import { notify } from "@/src/components/ui/feedback/feedbackStore";
 
 export default function InvestmentExchangeSettings({ data, exchangeContext, reload }: {
   data: InvestmentData;
@@ -38,7 +39,7 @@ export default function InvestmentExchangeSettings({ data, exchangeContext, relo
       setManualRate("");
       await reload();
     } catch (value) {
-      alert(value instanceof Error ? value.message : "Não foi possível atualizar a cotação.");
+      notify.error(value instanceof Error ? value.message : "Não foi possível atualizar a cotação.");
     } finally {
       setSaving(false);
     }

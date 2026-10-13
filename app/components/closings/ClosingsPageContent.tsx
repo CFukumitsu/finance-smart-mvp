@@ -26,6 +26,7 @@ import {
   checkCardPaymentCurrencies,
   formatMoney,
 } from "@/src/utils/currencies";
+import { confirmAction, notify } from "@/src/components/ui/feedback/feedbackStore";
 
 type Account = {
   id: string;
@@ -136,7 +137,7 @@ export default function ClosingsPageContent() {
       .order("name", { ascending: false });
 
     if (competenceError) {
-      alert("Erro ao carregar competências.");
+      notify.error("Erro ao carregar competências.");
       return;
     }
 
@@ -163,7 +164,7 @@ export default function ClosingsPageContent() {
       .eq("active", true)
 
     if (accountsError) {
-      alert("Erro ao carregar contas/cartões.");
+      notify.error("Erro ao carregar contas/cartões.");
       return;
     }
 
@@ -377,7 +378,7 @@ export default function ClosingsPageContent() {
       await loadData(selectedCompetenceId);
     } catch (error) {
       console.error(error);
-      alert("Erro ao fechar conta.");
+      notify.error("Erro ao fechar conta.");
     } finally {
       setIsProcessingId(null);
     }
@@ -398,7 +399,7 @@ export default function ClosingsPageContent() {
         )
       : null;
     if (paymentCurrencyCheck && !paymentCurrencyCheck.allowed) {
-      alert(paymentCurrencyCheck.message);
+      notify.warning(paymentCurrencyCheck.message);
       return;
     }
 
@@ -489,7 +490,7 @@ export default function ClosingsPageContent() {
       await loadData(selectedCompetenceId);
     } catch (error) {
       console.error(error);
-      alert("Erro ao fechar fatura.");
+      notify.error("Erro ao fechar fatura.");
     } finally {
       setIsProcessingId(null);
     }
@@ -504,7 +505,15 @@ export default function ClosingsPageContent() {
 
     const ownerId = await getCurrentUserId();
 
-    if (!confirm("Deseja reabrir esta fatura?")) return;
+    if (
+      !(await confirmAction({
+        title: "Reabrir fatura",
+        message: "Deseja reabrir esta fatura?",
+        tone: "warning",
+        confirmLabel: "Reabrir",
+      }))
+    )
+      return;
 
     setIsProcessingId(statementId);
 
@@ -520,7 +529,7 @@ export default function ClosingsPageContent() {
       await loadData(selectedCompetenceId);
     } catch (error) {
       console.error(error);
-      alert("Erro ao reabrir fatura.");
+      notify.error("Erro ao reabrir fatura.");
     } finally {
       setIsProcessingId(null);
     }
@@ -534,7 +543,15 @@ export default function ClosingsPageContent() {
 
     const ownerId = await getCurrentUserId();
 
-    if (!confirm("Deseja reabrir esta conta nesta competência?")) return;
+    if (
+      !(await confirmAction({
+        title: "Reabrir conta",
+        message: "Deseja reabrir esta conta nesta competência?",
+        tone: "warning",
+        confirmLabel: "Reabrir",
+      }))
+    )
+      return;
 
     setIsProcessingId(accountId);
 
@@ -551,7 +568,7 @@ export default function ClosingsPageContent() {
       await loadData(selectedCompetenceId);
     } catch (error) {
       console.error(error);
-      alert("Erro ao reabrir conta.");
+      notify.error("Erro ao reabrir conta.");
     } finally {
       setIsProcessingId(null);
     }
@@ -565,7 +582,7 @@ export default function ClosingsPageContent() {
     if (!selectedCompetenceId) return;
 
     if (!canCloseCompetence) {
-      alert("Feche todas as contas e faturas antes de fechar a competência.");
+      notify.warning("Feche todas as contas e faturas antes de fechar a competência.");
       return;
     }
 
@@ -579,7 +596,7 @@ export default function ClosingsPageContent() {
       await loadData(selectedCompetenceId);
     } catch (error) {
       console.error(error);
-      alert("Erro ao fechar competência.");
+      notify.error("Erro ao fechar competência.");
     } finally {
       setIsProcessingId(null);
     }
@@ -592,7 +609,15 @@ export default function ClosingsPageContent() {
 
     if (!selectedCompetenceId) return;
 
-    if (!confirm("Deseja reabrir esta competência?")) return;
+    if (
+      !(await confirmAction({
+        title: "Reabrir competência",
+        message: "Deseja reabrir esta competência?",
+        tone: "warning",
+        confirmLabel: "Reabrir",
+      }))
+    )
+      return;
 
     setIsProcessingId(selectedCompetenceId);
 
@@ -601,7 +626,7 @@ export default function ClosingsPageContent() {
       await loadData(selectedCompetenceId);
     } catch (error) {
       console.error(error);
-      alert("Erro ao reabrir competência.");
+      notify.error("Erro ao reabrir competência.");
     } finally {
       setIsProcessingId(null);
     }

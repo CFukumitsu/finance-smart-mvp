@@ -68,6 +68,7 @@ import type {
   EligibleFinanceAccount,
   FinanceAccount,
 } from "@/src/types/bankroll";
+import { confirmAction, notify } from "@/src/components/ui/feedback/feedbackStore";
 
 type View = "dashboard" | "wallets" | "sessions" | "transactions";
 type Data = {
@@ -607,7 +608,7 @@ function Wallets({
     return mutation.run("submit", async () => {
       try {
 
-    if (!form.name.trim()) return alert("Informe o nome da carteira.");
+    if (!form.name.trim()) return notify.warning("Informe o nome da carteira.");
     try {
       setSaving(true);
       await saveWallet(
@@ -626,7 +627,7 @@ function Wallets({
       setOpen(false);
       await reload();
     } catch (e) {
-      alert(e instanceof Error ? e.message : "Erro ao salvar.");
+      notify.error(e instanceof Error ? e.message : "Erro ao salvar.");
     } finally {
       setSaving(false);
     }
@@ -637,12 +638,12 @@ function Wallets({
   async function removeWalletEntry(w: BankrollWallet) {
     return mutation.run("removeWalletEntry" + ":" + (w).id, async () => {
 
-                  if (confirm(`Excluir a carteira ${w.name}?`))
+                  if (await confirmAction({ title: "Excluir carteira", message: `Excluir a carteira ${w.name}?`, tone: "danger", confirmLabel: "Excluir" }))
                     try {
                       await deleteWallet(w.id);
                       await reload();
                     } catch (e) {
-                      alert(
+                      notify.error(
                         e instanceof Error ? e.message : "Erro ao excluir.",
                       );
                     }
@@ -861,7 +862,7 @@ function Transactions({
     return mutation.run("submit", async () => {
       try {
 
-    if (!form.wallet_id) return alert("Informe a carteira.");
+    if (!form.wallet_id) return notify.warning("Informe a carteira.");
     try {
       setSaving(true);
       const amount = requireBankrollMoney(form.amount, "Valor");
@@ -903,7 +904,7 @@ function Transactions({
       setOpen(false);
       await reload();
     } catch (e) {
-      alert(e instanceof Error ? e.message : "Erro ao salvar.");
+      notify.error(e instanceof Error ? e.message : "Erro ao salvar.");
     } finally {
       setSaving(false);
     }
@@ -915,12 +916,12 @@ function Transactions({
   async function removeBankrollEntry(t: BankrollTransaction) {
     return mutation.run("removeBankrollEntry" + ":" + (t).id, async () => {
 
-                    if (confirm("Excluir esta movimentação?")) {
+                    if (await confirmAction({ title: "Excluir movimentação", message: "Excluir esta movimentação?", tone: "danger", confirmLabel: "Excluir" })) {
                       try {
                         await deleteTransaction(t);
                         await reload();
                       } catch (e) {
-                        alert(
+                        notify.error(
                           e instanceof Error ? e.message : "Erro ao excluir.",
                         );
                       }
@@ -1278,7 +1279,7 @@ function Sessions({
       try {
 
     if (!form.wallet_id || !form.game_type.trim())
-      return alert("Informe carteira e modalidade.");
+      return notify.warning("Informe carteira e modalidade.");
     try {
       setSaving(true);
       const cash = form.session_type === "cash_game";
@@ -1320,7 +1321,7 @@ function Sessions({
       setOpen(false);
       await reload();
     } catch (e) {
-      alert(e instanceof Error ? e.message : "Erro ao salvar.");
+      notify.error(e instanceof Error ? e.message : "Erro ao salvar.");
     } finally {
       setSaving(false);
     }
@@ -1331,12 +1332,12 @@ function Sessions({
   async function removeSessionEntry(s: BankrollSession) {
     return mutation.run("removeSessionEntry" + ":" + (s).id, async () => {
 
-                    if (confirm("Excluir esta sessão?")) {
+                    if (await confirmAction({ title: "Excluir sessão", message: "Excluir esta sessão?", tone: "danger", confirmLabel: "Excluir" })) {
                       try {
                         await deleteSession(s.id);
                         await reload();
                       } catch (e) {
-                        alert(
+                        notify.error(
                           e instanceof Error ? e.message : "Erro ao excluir.",
                         );
                       }

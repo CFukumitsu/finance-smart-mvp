@@ -2,6 +2,7 @@
 
 import { useCallback, useRef, useState } from "react";
 import { createMutationLock } from "@/src/utils/mutationLock";
+import { notify } from "@/src/components/ui/feedback/feedbackStore";
 
 /** One lock per editing surface; no global navigation or application state. */
 export function useMutation() {
@@ -9,7 +10,7 @@ export function useMutation() {
   const [lock] = useState(() => createMutationLock(setPending));
   const errorHandler = useRef((error: unknown) => {
     console.error("Erro durante a operação:", error);
-    window.alert(error instanceof Error ? error.message : "Não foi possível concluir a operação. Tente novamente.");
+    notify.error(error instanceof Error ? error.message : "Não foi possível concluir a operação. Tente novamente.");
   });
   const run = useCallback(async <T,>(key: string, operation: () => Promise<T>) => {
     try {

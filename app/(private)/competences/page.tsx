@@ -16,6 +16,7 @@ import { closeCompetence, reopenCompetence } from "@/src/services/closingService
 import { useModalShortcuts } from "@/src/hooks/useModalShortcuts";
 import { CalendarRange, LockKeyhole, LockOpen, Plus, Search, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import { confirmAction } from "@/src/components/ui/feedback/feedbackStore";
 
 type ModalMode = "single" | "range" | null;
 
@@ -120,7 +121,15 @@ export default function CompetencesPage() {
     return mutation.run("toggleClosed" + ":" + (competence).id, async () => {
 
     const isClosed = closedIds.has(competence.id);
-    if (!window.confirm(`Deseja ${isClosed ? "reabrir" : "fechar"} a competência ${competence.name}?`)) return;
+    if (
+      !(await confirmAction({
+        title: isClosed ? "Reabrir competência" : "Fechar competência",
+        message: `Deseja ${isClosed ? "reabrir" : "fechar"} a competência ${competence.name}?`,
+        tone: "warning",
+        confirmLabel: isClosed ? "Reabrir" : "Fechar",
+      }))
+    )
+      return;
 
     setProcessingId(competence.id);
     setFeedback(null);

@@ -27,6 +27,7 @@ import {
   investmentField,
 } from "./InvestmentUi";
 import { formatInvestmentMoneyInput, parseInvestmentMoney } from "@/src/utils/investmentFormatting";
+import { confirmAction, notify } from "@/src/components/ui/feedback/feedbackStore";
 
 const today = () => new Date().toISOString().slice(0, 10);
 
@@ -134,13 +135,13 @@ export default function InvestmentAccountEvents({
 
     if (submissionLock.current) return;
     const amount = parseInvestmentMoney(form.amount);
-    if (!form.date) return alert("Informe a data.");
+    if (!form.date) return notify.warning("Informe a data.");
     if (!form.investmentAccountId)
-      return alert("Selecione a conta de investimento.");
+      return notify.warning("Selecione a conta de investimento.");
     if (!Number.isFinite(amount) || amount <= 0)
-      return alert("Informe um valor maior que zero.");
+      return notify.warning("Informe um valor maior que zero.");
     if (requiresFinancialAccount(form.type) && !form.financialAccountId)
-      return alert("Selecione a conta financeira.");
+      return notify.warning("Selecione a conta financeira.");
 
     try {
       submissionLock.current = true;
@@ -162,7 +163,7 @@ export default function InvestmentAccountEvents({
       setOpen(false);
       await reload();
     } catch (value) {
-      alert(
+      notify.error(
         value instanceof Error
           ? value.message
           : "Não foi possível salvar a movimentação.",
@@ -179,12 +180,12 @@ export default function InvestmentAccountEvents({
   async function remove(event: InvestmentAccountEvent) {
     return mutation.run("remove" + ":" + (event).id, async () => {
 
-    if (!confirm(`Excluir ${eventLabels[event.event_type].toLowerCase()}?`)) return;
+    if (!(await confirmAction({ title: "Excluir movimentação", message: `Excluir ${eventLabels[event.event_type].toLowerCase()}?`, tone: "danger", confirmLabel: "Excluir" }))) return;
     try {
       await deleteInvestmentAccountEvent(event.id);
       await reload();
     } catch (value) {
-      alert(
+      notify.error(
         value instanceof Error
           ? value.message
           : "Não foi possível excluir a movimentação.",

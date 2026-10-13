@@ -22,6 +22,7 @@ import {
   type ReserveProjectionModel,
   type ReserveProjectionSettings,
 } from "@/src/utils/financialOverview";
+import { confirmAction } from "@/src/components/ui/feedback/feedbackStore";
 
 function todayIso() {
   const now = new Date();
@@ -145,9 +146,12 @@ export default function FinancialOverviewSettingsPage() {
       return;
     }
     if (saved?.model === "reference_month" && saved.referenceMonth === excludeMonthDraft) {
-      const confirmed = window.confirm(
-        `${monthLabel(excludeMonthDraft)} é o mês de referência da reserva estimada. Se for desconsiderado, a reserva passa a usar a média ponderada até você escolher outro mês de referência. Continuar?`,
-      );
+      const confirmed = await confirmAction({
+        title: "Desconsiderar mês de referência",
+        message: `${monthLabel(excludeMonthDraft)} é o mês de referência da reserva estimada. Se for desconsiderado, a reserva passa a usar a média ponderada até você escolher outro mês de referência. Continuar?`,
+        tone: "warning",
+        confirmLabel: "Continuar",
+      });
       if (!confirmed) return;
     }
     setIsSaving(true);

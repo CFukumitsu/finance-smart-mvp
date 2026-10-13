@@ -218,16 +218,6 @@ body {
   gap: 0.25rem;
 }
 
-.transactions-density-comfortable .transactions-table th {
-  padding-top: 0.75rem;
-  padding-bottom: 0.75rem;
-}
-
-.transactions-density-comfortable .transactions-table td {
-  padding-top: 0.75rem;
-  padding-bottom: 0.75rem;
-}
-
 .transactions-overlay {
   background: var(--overlay);
 }
@@ -642,6 +632,13 @@ body {
   color: #ffffff;
 }
 
+/* Botões sólidos de confirmação de pagamento: texto branco também no tema
+   claro (a regra geral de .transactions-page escurece text-white). */
+[data-theme="light"] .transactions-page button[class~="bg-emerald-600"],
+[data-theme="light"] .transactions-page button[class~="bg-amber-600"] {
+  color: #ffffff;
+}
+
 /* Overlays, dialogs, dropdowns and drawers. */
 [data-theme="light"] main [class~="bg-black/60"],
 [data-theme="light"] main [class~="bg-black/70"],
@@ -790,4 +787,100 @@ a,
 [data-theme="light"] .overview-page [class~="bg-white/5"],
 [data-theme="light"] .overview-page [class~="bg-white/10"] {
   background: var(--surface-muted);
+}
+
+/* Diálogos e toasts globais (FeedbackHost). Ficam fora de <main>, então usam
+   só as variáveis de tema, sem depender dos overrides de página. */
+.fs-overlay {
+  background: var(--overlay);
+}
+
+.fs-dialog {
+  background: var(--surface);
+  border-color: var(--border);
+  color: var(--foreground);
+}
+
+.fs-text {
+  color: var(--foreground);
+}
+
+.fs-text-soft {
+  color: var(--muted-strong);
+}
+
+.fs-muted {
+  color: var(--muted);
+}
+
+.fs-hover:hover {
+  background: var(--surface-hover);
+  color: var(--foreground);
+}
+
+.fs-details {
+  border-color: var(--border);
+  background: var(--surface-subtle);
+}
+
+.fs-field {
+  border-color: var(--border);
+  background: var(--field);
+  color: var(--foreground);
+}
+
+.fs-field:focus {
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 3px rgb(59 130 246 / 0.14);
+}
+
+.fs-field[aria-invalid="true"] {
+  border-color: #ef4444;
+}
+
+.fs-dialog button:focus-visible,
+.fs-dialog summary:focus-visible {
+  outline: 2px solid #3b82f6;
+  outline-offset: 2px;
+}
+
+.fs-chip-info { background: rgb(59 130 246 / 0.12); color: #60a5fa; }
+.fs-chip-success { background: rgb(16 185 129 / 0.12); color: #34d399; }
+.fs-chip-warning { background: rgb(245 158 11 / 0.12); color: #fbbf24; }
+.fs-chip-danger { background: rgb(239 68 68 / 0.12); color: #f87171; }
+.fs-icon-info { color: #60a5fa; }
+.fs-icon-success { color: #34d399; }
+.fs-icon-danger { color: #f87171; }
+.fs-danger-text { color: #f87171; }
+
+[data-theme="light"] .fs-chip-info,
+[data-theme="light"] .fs-icon-info { color: #2563eb; }
+[data-theme="light"] .fs-chip-success,
+[data-theme="light"] .fs-icon-success { color: #059669; }
+[data-theme="light"] .fs-chip-warning { color: #d97706; }
+[data-theme="light"] .fs-chip-danger,
+[data-theme="light"] .fs-icon-danger,
+[data-theme="light"] .fs-danger-text { color: #dc2626; }
+
+.fs-button-primary,
+.fs-button-warning,
+.fs-button-danger {
+  color: #ffffff;
+}
+
+.fs-button-primary { background: #2563eb; }
+.fs-button-primary:hover:not(:disabled) { background: #1d4ed8; }
+.fs-button-warning { background: #d97706; }
+.fs-button-warning:hover:not(:disabled) { background: #b45309; }
+.fs-button-danger { background: #dc2626; }
+.fs-button-danger:hover:not(:disabled) { background: #b91c1c; }
+
+.fs-button-secondary {
+  border-color: var(--border);
+  background: transparent;
+  color: var(--foreground);
+}
+
+.fs-button-secondary:hover:not(:disabled) {
+  background: var(--surface-hover);
 }
