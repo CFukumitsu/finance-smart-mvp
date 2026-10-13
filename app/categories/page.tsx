@@ -608,6 +608,11 @@ export default function CategoriesPage() {
                           ? "Ocultar do Dashboard"
                           : "Mostrar no Dashboard"
                       }
+                      aria-label={
+                        category.show_on_dashboard
+                          ? "Ocultar do Dashboard"
+                          : "Mostrar no Dashboard"
+                      }
                       onClick={() => toggleShowOnDashboard(category)}
                       className={`flex h-9 w-9 items-center justify-center rounded-xl border ${
                         category.show_on_dashboard
@@ -619,6 +624,7 @@ export default function CategoriesPage() {
                     </ProcessingButton>
                     <button
                       title="Planejamento"
+                      aria-label="Planejamento"
                       onClick={() => openPlanningModal(category)}
                       className="flex h-9 w-9 items-center justify-center rounded-xl border border-cyan-500/20 bg-cyan-500/10 text-cyan-400"
                     >
@@ -626,6 +632,7 @@ export default function CategoriesPage() {
                     </button>
                     <button disabled={mutation.isPending}
                       title="Editar"
+                      aria-label="Editar"
                       onClick={() => openEditDrawer(category)}
                       className="flex h-9 w-9 items-center justify-center rounded-xl border border-amber-500/20 bg-amber-500/10 text-amber-400"
                     >
@@ -634,6 +641,7 @@ export default function CategoriesPage() {
 
                     <ProcessingButton busy={mutation.pending === ("toggleActive" + ":" + (category).id)} disabled={mutation.isPending}
                       title={category.active ? "Inativar" : "Ativar"}
+                      aria-label={category.active ? "Inativar" : "Ativar"}
                       onClick={() => toggleActive(category)}
                       className="flex h-9 w-9 items-center justify-center rounded-xl border border-slate-500/20 bg-slate-500/10 text-slate-300"
                     >
@@ -642,6 +650,7 @@ export default function CategoriesPage() {
 
                     <ProcessingButton busy={mutation.pending === ("deleteCategory" + ":" + (category).id)} disabled={mutation.isPending}
                       title="Excluir"
+                      aria-label="Excluir"
                       onClick={() => deleteCategory(category)}
                       className="flex h-9 w-9 items-center justify-center rounded-xl border border-red-500/20 bg-red-500/10 text-red-400"
                     >
@@ -737,6 +746,11 @@ export default function CategoriesPage() {
                               ? "Ocultar do Dashboard"
                               : "Mostrar no Dashboard"
                           }
+                          aria-label={
+                            category.show_on_dashboard
+                              ? "Ocultar do Dashboard"
+                              : "Mostrar no Dashboard"
+                          }
                           onClick={() => toggleShowOnDashboard(category)}
                           className={`
                                 flex h-10 w-10 items-center justify-center
@@ -755,6 +769,7 @@ export default function CategoriesPage() {
                         </ProcessingButton>
                         <button
                           title="Planejamento"
+                          aria-label="Planejamento"
                           onClick={() => openPlanningModal(category)}
                           className="
                                     flex h-10 w-10 items-center justify-center
@@ -773,6 +788,7 @@ export default function CategoriesPage() {
                         </button>
                         <button disabled={mutation.isPending}
                           title="Editar"
+                          aria-label="Editar"
                           onClick={() => openEditDrawer(category)}
                           className="
                                       flex h-10 w-10 items-center justify-center
@@ -792,6 +808,7 @@ export default function CategoriesPage() {
 
                         <ProcessingButton busy={mutation.pending === ("toggleActive" + ":" + (category).id)} disabled={mutation.isPending}
                           title={category.active ? "Inativar" : "Ativar"}
+                          aria-label={category.active ? "Inativar" : "Ativar"}
                           onClick={() => toggleActive(category)}
                           className="
                                     flex h-10 w-10 items-center justify-center
@@ -811,6 +828,7 @@ export default function CategoriesPage() {
 
                         <ProcessingButton busy={mutation.pending === ("deleteCategory" + ":" + (category).id)} disabled={mutation.isPending}
                           title="Excluir"
+                          aria-label="Excluir"
                           onClick={() => deleteCategory(category)}
                           className="
                                     flex h-10 w-10 items-center justify-center

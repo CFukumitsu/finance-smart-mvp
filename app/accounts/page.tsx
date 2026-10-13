@@ -589,6 +589,7 @@ export default function AccountsPage() {
                   <div className="flex shrink-0 gap-2">
                     <button
                       title="Planejamento"
+                      aria-label="Planejamento"
                       onClick={() => openPlanningModal(account)}
                       className="flex h-9 w-9 items-center justify-center rounded-xl border border-cyan-500/20 bg-cyan-500/10 text-cyan-400"
                     >
@@ -597,6 +598,7 @@ export default function AccountsPage() {
 
                     <button disabled={mutation.isPending}
                       title="Editar"
+                      aria-label="Editar"
                       onClick={() => openEditDrawer(account)}
                       className="flex h-9 w-9 items-center justify-center rounded-xl border border-amber-500/20 bg-amber-500/10 text-amber-400"
                     >
@@ -605,6 +607,7 @@ export default function AccountsPage() {
 
                     <ProcessingButton busy={mutation.pending === ("toggleActive" + ":" + (account).id)} disabled={mutation.isPending}
                       title={account.active ? "Inativar" : "Ativar"}
+                      aria-label={account.active ? "Inativar" : "Ativar"}
                       onClick={() => toggleActive(account)}
                       className="flex h-9 w-9 items-center justify-center rounded-xl border border-slate-500/20 bg-slate-500/10 text-slate-300"
                     >
@@ -613,6 +616,7 @@ export default function AccountsPage() {
 
                     <ProcessingButton busy={mutation.pending === ("deleteAccount" + ":" + (account).id)} disabled={mutation.isPending}
                       title="Excluir"
+                      aria-label="Excluir"
                       onClick={() => deleteAccount(account)}
                       className="flex h-9 w-9 items-center justify-center rounded-xl border border-red-500/20 bg-red-500/10 text-red-400"
                     >
@@ -717,6 +721,7 @@ export default function AccountsPage() {
                       <div className="flex justify-end gap-2">
                         <button
                           title="Planejamento"
+                          aria-label="Planejamento"
                           onClick={() => openPlanningModal(account)}
                           className="
         flex h-10 w-10 items-center justify-center
@@ -736,6 +741,7 @@ export default function AccountsPage() {
 
                         <button disabled={mutation.isPending}
                           title="Editar"
+                          aria-label="Editar"
                           onClick={() => openEditDrawer(account)}
                           className="
         flex h-10 w-10 items-center justify-center
@@ -755,6 +761,7 @@ export default function AccountsPage() {
 
                         <ProcessingButton busy={mutation.pending === ("toggleActive" + ":" + (account).id)} disabled={mutation.isPending}
                           title={account.active ? "Inativar" : "Ativar"}
+                          aria-label={account.active ? "Inativar" : "Ativar"}
                           onClick={() => toggleActive(account)}
                           className="
         flex h-10 w-10 items-center justify-center
@@ -774,6 +781,7 @@ export default function AccountsPage() {
 
                         <ProcessingButton busy={mutation.pending === ("deleteAccount" + ":" + (account).id)} disabled={mutation.isPending}
                           title="Excluir"
+                          aria-label="Excluir"
                           onClick={() => deleteAccount(account)}
                           className="
         flex h-10 w-10 items-center justify-center
