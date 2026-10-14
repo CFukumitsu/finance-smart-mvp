@@ -4,6 +4,7 @@
 
 import { useMutation } from "@/src/hooks/useMutation";
 import { ProcessingButton, MutationScope } from "@/src/components/ui/Mutation";
+import FormDrawer from "@/src/components/ui/FormDrawer";
 import { useEffect, useRef, useState } from "react";
 import AppShell from "../components/layout/AppShell";
 import { getCurrentUserId, supabase } from "@/src/lib/supabase";
@@ -819,28 +820,31 @@ export default function AccountsPage() {
       </div>
 
       {isDrawerOpen && (
-        <MutationScope busy={mutation.isPending} isLocked={mutation.isLocked}><div className="fixed inset-0 z-50 flex justify-end bg-black/60">
-          <div className="flex h-full w-full max-w-xl flex-col border-l border-white/10 bg-slate-950 shadow-2xl">
-            <div className="mb-6 flex items-center justify-between">
-              <div>
-                <h2 className="text-2xl font-bold text-white">
-                  {editingAccountId
-                    ? "Editar conta/cartão"
-                    : "Nova conta/cartão"}
-                </h2>
-                <p className="text-sm text-slate-400">
-                  Configure os dados da conta ou cartão.
-                </p>
+        <MutationScope busy={mutation.isPending} isLocked={mutation.isLocked}>
+          <FormDrawer
+            title={editingAccountId ? "Editar conta/cartão" : "Nova conta/cartão"}
+            description="Configure os dados da conta ou cartão."
+            onClose={closeDrawer}
+            footer={
+              <div className="flex gap-3">
+                <button
+                  type="button"
+                  onClick={closeDrawer}
+                  className="w-full rounded-xl border border-white/10 px-5 py-3 font-semibold text-white hover:bg-white/10"
+                >
+                  Cancelar
+                </button>
+
+                <ProcessingButton busy={mutation.pending === ("saveAccount")} disabled={mutation.isPending}
+                  type="button"
+                  onClick={saveAccount}
+                  className="w-full rounded-xl bg-blue-600 px-5 py-3 font-semibold text-white hover:bg-blue-500"
+                >
+                  {editingAccountId ? "Atualizar" : "Salvar"}
+                </ProcessingButton>
               </div>
-
-              <button
-                onClick={closeDrawer}
-                className="rounded-lg px-3 py-2 text-slate-400 hover:bg-white/10 hover:text-white"
-              >
-                Fechar
-              </button>
-            </div>
-
+            }
+          >
             <div className="space-y-4">
               <input
                 value={form.name}
@@ -1102,49 +1106,36 @@ export default function AccountsPage() {
                 />
                 Ativa
               </label>
-
-              <div className="flex gap-3 pt-2">
+            </div>
+          </FormDrawer>
+        </MutationScope>
+      )}
+      {isPlanningOpen && planningAccount && (
+        <MutationScope busy={mutation.isPending} isLocked={mutation.isLocked}>
+          <FormDrawer
+            title="Planejamento mensal"
+            description={planningAccount.name}
+            onClose={closePlanningModal}
+            footer={
+              <div className="flex gap-3">
                 <button
-                  onClick={closeDrawer}
+                  type="button"
+                  onClick={closePlanningModal}
                   className="w-full rounded-xl border border-white/10 px-5 py-3 font-semibold text-white hover:bg-white/10"
                 >
                   Cancelar
                 </button>
 
-                <ProcessingButton busy={mutation.pending === ("saveAccount")} disabled={mutation.isPending}
-                  onClick={saveAccount}
+                <ProcessingButton busy={mutation.pending === ("savePlanning")} disabled={mutation.isPending}
+                  type="button"
+                  onClick={savePlanning}
                   className="w-full rounded-xl bg-blue-600 px-5 py-3 font-semibold text-white hover:bg-blue-500"
                 >
-                  {editingAccountId ? "Atualizar" : "Salvar"}
+                  Salvar planejamento
                 </ProcessingButton>
               </div>
-            </div>
-          </div>
-        </div></MutationScope>
-      )}
-      {isPlanningOpen && planningAccount && (
-        <MutationScope busy={mutation.isPending} isLocked={mutation.isLocked}><div className="fixed inset-0 z-50 flex justify-end bg-black/60">
-          <div className="flex h-full w-full max-w-xl flex-col border-l border-white/10 bg-slate-950 shadow-2xl">
-            <div className="flex-1 overflow-y-auto p-6">
-              <div className="mb-6 flex items-start justify-between">
-                <div>
-                  <h2 className="text-2xl font-bold text-white">
-                    Planejamento mensal
-                  </h2>
-
-                  <p className="mt-1 text-sm text-slate-400">
-                    {planningAccount.name}
-                  </p>
-                </div>
-
-                <button
-                  onClick={closePlanningModal}
-                  className="rounded-xl px-3 py-2 text-sm text-slate-400 hover:bg-white/10 hover:text-white"
-                >
-                  Fechar
-                </button>
-              </div>
-
+            }
+          >
               <div className="space-y-3">
                 {competences.map((competence) => (
                   <div
@@ -1185,27 +1176,8 @@ export default function AccountsPage() {
                   </div>
                 ))}
               </div>
-            </div>
-
-            <div className="border-t border-white/10 bg-slate-950 p-6">
-              <div className="flex gap-3">
-                <button
-                  onClick={closePlanningModal}
-                  className="w-full rounded-xl border border-white/10 px-5 py-3 font-semibold text-white hover:bg-white/10"
-                >
-                  Cancelar
-                </button>
-
-                <ProcessingButton busy={mutation.pending === ("savePlanning")} disabled={mutation.isPending}
-                  onClick={savePlanning}
-                  className="w-full rounded-xl bg-blue-600 px-5 py-3 font-semibold text-white hover:bg-blue-500"
-                >
-                  Salvar planejamento
-                </ProcessingButton>
-              </div>
-            </div>
-          </div>
-        </div></MutationScope>
+          </FormDrawer>
+        </MutationScope>
       )}
     </AppShell>
   );

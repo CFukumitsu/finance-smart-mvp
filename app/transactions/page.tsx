@@ -422,7 +422,6 @@ function TransactionsPageContent() {
   const [categories, setCategories] = useState<Category[]>([]);
   const [fuelForm, setFuelForm] = useState<FuelForm>(emptyFuelForm);
   const [competences, setCompetences] = useState<Competence[]>([]);
-  const [closedCompetenceIds, setClosedCompetenceIds] = useState<string[]>([]);
   const [descriptionSuggestions, setDescriptionSuggestions] = useState<
     string[]
   >([]);
@@ -590,22 +589,6 @@ function TransactionsPageContent() {
     );
 
     return currentCompetence?.id ?? list[0]?.id ?? "";
-  }
-
-  async function loadClosedCompetences(ownerId: string) {
-    const { data, error } = await supabase
-      .from("competence_closures")
-      .select("competence_id")
-      .eq("owner_id", ownerId)
-      .eq("status", "Fechada");
-
-    if (error) {
-      console.error("Erro ao carregar competências fechadas:", error);
-      setClosedCompetenceIds([]);
-      return;
-    }
-
-    setClosedCompetenceIds((data ?? []).map((item) => item.competence_id));
   }
 
   function isTransactionLocked(transaction: Transaction) {
@@ -921,60 +904,60 @@ function TransactionsPageContent() {
     setIsLoading(true);
 
     const ownerId = await getCurrentUserId();
-    await ensureCompetenceExists(new Date());
 
-    const [accountClosuresResponse, cardStatementsResponse] = await Promise.all(
-      [
-        supabase.from("account_closures").select("*").eq("owner_id", ownerId),
-        supabase
-          .from("credit_card_statements")
-          .select(
-            "id, account_id, competence_id, payment_transaction_id, payment_account_id, statement_total",
-          )
-          .eq("owner_id", ownerId),
-      ],
-    );
-
-    setAccountClosures(accountClosuresResponse.data ?? []);
-    setCardStatements(cardStatementsResponse.data ?? []);
-
-    const [accountsResponse, categoriesResponse, competencesResponse] =
-      await Promise.all([
-        supabase
-          .from("accounts")
-          .select(
-            "id, name, type, closing_day, due_day, limit_amount, current_balance, currency, show_on_investments_dashboard, investment_account_kind",
-          )
-          .eq("owner_id", ownerId)
-          .eq("active", true)
-          .order("name", { ascending: true }),
-        supabase
-          .from("categories")
-          .select("id, name, type, special_type")
-          .eq("owner_id", ownerId)
-          .eq("active", true)
-          .order("type", { ascending: false })
-          .order("name", { ascending: true }),
+    // Leituras independentes em paralelo. Só a lista de competências espera a
+    // garantia da competência atual, para já vir com ela.
+    const [
+      accountClosuresResponse,
+      cardStatementsResponse,
+      accountsResponse,
+      categoriesResponse,
+      competencesResponse,
+      conversionProviders,
+    ] = await Promise.all([
+      supabase.from("account_closures").select("*").eq("owner_id", ownerId),
+      supabase
+        .from("credit_card_statements")
+        .select(
+          "id, account_id, competence_id, payment_transaction_id, payment_account_id, statement_total",
+        )
+        .eq("owner_id", ownerId),
+      supabase
+        .from("accounts")
+        .select(
+          "id, name, type, closing_day, due_day, limit_amount, current_balance, currency, show_on_investments_dashboard, investment_account_kind",
+        )
+        .eq("owner_id", ownerId)
+        .eq("active", true)
+        .order("name", { ascending: true }),
+      supabase
+        .from("categories")
+        .select("id, name, type, special_type")
+        .eq("owner_id", ownerId)
+        .eq("active", true)
+        .order("type", { ascending: false })
+        .order("name", { ascending: true }),
+      ensureCompetenceExists(new Date()).then(() =>
         supabase
           .from("competences")
           .select("id, month, year, name, status")
           .eq("owner_id", ownerId)
           .order("year", { ascending: false })
           .order("month", { ascending: false }),
-      ]);
+      ),
+      loadConversionProviders().catch((error) => {
+        console.error("Erro ao carregar provedores de conversão:", error);
+        return [];
+      }),
+    ]);
+
+    setAccountClosures(accountClosuresResponse.data ?? []);
+    setCardStatements(cardStatementsResponse.data ?? []);
 
     const loadedAccounts = (accountsResponse.data ?? []) as Account[];
     setAccounts(loadedAccounts);
     if (categoriesResponse.data) setCategories(categoriesResponse.data);
-
-    try {
-      setConversionProviders(await loadConversionProviders());
-    } catch (error) {
-      console.error("Erro ao carregar provedores de conversão:", error);
-      setConversionProviders([]);
-    }
-
-    await loadClosedCompetences(ownerId);
+    setConversionProviders(conversionProviders);
 
     if (competencesResponse.data) {
       setCompetences(competencesResponse.data);
@@ -1007,6 +990,10 @@ function TransactionsPageContent() {
         category_id: storedDefaults?.category_id ?? "",
         competence_id: defaultCompetenceId,
       }));
+
+      // Com competência definida, o efeito dos filtros faz a carga (e desliga
+      // o "carregando"); chamar aqui também repetia a consulta mais pesada.
+      if (defaultCompetenceId) return;
 
       await loadTransactions({
         competenceId: defaultCompetenceId,

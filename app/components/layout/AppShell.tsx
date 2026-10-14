@@ -41,15 +41,13 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         )}
 
         <main className="min-w-0 flex-1 overflow-x-hidden">
-          <main className="min-w-0 flex-1 overflow-x-hidden">
-            <div className="app-header sticky top-0 z-30 flex justify-end border-b px-4 py-2 backdrop-blur sm:px-5 lg:px-8">
-              <UserMenu />
-            </div>
+          <div className="app-header sticky top-0 z-30 flex justify-end border-b px-4 py-2 backdrop-blur sm:px-5 lg:px-8">
+            <UserMenu />
+          </div>
 
-            <section className="w-full max-w-full px-4 pb-5 pt-4 sm:px-5 lg:px-8">
-              {children}
-            </section>
-          </main>
+          <section className="w-full max-w-full px-4 pb-[max(1.25rem,env(safe-area-inset-bottom))] pt-4 sm:px-5 lg:px-8">
+            {children}
+          </section>
         </main>
       </div>
     </div>

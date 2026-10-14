@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import AuthProvider from "@/src/providers/AuthProvider";
@@ -17,6 +17,15 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "Finance Smart",
   description: "Powered by FKT System",
+};
+
+// No Chrome Android o teclado virtual, por padrão, só cobre a página. Com
+// "resizes-content" a viewport encolhe, e painéis fixos (rodapé de ações dos
+// formulários) continuam acima do teclado.
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  interactiveWidget: "resizes-content",
 };
 
 export default function RootLayout({

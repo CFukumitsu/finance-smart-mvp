@@ -3311,8 +3311,8 @@ export default function ReconciliationPage() {
 
       {
         itemToReconcile && (
-          <MutationScope busy={mutation.isPending} isLocked={mutation.isLocked}><div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-6">
-            <div className="w-full max-w-4xl rounded-2xl border border-white/10 bg-slate-950 p-6 shadow-2xl">
+          <MutationScope busy={mutation.isPending} isLocked={mutation.isLocked}><div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-3 sm:p-6">
+            <div className="max-h-full w-full max-w-4xl overflow-y-auto overscroll-contain rounded-2xl border border-white/10 bg-slate-950 p-4 shadow-2xl sm:p-6">
               <div className="mb-5 flex items-start justify-between gap-4">
                 <div>
                   <h2 className="text-2xl font-bold text-white">
