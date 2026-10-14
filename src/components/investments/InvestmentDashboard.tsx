@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
+import { ChevronDown } from "lucide-react";
 import type { InvestmentData, InvestmentExchangeContext } from "@/src/types/investments";
 import {
   calculateInvestmentAccountSummaries,
@@ -17,6 +18,7 @@ import {
   type CashReserveRow,
   type CashReserveSources,
 } from "@/src/utils/investmentReserves";
+import { buildWealthDistribution } from "@/src/utils/investmentDistribution";
 import {
   formatInvestmentMoney,
   InvestmentEmpty,
@@ -24,6 +26,7 @@ import {
   InvestmentTd,
   investmentCard,
 } from "./InvestmentUi";
+import WealthDistribution from "./WealthDistribution";
 
 /** Textos de uma linha de reserva (mesmos no cartão do celular e na tabela). */
 function describeCashReserve(reserve: CashReserveRow, consolidationCurrency: string) {
@@ -71,7 +74,7 @@ function MetricCard({ label, value, tone = "default", note }: {
   );
 }
 
-/** Visão geral: patrimônio consolidado, indicadores, composição e reservas. */
+/** Visão geral: patrimônio consolidado, indicadores, distribuição, resumo e reservas. */
 export default function InvestmentDashboard({
   data,
   reserveSources,
@@ -91,6 +94,7 @@ export default function InvestmentDashboard({
       }),
     [data],
   );
+  const [reservesOpen, setReservesOpen] = useState(false);
   const selectedCurrency = exchangeContext.consolidationCurrency;
   const balanceAccountSummaries = calculateInvestmentAccountSummaries({
     accounts: data.accounts,
@@ -117,18 +121,38 @@ export default function InvestmentDashboard({
   const reservesByCurrency = splitCashReservesByCurrency(cashReserves, selectedCurrency);
   // Detecção automática pelo cadastro de contas (inclui inativas e zeradas).
   const multiCurrency = usesMultipleCurrencies(data.accounts, selectedCurrency);
-
-  // Composição: só as parcelas existentes; com uma parcela só, não há o que compor.
-  const compositionParts = [
-    { key: "investments", label: "Investimentos financeiros", value: consolidated.investmentsValue, color: "bg-cyan-400" },
-    ...(reservesByCurrency.foreign.count > 0
-      ? [{ key: "foreign", label: "Reservas em moedas estrangeiras", value: reservesByCurrency.foreign.value, color: "bg-violet-400" }]
-      : []),
-    ...(reservesByCurrency.domestic.count > 0
-      ? [{ key: "domestic", label: `Reservas em ${selectedCurrency}`, value: reservesByCurrency.domestic.value, color: "bg-emerald-400" }]
-      : []),
-  ];
-  const compositionTotal = compositionParts.reduce((sum, part) => sum + Math.max(part.value, 0), 0);
+  // Mesmos componentes do consolidado, só reagrupados (por classe e por conta).
+  const distribution = buildWealthDistribution({
+    positions,
+    assets: data.assets,
+    balanceAccounts: balanceAccountSummaries,
+    reserves: cashReserves,
+    consolidationCurrency: selectedCurrency,
+    rates: exchangeContext.rates,
+  });
+  const summaryGroups = [
+    {
+      key: "assets",
+      label: "Ativos financeiros",
+      detail: `${distribution.byComponent.assets.itemCount} ${distribution.byComponent.assets.itemCount === 1 ? "posição" : "posições"} em ${summary.assetCount} ${summary.assetCount === 1 ? "ativo" : "ativos"}`,
+      href: "/investments/portfolio",
+      ...distribution.byComponent.assets,
+    },
+    {
+      key: "balance",
+      label: "Investimentos por saldo",
+      detail: `${distribution.byComponent.balance.itemCount} ${distribution.byComponent.balance.itemCount === 1 ? "conta" : "contas"} (cofrinhos, poupança e similares)`,
+      href: "/investments/portfolio",
+      ...distribution.byComponent.balance,
+    },
+    {
+      key: "reserves",
+      label: "Reservas em caixa",
+      detail: `${distribution.byComponent.reserves.itemCount} ${distribution.byComponent.reserves.itemCount === 1 ? "conta" : "contas"} com papel Reserva / investimento`,
+      href: "#reservas-em-caixa",
+      ...distribution.byComponent.reserves,
+    },
+  ].filter((group) => group.itemCount > 0);
 
   if (!data.assets.length && !balanceAccountSummaries.length && !cashReserves.length) {
     return (
@@ -146,20 +170,22 @@ export default function InvestmentDashboard({
       {/* 1. Patrimônio consolidado: destaque, largura total. */}
       <section
         aria-labelledby="consolidated-wealth-title"
-        className="rounded-3xl border border-cyan-400/30 bg-gradient-to-br from-cyan-500/15 via-slate-950/80 to-slate-950 p-5 shadow-2xl sm:p-7"
+        className="relative overflow-hidden rounded-3xl border border-white/10 bg-slate-900/60 p-5 pl-6 sm:p-7 sm:pl-8"
       >
+        {/* Cor principal só como detalhe: um filete à esquerda. */}
+        <span className="absolute inset-y-0 left-0 w-1 bg-cyan-400" aria-hidden="true" />
         <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
           <div className="min-w-0">
-            <h2 id="consolidated-wealth-title" className="text-xs font-black uppercase tracking-[.2em] text-cyan-200">
+            <h2 id="consolidated-wealth-title" className="text-xs font-black uppercase tracking-[.2em] text-cyan-300">
               Patrimônio consolidado
             </h2>
-            <p className={`mt-2 break-words text-3xl font-black sm:text-4xl ${consolidated.complete ? "text-white" : "text-amber-200"}`}>
+            <p className={`mt-2 break-words text-3xl font-black tracking-tight sm:text-5xl ${consolidated.complete ? "text-white" : "text-amber-200"}`}>
               {formatInvestmentMoney(consolidated.total, selectedCurrency)}
             </p>
             {!consolidated.complete && (
               <p className="mt-1 text-xs font-bold uppercase tracking-wide text-amber-300">Valor parcial</p>
             )}
-            <p className="mt-2 text-sm text-cyan-100/70">
+            <p className="mt-2 text-sm text-slate-400">
               Investimentos + reservas em caixa (contas com papel Reserva / investimento), em {selectedCurrency}.
             </p>
           </div>
@@ -230,47 +256,59 @@ export default function InvestmentDashboard({
         </p>
       )}
 
-      {/* 4. Composição patrimonial: só quando há mais de uma parcela. */}
-      {compositionParts.length > 1 && (
-        <section className={`${investmentCard} space-y-4`} aria-labelledby="composition-title">
-          <h2 id="composition-title" className="text-lg font-black text-white">Composição patrimonial</h2>
-          {compositionTotal > 0 && (
-            <div className="flex h-3 overflow-hidden rounded-full bg-white/5" aria-hidden="true">
-              {compositionParts.map((part) => (
-                <div key={part.key} className={part.color} style={{ width: `${(Math.max(part.value, 0) / compositionTotal) * 100}%` }} />
-              ))}
-            </div>
-          )}
-          <dl className="grid gap-2 text-sm sm:grid-cols-3">
-            {compositionParts.map((part) => (
-              <div key={part.key} className="flex items-center justify-between gap-3 rounded-xl bg-white/[0.03] px-3 py-2.5 sm:flex-col sm:items-start sm:justify-start">
-                <dt className="flex items-center gap-2 text-slate-400">
-                  <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${part.color}`} aria-hidden="true" />
-                  {part.label}
-                </dt>
-                <dd className="text-right font-bold text-white sm:text-left">
-                  {formatInvestmentMoney(part.value, selectedCurrency)}
-                  {compositionTotal > 0 && (
-                    <span className="ml-1 text-xs font-semibold text-slate-500">
-                      {((Math.max(part.value, 0) / compositionTotal) * 100).toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%
-                    </span>
-                  )}
-                </dd>
-              </div>
+      {/* 4. Distribuição patrimonial: gráfico único, Por classe | Por conta. */}
+      {distribution.byClass.length > 0 && (
+        <WealthDistribution distribution={distribution} currency={selectedCurrency} />
+      )}
+
+      {/* 5. Resumo por grupo; o detalhe fica na Carteira. */}
+      {summaryGroups.length > 0 && (
+        <section className="space-y-3" aria-labelledby="investment-summary-title">
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <h2 id="investment-summary-title" className="text-lg font-black text-white">Resumo dos investimentos</h2>
+            <Link href="/investments/portfolio" className="text-sm font-bold text-cyan-300 hover:underline">Ver carteira →</Link>
+          </div>
+          <div className={`grid gap-3 ${summaryGroups.length > 1 ? "sm:grid-cols-2" : ""} ${summaryGroups.length > 2 ? "lg:grid-cols-3" : ""}`}>
+            {summaryGroups.map((group) => (
+              <Link
+                key={group.key}
+                href={group.href}
+                onClick={group.key === "reserves" ? () => setReservesOpen(true) : undefined}
+                className={`${investmentCard} block transition hover:border-cyan-400/40`}
+              >
+                <p className="text-xs font-bold uppercase tracking-wide text-slate-500">{group.label}</p>
+                <p className={`mt-2 break-words text-xl font-black ${group.pendingCount > 0 ? "text-amber-200" : "text-white"}`}>
+                  {formatInvestmentMoney(group.value, selectedCurrency)}
+                </p>
+                <p className="mt-1 text-xs text-slate-400">{group.detail}</p>
+                {group.pendingCount > 0 && (
+                  <p className="mt-1 text-xs text-amber-300">
+                    {group.pendingCount} sem cotação (fora do valor)
+                  </p>
+                )}
+              </Link>
             ))}
-          </dl>
+          </div>
         </section>
       )}
 
-      {/* 5. Resumo das reservas. */}
+      {/* 6. Reservas em caixa: acessíveis, recolhidas por padrão (sem mais destaque que os demais grupos). */}
       {cashReserves.length > 0 && (
-        <section className="space-y-4">
-          <div>
-            <h2 className="text-xl font-black text-white">Reservas em caixa</h2>
-            <p className="mt-1 text-sm text-slate-400">
-              Saldo atual pelos lançamentos da conta, na moeda original. Transferências para reservas não são rendimento.
-            </p>
-          </div>
+        <details
+          id="reservas-em-caixa"
+          open={reservesOpen}
+          onToggle={(event) => setReservesOpen(event.currentTarget.open)}
+          className={`${investmentCard} scroll-mt-20 space-y-4 [&[open]>summary_svg]:rotate-180`}
+        >
+          <summary className="flex cursor-pointer list-none items-start justify-between gap-3 [&::-webkit-details-marker]:hidden">
+            <span className="min-w-0">
+              <span className="block text-lg font-black text-white">Reservas em caixa</span>
+              <span className="mt-1 block text-sm text-slate-400">
+                Saldo atual pelos lançamentos da conta, na moeda original. Transferências para reservas não são rendimento.
+              </span>
+            </span>
+            <ChevronDown size={20} className="mt-1 shrink-0 text-slate-400 transition-transform" aria-hidden="true" />
+          </summary>
           {/* Celular: cartões (todas as colunas visíveis sem rolagem lateral). */}
           <div className="grid gap-3 md:hidden">
             {cashReserves.map((reserve) => {
@@ -325,23 +363,8 @@ export default function InvestmentDashboard({
               })}
             </InvestmentTable>
           </div>
-        </section>
+        </details>
       )}
-
-      {/* 6. Resumo dos investimentos: o detalhe fica na Carteira. */}
-      <Link
-        href="/investments/portfolio"
-        className={`${investmentCard} flex items-center justify-between gap-4 transition hover:border-cyan-400/40 hover:bg-white/[0.03]`}
-      >
-        <div className="min-w-0">
-          <p className="font-black text-white">Carteira de investimentos</p>
-          <p className="mt-1 text-sm text-slate-400">
-            {summary.assetCount} {summary.assetCount === 1 ? "ativo" : "ativos"} · {balanceAccountSummaries.length}{" "}
-            {balanceAccountSummaries.length === 1 ? "conta por saldo" : "contas por saldo"} · posições e valorizações
-          </p>
-        </div>
-        <span className="shrink-0 text-sm font-bold text-cyan-300" aria-hidden="true">Ver carteira →</span>
-      </Link>
     </div>
   );
 }

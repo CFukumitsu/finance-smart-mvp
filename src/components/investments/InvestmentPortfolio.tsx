@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import type { InvestmentData, InvestmentExchangeContext, InvestmentPosition } from "@/src/types/investments";
 import {
   calculateInvestmentAccountSummaries,
@@ -20,9 +21,8 @@ import {
   investmentField,
 } from "./InvestmentUi";
 import InvestmentValuations from "./InvestmentValuations";
-import InvestmentAssets from "./InvestmentAssets";
 
-/** Carteira: o que está aplicado (contas por saldo e posições), valorizações e cadastro de ativos. */
+/** Carteira: o que está aplicado (contas por saldo e posições) e valorizações. */
 export default function InvestmentPortfolio({
   data,
   exchangeContext,
@@ -42,6 +42,11 @@ export default function InvestmentPortfolio({
       }),
     [data],
   );
+  const router = useRouter();
+  // Link antigo (/investments/portfolio#ativos): o cadastro agora tem área própria.
+  useEffect(() => {
+    if (window.location.hash === "#ativos") router.replace("/investments/assets");
+  }, [router]);
   const [search, setSearch] = useState("");
   const [accountFilter, setAccountFilter] = useState("");
   const [sort, setSort] = useState("asset");
@@ -343,15 +348,18 @@ export default function InvestmentPortfolio({
         <InvestmentValuations data={data} exchangeContext={exchangeContext} reload={reload} />
       )}
 
-      <section id="ativos" className="scroll-mt-20 space-y-4">
-        <div>
-          <h2 className="text-xl font-black text-white">Ativos cadastrados</h2>
-          <p className="mt-1 text-sm text-slate-400">
-            Cadastro dos ativos usados nas operações e valorizações.
-          </p>
-        </div>
-        <InvestmentAssets data={data} reload={reload} />
-      </section>
+      <Link
+        href="/investments/assets"
+        className="flex items-center justify-between gap-4 rounded-2xl border border-white/10 bg-slate-950/60 p-5 transition hover:border-cyan-400/40"
+      >
+        <span className="min-w-0">
+          <span className="block font-black text-white">Ativos cadastrados</span>
+          <span className="mt-1 block text-sm text-slate-400">
+            {data.assets.length} {data.assets.length === 1 ? "ativo" : "ativos"} · cadastrar, editar, ativar ou inativar
+          </span>
+        </span>
+        <span className="shrink-0 text-sm font-bold text-cyan-300" aria-hidden="true">Abrir →</span>
+      </Link>
     </div>
   );
 }

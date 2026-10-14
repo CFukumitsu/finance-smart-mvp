@@ -14,8 +14,9 @@ import InvestmentPortfolio from "./InvestmentPortfolio";
 import InvestmentExchangeSettings from "./InvestmentExchangeSettings";
 import InvestmentOperations from "./InvestmentOperations";
 import InvestmentAccountEvents from "./InvestmentAccountEvents";
+import InvestmentAssets from "./InvestmentAssets";
 
-export type InvestmentView = "dashboard" | "portfolio" | "operations" | "settings";
+export type InvestmentView = "dashboard" | "portfolio" | "operations" | "assets" | "settings";
 
 const emptyData: InvestmentData = {
   assets: [],
@@ -35,13 +36,15 @@ const viewTitles: Record<InvestmentView, string> = {
   dashboard: "Visão geral",
   portfolio: "Carteira",
   operations: "Operações",
+  assets: "Ativos cadastrados",
   settings: "Configurações",
 };
 
 const viewDescriptions: Record<InvestmentView, string> = {
-  dashboard: "Patrimônio consolidado, indicadores e reservas.",
-  portfolio: "Contas por saldo, posições, valorizações e ativos cadastrados.",
+  dashboard: "Patrimônio consolidado, distribuição, indicadores e reservas.",
+  portfolio: "Contas por saldo, posições e valorizações.",
   operations: "Compras, vendas, aplicações, resgates e seus históricos.",
+  assets: "Cadastro dos ativos usados nas operações e valorizações.",
   settings: "Moeda de consolidação e cotações.",
 };
 
@@ -140,18 +143,20 @@ export default function InvestmentScreen({ view }: { view: InvestmentView }) {
         <p className="mt-1 text-sm text-slate-400">{viewDescriptions[view]}</p>
       </header>
 
-      <nav aria-label="Áreas de Investimentos" className="grid grid-cols-2 gap-2 rounded-2xl border border-white/10 bg-slate-900/50 p-2 sm:grid-cols-4">
+      {/* Celular: 2 colunas (a última área ocupa a linha inteira); md+: as cinco lado a lado. */}
+      <nav aria-label="Áreas de Investimentos" className="grid grid-cols-2 gap-2 rounded-2xl border border-white/10 bg-slate-900/50 p-2 md:grid-cols-5 [&>a:last-child]:col-span-2 md:[&>a:last-child]:col-span-1">
         {[
           ["dashboard", "/investments", "Visão geral"],
           ["portfolio", "/investments/portfolio", "Carteira"],
           ["operations", "/investments/operations", "Operações"],
+          ["assets", "/investments/assets", "Ativos cadastrados"],
           ["settings", "/investments/settings", "Configurações"],
         ].map(([key, href, label]) => (
           <Link
             key={key}
             href={href}
             aria-current={view === key ? "page" : undefined}
-            className={`rounded-xl px-3 py-2.5 text-center text-sm font-bold transition ${
+            className={`flex items-center justify-center rounded-xl px-3 py-2.5 text-center text-sm font-bold leading-tight transition ${
               view === key
                 ? "bg-cyan-500/15 text-cyan-200"
                 : "text-slate-400 hover:bg-white/5 hover:text-white"
@@ -179,6 +184,8 @@ export default function InvestmentScreen({ view }: { view: InvestmentView }) {
         <InvestmentDashboard data={data} reserveSources={reserveSources} exchangeContext={exchangeContext} />
       ) : view === "portfolio" ? (
         <InvestmentPortfolio data={data} exchangeContext={exchangeContext} reload={reload} />
+      ) : view === "assets" ? (
+        <InvestmentAssets data={data} reload={reload} />
       ) : view === "settings" ? (
         <InvestmentExchangeSettings data={data} exchangeContext={exchangeContext} reload={reload} />
       ) : (

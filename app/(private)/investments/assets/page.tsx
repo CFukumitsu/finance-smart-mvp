@@ -1,6 +1,12 @@
-import { redirect } from "next/navigation";
+"use client";
 
-// O cadastro de ativos passou a fazer parte da Carteira; mantém links antigos.
+import AppShell from "../../../components/layout/AppShell";
+import InvestmentScreen from "@/src/components/investments/InvestmentScreen";
+
 export default function InvestmentAssetsPage() {
-  redirect("/investments/portfolio#ativos");
+  return (
+    <AppShell>
+      <InvestmentScreen view="assets" />
+    </AppShell>
+  );
 }

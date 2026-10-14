@@ -34,14 +34,19 @@ const menuItems = [
     href: "/dashboard",
   },
   {
-    label: "Análises",
-    icon: ChartNoAxesCombined,
-    href: "/analytics",
-  },
-  {
     label: "Lançamentos",
     icon: ListChecks,
     href: "/transactions",
+  },
+  {
+    label: "Investimentos",
+    icon: ChartNoAxesCombined,
+    href: "/investments",
+  },
+  {
+    label: "Análises",
+    icon: ChartNoAxesCombined,
+    href: "/analytics",
   },
   {
     label: "Conciliação",
@@ -52,11 +57,6 @@ const menuItems = [
     label: "Bankroll Poker",
     icon: Spade,
     href: "/bankroll",
-  },
-  {
-    label: "Investimentos",
-    icon: ChartNoAxesCombined,
-    href: "/investments",
   },
   {
     label: "Fechamentos",
