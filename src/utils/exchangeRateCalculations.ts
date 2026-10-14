@@ -36,6 +36,22 @@ export function resolveExchangeRate(
   return null;
 }
 
+/** Moedas com PTAX automática contra o BRL. */
+export const PTAX_CURRENCIES = ["USD", "EUR", "GBP"] as const;
+
+/** Moedas X (USD/EUR/GBP) cujo par X/BRL é necessário para consolidar `currencies`. */
+export function listRequiredPtaxCurrencies(currencies: string[], consolidationCurrency: string) {
+  const consolidation = consolidationCurrency.toUpperCase();
+  const needed = new Set<string>();
+  for (const raw of currencies) {
+    const pair = new Set([raw.toUpperCase(), consolidation]);
+    for (const ptax of PTAX_CURRENCIES) {
+      if (pair.has(ptax) && pair.has("BRL")) needed.add(ptax);
+    }
+  }
+  return PTAX_CURRENCIES.filter((currency) => needed.has(currency));
+}
+
 export function convertInvestmentValue(value: number, rate: number | null) {
   if (!Number.isFinite(value) || rate === null || !Number.isFinite(rate) || rate <= 0) {
     return null;

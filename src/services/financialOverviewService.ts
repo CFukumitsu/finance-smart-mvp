@@ -27,7 +27,7 @@ const PAGE_SIZE = 1000;
 type QueryResult<T> = PromiseLike<{ data: T[] | null; error: { message: string } | null }>;
 
 /** Lê todas as páginas (o PostgREST limita cada resposta). */
-async function fetchAllPages<T>(buildQuery: (from: number, to: number) => QueryResult<T>) {
+export async function fetchAllPages<T>(buildQuery: (from: number, to: number) => QueryResult<T>) {
   const rows: T[] = [];
   for (let from = 0; ; from += PAGE_SIZE) {
     const { data, error } = await buildQuery(from, from + PAGE_SIZE - 1);

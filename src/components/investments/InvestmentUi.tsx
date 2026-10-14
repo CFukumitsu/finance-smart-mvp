@@ -63,8 +63,10 @@ export function InvestmentToolbar({
   children?: ReactNode;
 }) {
   return (
-    <div className="grid gap-3 rounded-2xl border border-white/10 bg-slate-950/60 p-4 md:grid-cols-2 xl:flex xl:items-center">
-      <label className="relative min-w-0 flex-1">
+    // xl: a pesquisa tem largura mínima e cresce mais; os filtros (w-full no
+    // celular) deixam de reivindicar 100% cada e não espremem a pesquisa.
+    <div className="grid gap-3 rounded-2xl border border-white/10 bg-slate-950/60 p-4 md:grid-cols-2 xl:flex xl:items-center xl:[&>button]:shrink-0 xl:[&>select]:w-auto xl:[&>select]:min-w-44 xl:[&>select]:flex-1">
+      <label className="relative min-w-0 xl:min-w-64 xl:flex-[2_1_0%]">
         <Search className="absolute left-3 top-3 text-slate-500" size={17} />
         <input
           aria-label="Pesquisar"

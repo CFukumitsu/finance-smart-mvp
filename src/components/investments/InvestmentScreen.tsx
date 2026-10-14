@@ -5,14 +5,17 @@ import { useCallback, useEffect, useState } from "react";
 import { ChartNoAxesCombined } from "lucide-react";
 import { loadInvestmentData } from "@/src/services/investmentService";
 import { loadInvestmentExchangeContext } from "@/src/services/exchangeRateService";
+import { loadCashReserveSources } from "@/src/services/investmentReserveService";
 import type { InvestmentData, InvestmentExchangeContext } from "@/src/types/investments";
+import { listCashReserveCurrencies, localTodayIso, type CashReserveSources } from "@/src/utils/investmentReserves";
 import { investmentCard } from "./InvestmentUi";
 import InvestmentDashboard from "./InvestmentDashboard";
-import InvestmentAssets from "./InvestmentAssets";
+import InvestmentPortfolio from "./InvestmentPortfolio";
+import InvestmentExchangeSettings from "./InvestmentExchangeSettings";
 import InvestmentOperations from "./InvestmentOperations";
 import InvestmentAccountEvents from "./InvestmentAccountEvents";
 
-export type InvestmentView = "dashboard" | "assets" | "operations";
+export type InvestmentView = "dashboard" | "portfolio" | "operations" | "settings";
 
 const emptyData: InvestmentData = {
   assets: [],
@@ -30,12 +33,48 @@ const emptyExchangeContext: InvestmentExchangeContext = {
 
 const viewTitles: Record<InvestmentView, string> = {
   dashboard: "Visão geral",
-  assets: "Ativos",
+  portfolio: "Carteira",
   operations: "Operações",
+  settings: "Configurações",
 };
+
+const viewDescriptions: Record<InvestmentView, string> = {
+  dashboard: "Patrimônio consolidado, indicadores e reservas.",
+  portfolio: "Contas por saldo, posições, valorizações e ativos cadastrados.",
+  operations: "Compras, vendas, aplicações, resgates e seus históricos.",
+  settings: "Moeda de consolidação e cotações.",
+};
+
+const emptyReserveSources: CashReserveSources = {
+  accounts: [],
+  competences: [],
+  closures: [],
+  transactions: [],
+};
+
+// Reservas em caixa só aparecem na Visão geral; as outras telas não as carregam.
+async function loadInvestmentScreenData(view: InvestmentView) {
+  const [investmentData, reserveSources] = await Promise.all([
+    loadInvestmentData(),
+    view === "dashboard" ? loadCashReserveSources(localTodayIso()) : Promise.resolve(emptyReserveSources),
+  ]);
+  const exchange = await loadInvestmentExchangeContext(
+    [
+      ...new Set([
+        ...investmentData.assets.map((asset) => asset.currency),
+        ...investmentData.accounts
+          .filter((account) => account.investment_account_kind === "BALANCE")
+          .flatMap((account) => (account.currency ? [account.currency] : [])),
+        ...listCashReserveCurrencies(reserveSources.accounts, investmentData.operations),
+      ]),
+    ],
+  );
+  return { data: investmentData, reserveSources, exchange };
+}
 
 export default function InvestmentScreen({ view }: { view: InvestmentView }) {
   const [data, setData] = useState<InvestmentData>(emptyData);
+  const [reserveSources, setReserveSources] = useState<CashReserveSources>(emptyReserveSources);
   const [exchangeContext, setExchangeContext] = useState<InvestmentExchangeContext>(emptyExchangeContext);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -44,19 +83,10 @@ export default function InvestmentScreen({ view }: { view: InvestmentView }) {
     try {
       setLoading(true);
       setError("");
-      const investmentData = await loadInvestmentData();
-      const exchange = await loadInvestmentExchangeContext(
-        [
-          ...new Set([
-            ...investmentData.assets.map((asset) => asset.currency),
-            ...investmentData.accounts
-              .filter((account) => account.investment_account_kind === "BALANCE")
-              .flatMap((account) => (account.currency ? [account.currency] : [])),
-          ]),
-        ],
-      );
-      setData(investmentData);
-      setExchangeContext(exchange);
+      const value = await loadInvestmentScreenData(view);
+      setData(value.data);
+      setReserveSources(value.reserveSources);
+      setExchangeContext(value.exchange);
     } catch (value) {
       setError(
         value instanceof Error
@@ -66,28 +96,16 @@ export default function InvestmentScreen({ view }: { view: InvestmentView }) {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [view]);
 
   useEffect(() => {
     let active = true;
 
-    void loadInvestmentData()
-      .then(async (value) => ({
-        data: value,
-        exchange: await loadInvestmentExchangeContext(
-          [
-            ...new Set([
-              ...value.assets.map((asset) => asset.currency),
-              ...value.accounts
-                .filter((account) => account.investment_account_kind === "BALANCE")
-                .flatMap((account) => (account.currency ? [account.currency] : [])),
-            ]),
-          ],
-        ),
-      }))
+    void loadInvestmentScreenData(view)
       .then((value) => {
         if (active) {
           setData(value.data);
+          setReserveSources(value.reserveSources);
           setExchangeContext(value.exchange);
         }
       })
@@ -107,7 +125,7 @@ export default function InvestmentScreen({ view }: { view: InvestmentView }) {
     return () => {
       active = false;
     };
-  }, []);
+  }, [view]);
 
   return (
     <div className="space-y-6">
@@ -119,21 +137,20 @@ export default function InvestmentScreen({ view }: { view: InvestmentView }) {
           </span>
         </div>
         <h1 className="text-3xl font-black text-white">{viewTitles[view]}</h1>
-        <p className="mt-1 text-sm text-slate-400">
-          Posições e patrimônio derivados exclusivamente do histórico de
-          operações.
-        </p>
+        <p className="mt-1 text-sm text-slate-400">{viewDescriptions[view]}</p>
       </header>
 
-      <nav className="grid grid-cols-3 gap-2 rounded-2xl border border-white/10 bg-slate-900/50 p-2">
+      <nav aria-label="Áreas de Investimentos" className="grid grid-cols-2 gap-2 rounded-2xl border border-white/10 bg-slate-900/50 p-2 sm:grid-cols-4">
         {[
           ["dashboard", "/investments", "Visão geral"],
-          ["assets", "/investments/assets", "Ativos"],
+          ["portfolio", "/investments/portfolio", "Carteira"],
           ["operations", "/investments/operations", "Operações"],
+          ["settings", "/investments/settings", "Configurações"],
         ].map(([key, href, label]) => (
           <Link
             key={key}
             href={href}
+            aria-current={view === key ? "page" : undefined}
             className={`rounded-xl px-3 py-2.5 text-center text-sm font-bold transition ${
               view === key
                 ? "bg-cyan-500/15 text-cyan-200"
@@ -159,9 +176,11 @@ export default function InvestmentScreen({ view }: { view: InvestmentView }) {
           Carregando investimentos...
         </div>
       ) : view === "dashboard" ? (
-        <InvestmentDashboard data={data} exchangeContext={exchangeContext} reload={reload} />
-      ) : view === "assets" ? (
-        <InvestmentAssets data={data} reload={reload} />
+        <InvestmentDashboard data={data} reserveSources={reserveSources} exchangeContext={exchangeContext} />
+      ) : view === "portfolio" ? (
+        <InvestmentPortfolio data={data} exchangeContext={exchangeContext} reload={reload} />
+      ) : view === "settings" ? (
+        <InvestmentExchangeSettings data={data} exchangeContext={exchangeContext} reload={reload} />
       ) : (
         <div className="space-y-10">
           <InvestmentAccountEvents data={data} reload={reload} />

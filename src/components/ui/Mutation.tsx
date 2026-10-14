@@ -7,7 +7,10 @@ export function ProcessingButton({ busy, children, disabled, ...props }: ButtonH
   const compact = Boolean(props["aria-label"]);
   return (
     <button {...props} disabled={disabled || busy} aria-busy={busy}>
-      <span className="inline-grid items-center justify-items-center align-middle">
+      {/* relative: o "Processando..." sr-only (absolute) fica preso ao botão; sem
+          isso, dentro de tabelas com rolagem lateral ele escapava do recorte e
+          alargava a página no celular. */}
+      <span className="relative inline-grid items-center justify-items-center align-middle">
         <span className={`col-start-1 row-start-1 inline-flex items-center justify-center gap-2 ${busy ? "invisible" : ""}`} aria-hidden={busy || undefined}>{children}</span>
         <span className={`col-start-1 row-start-1 inline-flex items-center justify-center gap-2 ${busy ? "" : "invisible"}`} aria-hidden={!busy}>
           <LoaderCircle size={16} className="animate-spin motion-reduce:animate-none" aria-hidden="true" />

@@ -1,6 +1,6 @@
 import { getCurrentUserId, supabase } from "@/src/lib/supabase";
 import type { InvestmentExchangeContext, InvestmentExchangeRate } from "@/src/types/investments";
-import { isExchangeRateStale, resolveExchangeRate } from "@/src/utils/exchangeRateCalculations";
+import { isExchangeRateStale, listRequiredPtaxCurrencies, resolveExchangeRate } from "@/src/utils/exchangeRateCalculations";
 
 type PtaxResponse = { rate?: number; quotedAt?: string; error?: string };
 
@@ -41,8 +41,19 @@ export async function refreshUsdBrlRate() {
   return persistRate({ baseCurrency: "USD", quoteCurrency: "BRL", rate: official.rate, source: "PTAX", quotedAt: official.quotedAt });
 }
 
-export async function saveManualExchangeRate(rate: number) {
-  return persistRate({ baseCurrency: "USD", quoteCurrency: "BRL", rate, source: "MANUAL", quotedAt: new Date().toISOString() });
+export async function refreshPtaxRate(currency: string) {
+  if (currency === "USD") return refreshUsdBrlRate();
+  const response = await fetch(`/api/exchange-rates/ptax?currency=${encodeURIComponent(currency)}`, { cache: "no-store" });
+  const body = (await response.json().catch(() => ({}))) as PtaxResponse;
+  if (!response.ok || !Number.isFinite(body.rate) || Number(body.rate) <= 0) {
+    throw new Error(body.error || "A cotação PTAX não está disponível.");
+  }
+  return persistRate({ baseCurrency: currency, quoteCurrency: "BRL", rate: Number(body.rate), source: "PTAX", quotedAt: String(body.quotedAt) });
+}
+
+/** Cotação manual de `currency`/BRL (USD por padrão, como antes). */
+export async function saveManualExchangeRate(rate: number, currency = "USD") {
+  return persistRate({ baseCurrency: currency.toUpperCase(), quoteCurrency: "BRL", rate, source: "MANUAL", quotedAt: new Date().toISOString() });
 }
 
 export async function saveInvestmentConsolidationCurrency(currency: string) {
@@ -65,23 +76,36 @@ export async function loadInvestmentExchangeContext(assetCurrencies: string[]): 
   if (ratesResponse.error) throw new Error(ratesResponse.error.message);
   const consolidationCurrency = settings.data?.consolidation_currency?.toUpperCase() ?? "BRL";
   let rates = ((ratesResponse.data ?? []) as InvestmentExchangeRate[]).map(normalizeRate);
-  let warning: string | null = null;
-  const needsUsdBrl = assetCurrencies.some((currency) => {
-    const pair = new Set([currency.toUpperCase(), consolidationCurrency]);
-    return pair.has("USD") && pair.has("BRL");
-  });
-  const savedUsdBrl = rates.find((rate) => rate.base_currency === "USD" && rate.quote_currency === "BRL");
-  if (needsUsdBrl && (!savedUsdBrl || isExchangeRateStale(savedUsdBrl))) {
-    try {
-      const refreshed = await refreshUsdBrlRate();
+  const warnings: string[] = [];
+  // Cada par X/BRL necessário é atualizado pela PTAX quando falta ou está
+  // velho; se a consulta falhar, vale a última cotação salva (com aviso).
+  const results = await Promise.all(
+    listRequiredPtaxCurrencies(assetCurrencies, consolidationCurrency).map(async (currency) => {
+      const saved = rates.find((rate) => rate.base_currency === currency && rate.quote_currency === "BRL");
+      if (saved && !isExchangeRateStale(saved)) return null;
+      try {
+        return { currency, refreshed: await refreshPtaxRate(currency) };
+      } catch {
+        return { currency, refreshed: null, hadSaved: Boolean(saved) };
+      }
+    }),
+  );
+  for (const result of results) {
+    if (!result) continue;
+    if (result.refreshed) {
+      const refreshed = result.refreshed;
       rates = [refreshed, ...rates.filter((item) => item.id !== refreshed.id)];
-    } catch {
-      warning = savedUsdBrl
+    } else if (result.currency === "USD") {
+      warnings.push(result.hadSaved
         ? "Não foi possível atualizar a PTAX. A última cotação salva está sendo utilizada e pode estar desatualizada."
-        : "Não foi possível obter a PTAX. Ativos USD não serão consolidados até existir uma cotação.";
+        : "Não foi possível obter a PTAX. Ativos USD não serão consolidados até existir uma cotação.");
+    } else {
+      warnings.push(result.hadSaved
+        ? `Não foi possível atualizar a PTAX ${result.currency}/BRL. A última cotação salva está sendo utilizada e pode estar desatualizada.`
+        : `Não foi possível obter a PTAX ${result.currency}/BRL. Valores em ${result.currency} não serão consolidados até existir uma cotação.`);
     }
   }
-  return { consolidationCurrency, rates, warning };
+  return { consolidationCurrency, rates, warning: warnings.length ? warnings.join(" ") : null };
 }
 
 export { resolveExchangeRate };
