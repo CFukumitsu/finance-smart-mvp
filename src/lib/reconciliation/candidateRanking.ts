@@ -74,6 +74,54 @@ export function descriptionSimilarity(left: string, right: string) {
   return (2 * common) / (leftWords.size + rightWords.size);
 }
 
+/** Vínculo gravado em credit_card_statement_item_transactions, com o valor do item da fatura. */
+export type PersistedStatementLink = {
+  statementItemId: string;
+  transactionId: string;
+  value: number;
+};
+
+/**
+ * Itens da fatura aberta (estado da tela, que já reflete as gravações da sessão)
+ * + vínculos gravados de itens de OUTRAS faturas/competências do mesmo lançamento.
+ */
+export function mergeLinkedItems(currentItems: CandidateLinkedItem[], persistedLinks: PersistedStatementLink[]) {
+  const currentIds = new Set(currentItems.map((item) => item.id).filter(Boolean));
+  return [
+    ...currentItems,
+    ...persistedLinks
+      .filter((link) => !currentIds.has(link.statementItemId))
+      .map((link) => ({ id: link.statementItemId, value: link.value, matchedTransactionId: link.transactionId })),
+  ];
+}
+
+function reconciledCentsFor(transactionId: string, linkedItems: CandidateLinkedItem[], excludedStatementItemId?: string) {
+  return linkedItems
+    .filter((item) => item.matchedTransactionId === transactionId && item.id !== excludedStatementItemId)
+    .reduce((sum, item) => sum + moneyToCents(item.value), 0);
+}
+
+/**
+ * Revalidação no momento de confirmar, com dados recém-lidos do banco. Mesma regra
+ * dos candidatos: só é possível vincular enquanto houver saldo disponível (> 0).
+ * effectiveValue é o "Valor para conciliação" quando o usuário o editou.
+ */
+export function checkReconciliationAvailability(params: {
+  transaction: CandidateTransaction;
+  statementItemId: string;
+  linkedItems: CandidateLinkedItem[];
+  effectiveValue?: number;
+}) {
+  const valueCents = Math.abs(moneyToCents(params.effectiveValue ?? Number(params.transaction.value ?? 0)));
+  const reconciledCents = Math.abs(reconciledCentsFor(params.transaction.id, params.linkedItems, params.statementItemId));
+  const availableCents = Math.max(0, valueCents - reconciledCents);
+  return {
+    alreadyReconciled: centsToMoney(reconciledCents),
+    availableBalance: centsToMoney(availableCents),
+    allowed: availableCents > 0,
+  };
+}
+
 export function buildReconciliationCandidates<T extends CandidateTransaction>(params: {
   statementItem: { id?: string; date: string; description: string; value: number };
   transactions: T[];
@@ -86,9 +134,7 @@ export function buildReconciliationCandidates<T extends CandidateTransaction>(pa
     .filter((transaction) => transaction.type !== "Pagamento de Fatura" && transaction.type !== "Transferência")
     .map((transaction): RankedReconciliationCandidate<T> | null => {
       const originalCents = signedTransactionCents(transaction);
-      const reconciledCents = params.linkedItems
-        .filter((item) => item.matchedTransactionId === transaction.id && item.id !== params.statementItem.id)
-        .reduce((sum, item) => sum + moneyToCents(item.value), 0);
+      const reconciledCents = reconciledCentsFor(transaction.id, params.linkedItems, params.statementItem.id);
       const availableMagnitudeCents = Math.max(0, Math.abs(originalCents) - Math.abs(reconciledCents));
       const signedAvailableCents = Math.sign(originalCents) * availableMagnitudeCents;
 

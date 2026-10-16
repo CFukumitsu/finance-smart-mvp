@@ -13,7 +13,18 @@ import {
   matchStatementItemOccurrences,
   normalizeRowsByImportLayoutWithDiagnostics,
 } from "@/src/lib/reconciliation/importNormalizer";
-import { buildReconciliationCandidates, calculateAdjustedTransactionValue, moneyToCents } from "@/src/lib/reconciliation/candidateRanking";
+import {
+  buildReconciliationCandidates,
+  calculateAdjustedTransactionValue,
+  checkReconciliationAvailability,
+  mergeLinkedItems,
+  moneyToCents,
+  type PersistedStatementLink,
+} from "@/src/lib/reconciliation/candidateRanking";
+import {
+  loadPersistedLinksForTransactions,
+  loadTransactionForReconciliation,
+} from "@/src/services/reconciliationLinkService";
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx";
 import AppShell from "../components/layout/AppShell";
@@ -100,6 +111,9 @@ function normalizeText(value: unknown) {
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "");
 }
+
+// Descarta respostas antigas de vínculos quando uma leitura mais nova já começou.
+let persistedLinksRequestId = 0;
 
 function getErrorMessage(error: unknown) {
   if (error instanceof Error) return error.message;
@@ -715,6 +729,8 @@ export default function ReconciliationPage() {
   >([]);
   const [selectedCompetenceId, setSelectedCompetenceId] = useState("");
   const [reconciledValues, setReconciledValues] = useState<Record<string, string>>({});
+  // Vínculos gravados dos lançamentos carregados, inclusive de outras faturas/competências.
+  const [persistedLinks, setPersistedLinks] = useState<PersistedStatementLink[]>([]);
   const [candidateSearch, setCandidateSearch] = useState("");
   const [fileName, setFileName] = useState("");
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -1134,6 +1150,7 @@ export default function ReconciliationPage() {
     setClosedStatement(existingStatement ?? null);
     setTransactions(allAvailableTransactions);
     setItems(persistedImportedItems);
+    void refreshPersistedLinks(allAvailableTransactions.map((transaction) => transaction.id));
 
     if (persistedImportedItems.length > 0) {
       setDetectedLayout({
@@ -1186,7 +1203,12 @@ export default function ReconciliationPage() {
       matched: false,
     }));
 
-    const usedTransactionIds = new Set<string>();
+    // Lançamentos já vinculados (em qualquer fatura) não entram na conciliação
+    // automática, que compara o valor INTEIRO do lançamento com o item.
+    const alreadyLinkedLinks = await loadPersistedLinksForTransactions(
+      accountTransactions.map((transaction) => transaction.id)
+    );
+    const usedTransactionIds = new Set<string>(alreadyLinkedLinks.map((link) => link.transactionId));
     const usedStatementItemIds = new Set<string>();
 
     for (const item of importedPendingItems) {
@@ -1732,6 +1754,7 @@ export default function ReconciliationPage() {
       setDetectedLayout(detectedImportLayout);
       setTransactions(allAvailableTransactions);
       setItems(reconciledItems);
+      void refreshPersistedLinks(allAvailableTransactions.map((transaction) => transaction.id));
       setShowOnlyUnmatched(true);
 
       if (statementItemsPayload.length > 0) {
@@ -2023,8 +2046,75 @@ export default function ReconciliationPage() {
     return buildReconciliationCandidates({
       statementItem: item,
       transactions,
-      linkedItems: items,
+      linkedItems: mergeLinkedItems(items, persistedLinks),
     });
+  }
+
+  async function refreshPersistedLinks(transactionIds: string[]) {
+    const requestId = ++persistedLinksRequestId;
+    try {
+      const links = await loadPersistedLinksForTransactions(transactionIds);
+      if (requestId === persistedLinksRequestId) setPersistedLinks(links);
+    } catch (error) {
+      console.error("Erro ao carregar vínculos de conciliação:", getErrorMessage(error), error);
+      notify.warning("Não foi possível conferir os vínculos de outras faturas. Eles serão revalidados ao conciliar.");
+    }
+  }
+
+  // Revalida com o banco ao confirmar: a lista do modal pode estar desatualizada
+  // (outra aba, outro aparelho ou outra fatura). Nada é gravado aqui.
+  async function validateReconciliationAgainstDatabase(
+    item: ImportedItem,
+    transaction: Transaction,
+    options: { effectiveValue?: number; expectedAlreadyReconciled?: number } = {}
+  ) {
+    if (!item.id) throw new Error("Item da fatura ainda não foi persistido.");
+
+    const [freshTransaction, links] = await Promise.all([
+      loadTransactionForReconciliation(transaction.id),
+      loadPersistedLinksForTransactions([transaction.id]),
+    ]);
+
+    setPersistedLinks((previous) => [
+      ...previous.filter((link) => link.transactionId !== transaction.id),
+      ...links,
+    ]);
+
+    if (!freshTransaction) {
+      notify.warning("Lançamento do Finance não encontrado. Recarregue a conferência.");
+      return null;
+    }
+
+    if (moneyToCents(Number(freshTransaction.value)) !== moneyToCents(Number(transaction.value))) {
+      notify.warning("O valor do lançamento mudou. Recarregue a conferência.");
+      return null;
+    }
+
+    const availability = checkReconciliationAvailability({
+      transaction: freshTransaction,
+      statementItemId: item.id,
+      linkedItems: mergeLinkedItems([], links),
+      effectiveValue: options.effectiveValue,
+    });
+
+    if (
+      options.expectedAlreadyReconciled !== undefined &&
+      moneyToCents(availability.alreadyReconciled) !== moneyToCents(options.expectedAlreadyReconciled)
+    ) {
+      notify.warning(
+        `Os vínculos deste lançamento mudaram (já conciliado agora: ${formatCurrency(availability.alreadyReconciled)}). Recarregue a conferência e revise.`
+      );
+      return null;
+    }
+
+    if (options.expectedAlreadyReconciled === undefined && !availability.allowed) {
+      notify.warning(
+        `Este lançamento já está totalmente conciliado (${formatCurrency(availability.alreadyReconciled)} vinculados). Nenhum vínculo foi gravado. Recarregue a conferência.`
+      );
+      return null;
+    }
+
+    return availability;
   }
 
   async function saveReconciliation(
@@ -2146,6 +2236,11 @@ export default function ReconciliationPage() {
     }
 
     try {
+      const availability = await validateReconciliationAgainstDatabase(item, selectedTransaction, {
+        effectiveValue: reconciledValue,
+      });
+      if (!availability) return;
+
       if (!valueChanged) {
         await saveReconciliation(item, transactionId);
       } else {
@@ -2215,6 +2310,18 @@ export default function ReconciliationPage() {
     });
 
     if (!confirmed) return;
+
+    try {
+      const availability = await validateReconciliationAgainstDatabase(item, transaction, {
+        expectedAlreadyReconciled: transaction.alreadyReconciled,
+      });
+      if (!availability) return;
+    } catch (validationError) {
+      const message = getErrorMessage(validationError);
+      console.error("Erro ao validar conciliação:", message, validationError);
+      notify.error(`Erro ao validar conciliação: ${message}`);
+      return;
+    }
 
     const ownerId = await getCurrentUserId();
     const previousTransactionId = item.matchedTransactionId ?? null;
@@ -3008,7 +3115,7 @@ export default function ReconciliationPage() {
 
                 <ProcessingButton busy={mutation.pending === ("closeStatementAndCreatePayment")}
                   type="button"
-                  disabled={mutation.isPending || (isClosingStatement || isClosingStatementRef.current)}
+                  disabled={mutation.isPending || isClosingStatement}
                   onClick={closeStatementAndCreatePayment}
                   className="rounded-xl bg-emerald-600 px-4 py-3 font-bold text-white hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-60"
                 >
@@ -3191,7 +3298,11 @@ export default function ReconciliationPage() {
                       {!item.matched ? (
                         <>
                           <button disabled={mutation.isPending}
-                            onClick={() => { setReconciledValues({}); setItemToReconcile(item); }}
+                            onClick={() => {
+                              setReconciledValues({});
+                              setItemToReconcile(item);
+                              void refreshPersistedLinks(transactions.map((transaction) => transaction.id));
+                            }}
                             className="rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white hover:bg-blue-500"
                           >
                             Conciliar
