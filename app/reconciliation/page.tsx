@@ -13,7 +13,7 @@ import {
   matchStatementItemOccurrences,
   normalizeRowsByImportLayoutWithDiagnostics,
 } from "@/src/lib/reconciliation/importNormalizer";
-import { buildReconciliationCandidates, calculateAdjustedTransactionValue } from "@/src/lib/reconciliation/candidateRanking";
+import { buildReconciliationCandidates, calculateAdjustedTransactionValue, moneyToCents } from "@/src/lib/reconciliation/candidateRanking";
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx";
 import AppShell from "../components/layout/AppShell";
@@ -3312,14 +3312,14 @@ export default function ReconciliationPage() {
       {
         itemToReconcile && (
           <MutationScope busy={mutation.isPending} isLocked={mutation.isLocked}><div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-3 sm:p-6">
-            <div className="max-h-full w-full max-w-4xl overflow-y-auto overscroll-contain rounded-2xl border border-white/10 bg-slate-950 p-4 shadow-2xl sm:p-6">
-              <div className="mb-5 flex items-start justify-between gap-4">
-                <div>
+            <div className="flex max-h-full w-full max-w-screen-2xl flex-col overflow-hidden rounded-2xl border border-white/10 bg-slate-950 shadow-2xl">
+              <div className="flex shrink-0 items-start justify-between gap-4 p-4 pb-3 sm:p-6 sm:pb-4">
+                <div className="min-w-0">
                   <h2 className="text-2xl font-bold text-white">
                     Conciliar lançamento
                   </h2>
 
-                  <p className="mt-1 text-sm text-slate-400">
+                  <p className="mt-1 break-words text-sm text-slate-400">
                     Fatura: {new Date(itemToReconcile.date + "T00:00:00").toLocaleDateString("pt-BR")} ·{" "}
                     {itemToReconcile.description} · {formatCurrency(itemToReconcile.value)}
                   </p>
@@ -3327,63 +3327,90 @@ export default function ReconciliationPage() {
 
                 <button disabled={mutation.isPending}
                   onClick={() => setItemToReconcile(null)}
-                  className="rounded-lg px-3 py-2 text-slate-400 hover:bg-white/10 hover:text-white"
+                  className="shrink-0 rounded-lg px-3 py-2 text-slate-400 hover:bg-white/10 hover:text-white"
                 >
                   Fechar
                 </button>
               </div>
 
-              <div className="max-h-[60vh] overflow-auto rounded-xl border border-white/10">
+              <div className="flex shrink-0 flex-col gap-3 px-4 pb-3 sm:flex-row sm:px-6 sm:pb-4">
                 <input disabled={mutation.isPending}
                   value={candidateSearch}
                   onChange={(event) => setCandidateSearch(event.target.value)}
                   placeholder="Filtrar lançamentos por descrição..."
-                  className="mb-4 w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none"
+                  className="min-w-0 flex-1 rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none"
                 />
-                <div className="mb-4 flex justify-end">
-                  <button disabled={mutation.isPending}
-                    onClick={() => openCreateTransactionDrawer(itemToReconcile)}
-                    className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-500"
-                  >
-                    Criar lançamento
-                  </button>
-                </div>
-                <table className="w-full text-left text-sm">
-                  <thead className="sticky top-0 bg-slate-900 text-slate-300">
-                    <tr>
-                      <th className="px-4 py-3">Data</th>
-                      <th className="px-4 py-3">Descrição no Finance Smart</th>
-                      <th className="px-4 py-3 text-right">Valor lançado / conciliado</th>
-                      <th className="px-4 py-3 text-right">Já conciliado</th>
-                      <th className="px-4 py-3 text-right">Saldo disponível</th>
-                      <th className="px-4 py-3 text-right">Diferença</th>
-                      <th className="px-4 py-3 text-right">Ação</th>
-                    </tr>
-                  </thead>
+                <button disabled={mutation.isPending}
+                  onClick={() => openCreateTransactionDrawer(itemToReconcile)}
+                  className="shrink-0 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-500"
+                >
+                  Criar lançamento
+                </button>
+              </div>
 
-                  <tbody className="divide-y divide-white/10">
-                    {visibleCandidateTransactions.map((transaction, index) => (
-                        <tr key={transaction.id} className={index === 0 ? "bg-cyan-500/[0.08]" : "hover:bg-white/[0.03]"}>
-                          <td className="px-4 py-3 text-slate-300">
+              {/* Tabela a partir de xl; abaixo disso cada candidato vira um cartão. */}
+              <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-4 sm:px-6 sm:pb-6">
+                <div className="xl:rounded-xl xl:border xl:border-white/10">
+                  <div className="sticky top-0 z-10 hidden gap-3 bg-slate-900 px-4 py-3 text-sm text-slate-300 xl:grid xl:grid-cols-[6rem_minmax(0,1fr)_10rem_9.5rem_10rem_8.5rem_10.5rem] xl:rounded-t-xl">
+                    <div>Data</div>
+                    <div>Descrição no Finance Smart</div>
+                    <div className="text-right">Valor Fatura / Finance</div>
+                    <div className="text-right">Valor para conciliação</div>
+                    <div className="text-right">Já conciliado / Saldo</div>
+                    <div className="text-right">Diferença</div>
+                    <div className="text-right">Ação</div>
+                  </div>
+
+                  <ul className="space-y-3 xl:space-y-0 xl:divide-y xl:divide-white/10">
+                    {visibleCandidateTransactions.map((transaction, index) => {
+                      const editedValue = reconciledValues[transaction.id];
+                      const financeCents = Math.round(Number(transaction.value) * 100);
+                      const reconcileCents = editedValue === undefined
+                        ? financeCents
+                        : editedValue
+                          ? Number(editedValue.replace(/\D/g, ""))
+                          : null;
+                      // Mesma base do ranking (saldo disponível x item da fatura), recalculada com o valor digitado.
+                      const statementDifferenceCents = reconcileCents === null
+                        ? null
+                        : reconcileCents - moneyToCents(transaction.alreadyReconciled) - Math.abs(moneyToCents(itemToReconcile.value));
+                      const financeAdjustmentCents = reconcileCents === null ? 0 : reconcileCents - financeCents;
+
+                      return (
+                        <li key={transaction.id} className={"grid grid-cols-2 gap-x-4 gap-y-3 rounded-xl border border-white/10 p-4 text-sm sm:grid-cols-3 lg:grid-cols-5 xl:grid-cols-[6rem_minmax(0,1fr)_10rem_9.5rem_10rem_8.5rem_10.5rem] xl:items-center xl:gap-3 xl:rounded-none xl:border-0 xl:px-4 xl:py-3 " + (index === 0 ? "bg-cyan-500/[0.08]" : "hover:bg-white/[0.03]")}>
+                          <div className="text-slate-300">
+                            <div className="text-xs text-slate-500 xl:hidden">Data</div>
                             {new Date(transaction.due_date + "T00:00:00").toLocaleDateString("pt-BR")}
-                          </td>
+                          </div>
 
-                          <td className="px-4 py-3 text-white">
-                            {transaction.description}
+                          <div className="order-first col-span-full min-w-0 text-white xl:order-none xl:col-span-1">
+                            <div className="break-words [overflow-wrap:anywhere]" title={transaction.description}>
+                              {transaction.description}
+                            </div>
                             <div className="mt-1 flex flex-wrap gap-1">
                               {index === 0 && <span className="rounded-full bg-cyan-500/15 px-2 py-0.5 text-[10px] font-bold text-cyan-200">Melhor candidato</span>}
                               {transaction.badges.map((badge) => <span key={badge} className="rounded-full bg-white/[0.07] px-2 py-0.5 text-[10px] font-semibold text-slate-300">{badge}</span>)}
                             </div>
-                          </td>
+                          </div>
 
-                          <td className="px-4 py-3 text-right text-slate-300">
-                            <div>Valor lançado: {formatCurrency(transaction.originalValue)}</div>
-                            <label className="mt-2 block text-xs">
-                              Valor conciliado
+                          <dl className="space-y-1 text-slate-300 xl:text-right">
+                            <div className="flex justify-between gap-2 xl:justify-end">
+                              <dt className="text-xs text-slate-500">Valor Fatura</dt>
+                              <dd className="whitespace-nowrap">{formatCurrency(itemToReconcile.value)}</dd>
+                            </div>
+                            <div className="flex justify-between gap-2 xl:justify-end">
+                              <dt className="text-xs text-slate-500">Valor Finance</dt>
+                              <dd className="whitespace-nowrap">{formatCurrency(transaction.originalValue)}</dd>
+                            </div>
+                          </dl>
+
+                          <div className="text-slate-300 xl:text-right">
+                            <label className="block">
+                              <span className="text-xs text-slate-500 xl:sr-only">Valor para conciliação</span>
                               <input disabled={mutation.isPending}
-                                aria-label={"Valor conciliado de " + transaction.description}
+                                aria-label={"Valor para conciliação de " + transaction.description}
                                 inputMode="numeric"
-                                value={reconciledValues[transaction.id] ?? formatCurrency(Number(transaction.value))}
+                                value={editedValue ?? formatCurrency(Number(transaction.value))}
                                 onChange={(event) => {
                                   const digits = event.target.value.replace(/\D/g, "");
                                   setReconciledValues((previous) => ({
@@ -3391,33 +3418,39 @@ export default function ReconciliationPage() {
                                     [transaction.id]: digits ? formatCurrency(Number(digits) / 100) : "",
                                   }));
                                 }}
-                                className="mt-1 w-36 rounded-lg border border-white/10 bg-slate-900 px-3 py-2 text-right text-white"
+                                className="mt-1 w-full min-w-0 rounded-lg border border-white/10 bg-slate-900 px-3 py-2 text-right text-white xl:mt-0"
                               />
                             </label>
-                            {reconciledValues[transaction.id] && (() => {
-                              const differenceCents = Number(reconciledValues[transaction.id].replace(/\D/g, "")) - Math.round(Number(transaction.value) * 100);
-                              return differenceCents !== 0 && (
-                                <div className="mt-1 text-xs text-amber-300" aria-live="polite">
-                                  Diferença: {differenceCents > 0 ? "+" : "-"}{formatCurrency(Math.abs(differenceCents) / 100)}
-                                </div>
-                              );
-                            })()}
-                          </td>
+                            {financeAdjustmentCents !== 0 && (
+                              <div className="mt-1 text-xs text-amber-300" aria-live="polite">
+                                Altera o Finance em{" "}
+                                <span className="whitespace-nowrap">{financeAdjustmentCents > 0 ? "+" : "-"}{formatCurrency(Math.abs(financeAdjustmentCents) / 100)}</span>
+                              </div>
+                            )}
+                          </div>
 
-                          <td className="px-4 py-3 text-right text-slate-400">
-                            {formatCurrency(transaction.alreadyReconciled)}
-                          </td>
+                          <dl className="space-y-1 xl:text-right">
+                            <div className="flex justify-between gap-2 xl:justify-end">
+                              <dt className="text-xs text-slate-500">Já conciliado</dt>
+                              <dd className="whitespace-nowrap text-slate-400">{formatCurrency(transaction.alreadyReconciled)}</dd>
+                            </div>
+                            <div className="flex justify-between gap-2 xl:justify-end">
+                              <dt className="text-xs text-slate-500">Saldo</dt>
+                              <dd className="whitespace-nowrap font-semibold text-emerald-300">{formatCurrency(transaction.availableBalance)}</dd>
+                            </div>
+                          </dl>
 
-                          <td className="px-4 py-3 text-right font-semibold text-emerald-300">
-                            {formatCurrency(transaction.availableBalance)}
-                          </td>
+                          <div className="text-slate-400 xl:text-right" aria-live="polite">
+                            <div className="text-xs text-slate-500 xl:hidden">Diferença</div>
+                            <div className="whitespace-nowrap">{transaction.daysDifference} dia(s)</div>
+                            <div className={"whitespace-nowrap " + (statementDifferenceCents === 0 ? "text-emerald-300" : statementDifferenceCents === null ? "" : "text-amber-300")}>
+                              {statementDifferenceCents === null
+                                ? "—"
+                                : (statementDifferenceCents > 0 ? "+" : statementDifferenceCents < 0 ? "-" : "") + formatCurrency(Math.abs(statementDifferenceCents) / 100)}
+                            </div>
+                          </div>
 
-                          <td className="px-4 py-3 text-right text-slate-400">
-                            {transaction.daysDifference} dia(s) · {formatCurrency(transaction.valueDifference)}
-                          </td>
-
-                          <td className="px-4 py-3 text-right">
-                            <div className="flex justify-end gap-2">
+                          <div className="col-span-full flex flex-wrap justify-end gap-2 xl:col-span-1 xl:flex-col xl:items-stretch">
                               <ProcessingButton busy={mutation.pending === ("manuallyReconcile:" + itemToReconcile.id + ":" + transaction.id)} disabled={mutation.isPending}
                                 onClick={() =>
                                   manuallyReconcile(itemToReconcile, transaction.id)
@@ -3438,20 +3471,18 @@ export default function ReconciliationPage() {
                                   Vincular e ajustar total
                                 </ProcessingButton>
                               )}
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
+                          </div>
+                        </li>
+                      );
+                    })}
+                  </ul>
 
-                    {visibleCandidateTransactions.length === 0 && (
-                      <tr>
-                        <td colSpan={7} className="px-4 py-8 text-center text-slate-400">
-                          Nenhum lançamento com saldo disponível foi encontrado.
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
+                  {visibleCandidateTransactions.length === 0 && (
+                    <div className="rounded-xl border border-white/10 px-4 py-8 text-center text-slate-400 xl:rounded-none xl:border-0">
+                      Nenhum lançamento com saldo disponível foi encontrado.
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           </div></MutationScope>
