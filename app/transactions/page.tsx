@@ -101,6 +101,14 @@ import {
   isFinancialLedgerAccount,
 } from "@/src/utils/closingAccounts";
 import {
+  BROKERAGE_TRANSFER_HINTS,
+  BROKERAGE_TRANSFER_LABELS,
+  classifyTransferAccounts,
+  getTransferDestinationOptions,
+  getTransferOriginOptions,
+  isBrokerageAccount,
+} from "@/src/utils/brokerageTransfers";
+import {
   checkCardPaymentCurrencies,
   checkTransferCurrencies,
   formatMoney,
@@ -134,7 +142,10 @@ import {
   loadTransactionShortcutSummaries,
   type TransactionShortcutSummary,
 } from "@/src/services/transactionShortcutService";
-import type { AccountPeriodBalances } from "@/src/utils/accountPeriodBalances";
+import {
+  resolveAccountPeriodBalancesView,
+  type AccountPeriodBalancesRequest,
+} from "@/src/utils/accountPeriodBalances";
 import { getTemporal } from "@/src/utils/financialOverview";
 import { useAccountImageUrls } from "@/src/hooks/useAccountImageUrls";
 import {
@@ -175,6 +186,12 @@ const ACCOUNT_COLUMNS =
 function getLocalTodayIsoDate() {
   const now = new Date();
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+}
+
+/** Opção de conta na transferência; corretoras identificadas no próprio texto. */
+function formatTransferAccountOption(account: Account) {
+  const currency = account.currency ? ` (${account.currency})` : "";
+  return `${account.name}${currency}${isBrokerageAccount(account) ? " · corretora" : ""}`;
 }
 
 type Category = {
@@ -482,14 +499,10 @@ function TransactionsPageContent() {
   >("loading");
   // Incrementado depois de gravações, para os atalhos refletirem o novo saldo.
   const [shortcutRefreshToken, setShortcutRefreshToken] = useState(0);
-  const [accountPeriodBalances, setAccountPeriodBalances] = useState<{
-    accountId: string;
-    competenceId: string;
-    balances: AccountPeriodBalances;
-  } | null>(null);
-  const [accountPeriodBalancesState, setAccountPeriodBalancesState] = useState<
-    "idle" | "loading" | "ready" | "error"
-  >("idle");
+  const [accountPeriodBalancesRequest, setAccountPeriodBalancesRequest] =
+    useState<AccountPeriodBalancesRequest | null>(null);
+  // Incrementado por "Tentar novamente" no resumo da conta.
+  const [accountPeriodBalancesRetry, setAccountPeriodBalancesRetry] = useState(0);
   const [plannedCardLimit, setPlannedCardLimit] = useState(0);
   const [accountClosures, setAccountClosures] = useState<AccountClosure[]>([]);
   const loadTransactionsRequestIdRef = useRef(0);
@@ -602,6 +615,28 @@ function TransactionsPageContent() {
       : form.type === "Pagamento de Fatura"
         ? invoicePaymentAccountOptions
         : financialLedgerAccounts;
+
+  // Transferência vinculada (nova ou em edição) aceita corretora de ativos
+  // numa das pontas: aporte (financeira -> corretora) ou resgate (corretora ->
+  // financeira). Transferência legada em edição segue só entre contas
+  // financeiras. Corretoras não viram contas comuns nos demais tipos.
+  const isLinkedTransferForm =
+    form.type === "Transferência" &&
+    (!editingTransactionId || editingTransferGroupId !== null);
+  const transferOriginAccount =
+    accounts.find((account) => account.id === form.account_id) ?? null;
+  const transferDestinationAccount =
+    accounts.find((account) => account.id === form.destination_account_id) ??
+    null;
+  const transferOriginOptions = isLinkedTransferForm
+    ? getTransferOriginOptions(accounts)
+    : financialAccounts;
+  const transferDestinationOptions = isLinkedTransferForm
+    ? getTransferDestinationOptions(accounts, transferOriginAccount)
+    : financialAccounts.filter((account) => account.id !== form.account_id);
+  const transferClassification = isLinkedTransferForm
+    ? classifyTransferAccounts(transferOriginAccount, transferDestinationAccount)
+    : null;
 
   function getLinkedStatement(transactionId: string | null | undefined) {
     if (!transactionId) return null;
@@ -1162,13 +1197,13 @@ function TransactionsPageContent() {
   useEffect(() => {
     const account = accounts.find((item) => item.id === accountFilter);
     const competence = competences.find((item) => item.id === competenceFilter);
-    if (account?.type !== "Conta" || !competence) {
-      setAccountPeriodBalancesState("idle");
-      return;
-    }
+    if (account?.type !== "Conta" || !competence) return;
 
+    // Cada resultado leva a seleção que o pediu; respostas de uma seleção
+    // anterior são descartadas (cancelled) e nunca aparecem na atual.
+    const key = { accountId: account.id, competenceId: competence.id };
     let cancelled = false;
-    setAccountPeriodBalancesState("loading");
+    setAccountPeriodBalancesRequest({ ...key, status: "loading", balances: null });
     loadAccountPeriodBalances({
       account,
       year: competence.year,
@@ -1177,23 +1212,25 @@ function TransactionsPageContent() {
     })
       .then((balances) => {
         if (cancelled) return;
-        setAccountPeriodBalances({
-          accountId: account.id,
-          competenceId: competence.id,
-          balances,
-        });
-        setAccountPeriodBalancesState("ready");
+        setAccountPeriodBalancesRequest({ ...key, status: "ready", balances });
       })
       .catch((error) => {
         if (cancelled) return;
         console.error("Erro ao carregar saldos da conta:", error);
-        setAccountPeriodBalancesState("error");
+        setAccountPeriodBalancesRequest({ ...key, status: "error", balances: null });
       });
 
     return () => {
       cancelled = true;
     };
-  }, [accountFilter, competenceFilter, accounts, competences, shortcutRefreshToken]);
+  }, [
+    accountFilter,
+    competenceFilter,
+    accounts,
+    competences,
+    shortcutRefreshToken,
+    accountPeriodBalancesRetry,
+  ]);
 
   function refreshShortcutSummaries() {
     setShortcutRefreshToken((token) => token + 1);
@@ -1247,6 +1284,17 @@ function TransactionsPageContent() {
       storedDefaults?.due_date ?? new Date().toISOString().split("T")[0];
 
     const defaultType = storedDefaults?.type ?? "Despesa";
+    // Corretora só volta como padrão numa nova transferência (aporte/resgate);
+    // nunca como conta de receita/despesa.
+    const storedAccount = accounts.find(
+      (account) => account.id === storedDefaults?.account_id,
+    );
+    const defaultAccountId =
+      storedAccount &&
+      isBrokerageAccount(storedAccount) &&
+      defaultType !== "Transferência"
+        ? ""
+        : (storedDefaults?.account_id ?? "");
 
     setEditingTransactionId(null);
     setEditingTransferGroupId(null);
@@ -1266,7 +1314,7 @@ function TransactionsPageContent() {
         storedDefaults?.status ??
         getAutomaticStatus(defaultType, defaultDueDate),
       installments: "2",
-      account_id: storedDefaults?.account_id ?? "",
+      account_id: defaultAccountId,
       card_payment_account_id: "",
       origin_account_id: "",
       destination_account_id: "",
@@ -1467,13 +1515,30 @@ function TransactionsPageContent() {
         (account) => account.id === form.destination_account_id,
       );
 
+      // Transferência vinculada: as regras de conta (inclusive aporte/resgate
+      // com corretora, mesma moeda) são as de resolve_transfer_accounts, que o
+      // banco valida de novo. Legado e demais tipos seguem como antes.
+      const isLinkedTransferSave =
+        form.type === "Transferência" &&
+        (!editingTransactionId || editingTransferGroupId !== null);
+      const linkedTransferAccounts = isLinkedTransferSave
+        ? classifyTransferAccounts(selectedAccount, selectedDestination)
+        : null;
+
+      if (linkedTransferAccounts?.kind === "blocked") {
+        notify.warning(linkedTransferAccounts.message);
+        return;
+      }
+
       if (
         !selectedAccount ||
-        !isFinancialLedgerAccount(selectedAccount) ||
-        (form.type === "Transferência" &&
-          (!isFinancialAccount(selectedAccount) ||
-            !selectedDestination ||
-            !isFinancialAccount(selectedDestination)))
+        (isLinkedTransferSave
+          ? false
+          : !isFinancialLedgerAccount(selectedAccount) ||
+            (form.type === "Transferência" &&
+              (!isFinancialAccount(selectedAccount) ||
+                !selectedDestination ||
+                !isFinancialAccount(selectedDestination))))
       ) {
         notify.warning(
           "Contas de investimento devem ser movimentadas exclusivamente pelo módulo Investimentos.",
@@ -2323,9 +2388,11 @@ function TransactionsPageContent() {
 
   // Bloco de conversão: só em transferência vinculada (nova ou em edição)
   // entre contas com moedas confirmadas diferentes. Legado não muda.
+  // Aporte/resgate com corretora nunca usa conversão (mesma moeda exigida).
   const transferFormCurrencyMode =
     form.type === "Transferência" &&
     (!editingTransactionId || editingTransferGroupId !== null) &&
+    transferClassification?.kind === "traditional" &&
     form.account_id &&
     form.destination_account_id
       ? getTransferCurrencyMode(
@@ -2592,12 +2659,12 @@ function TransactionsPageContent() {
   // Saldos da conta selecionada: regra canônica (mesma dos atalhos), sem
   // depender de busca/tipo/status/categoria. Só a movimentação acompanha os
   // filtros da listagem.
-  const periodBalances =
-    selectedAccount?.type === "Conta" &&
-    accountPeriodBalances?.accountId === selectedAccount.id &&
-    accountPeriodBalances.competenceId === competenceFilter
-      ? accountPeriodBalances.balances
-      : null;
+  const periodBalancesView = resolveAccountPeriodBalancesView({
+    selectedAccount,
+    competenceId: competenceFilter,
+    request: accountPeriodBalancesRequest,
+  });
+  const periodBalances = periodBalancesView.balances;
   const periodMovement = selectedAccount
     ? calculateAccountMovement(selectedAccount.id, transactions)
     : 0;
@@ -2614,7 +2681,7 @@ function TransactionsPageContent() {
 
   function formatPeriodBalance(value: number | null | undefined) {
     if (value === null || value === undefined) {
-      return accountPeriodBalancesState === "error" ? "Indisponível" : "…";
+      return periodBalancesView.status === "error" ? "Indisponível" : "…";
     }
     return formatSummaryCurrency(value);
   }
@@ -2847,6 +2914,14 @@ function TransactionsPageContent() {
       type: newType,
       status: newStatus,
       category_id: newType === "Transferência" ? "" : current.category_id,
+      // Corretora só participa como ponta de aporte/resgate.
+      account_id:
+        newType !== "Transferência" &&
+        isBrokerageAccount(
+          accounts.find((account) => account.id === current.account_id),
+        )
+          ? ""
+          : current.account_id,
       destination_account_id:
         newType === "Transferência" ? current.destination_account_id : "",
       mode: newType === "Transferência" ? "unico" : current.mode,
@@ -3159,6 +3234,24 @@ function TransactionsPageContent() {
                     : "Entradas − saídas da conta"
                 }
               />
+              {periodBalancesView.status === "error" && (
+                <div
+                  role="alert"
+                  className="col-span-full flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-amber-500/30 bg-amber-500/10 px-4 py-2.5 text-sm"
+                >
+                  <span className="theme-text">
+                    Não foi possível carregar os saldos desta conta. A
+                    movimentação e os lançamentos continuam disponíveis.
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setAccountPeriodBalancesRetry((value) => value + 1)}
+                    className="h-8 shrink-0 rounded-lg border border-amber-500/40 px-3 text-xs font-semibold text-amber-300 transition-colors hover:bg-amber-500/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/60"
+                  >
+                    Tentar novamente
+                  </button>
+                </div>
+              )}
             </>
           )}
 
@@ -4113,12 +4206,23 @@ function TransactionsPageContent() {
                         value={form.account_id}
                         onChange={(event) => {
                           const accountId = event.target.value;
+                          // Destino que deixa de ser válido para a nova origem
+                          // (ex.: corretora -> corretora) é limpo.
+                          const nextOrigin =
+                            accounts.find((account) => account.id === accountId) ??
+                            null;
+                          const keepsDestination =
+                            !isLinkedTransferForm ||
+                            getTransferDestinationOptions(accounts, nextOrigin).some(
+                              (account) => account.id === form.destination_account_id,
+                            );
 
                           setForm({
                             ...form,
                             account_id: accountId,
                             destination_account_id:
-                              form.destination_account_id === accountId
+                              form.destination_account_id === accountId ||
+                              !keepsDestination
                                 ? ""
                                 : form.destination_account_id,
                           });
@@ -4131,9 +4235,9 @@ function TransactionsPageContent() {
                       >
                         <option value="">Selecione</option>
 
-                        {financialAccounts.map((account) => (
+                        {transferOriginOptions.map((account) => (
                           <option key={account.id} value={account.id}>
-                            {`${account.name}${account.currency ? ` (${account.currency})` : ""}`}
+                            {formatTransferAccountOption(account)}
                           </option>
                         ))}
                       </select>
@@ -4156,16 +4260,49 @@ function TransactionsPageContent() {
                       >
                         <option value="">Selecione</option>
 
-                        {financialAccounts
-                          .filter((account) => account.id !== form.account_id)
-                          .map((account) => (
-                            <option key={account.id} value={account.id}>
-                              {`${account.name}${account.currency ? ` (${account.currency})` : ""}`}
-                            </option>
-                          ))}
+                        {transferDestinationOptions.map((account) => (
+                          <option key={account.id} value={account.id}>
+                            {formatTransferAccountOption(account)}
+                          </option>
+                        ))}
                       </select>
                     </div>
                   </div>
+
+                  {(transferClassification?.kind === "contribution" ||
+                    transferClassification?.kind === "redemption") && (
+                    <div
+                      role="status"
+                      className="flex items-start gap-3 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3"
+                    >
+                      <TrendingUp
+                        size={18}
+                        aria-hidden="true"
+                        className={`mt-0.5 shrink-0 text-emerald-300 ${
+                          transferClassification.kind === "redemption"
+                            ? "rotate-180"
+                            : ""
+                        }`}
+                      />
+                      <div className="min-w-0">
+                        <p className="theme-text text-sm font-semibold">
+                          {BROKERAGE_TRANSFER_LABELS[transferClassification.kind]}
+                        </p>
+                        <p className="theme-muted mt-0.5 text-xs">
+                          {BROKERAGE_TRANSFER_HINTS[transferClassification.kind]}
+                        </p>
+                      </div>
+                    </div>
+                  )}
+
+                  {transferClassification?.kind === "blocked" && (
+                    <p
+                      role="alert"
+                      className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-300"
+                    >
+                      {transferClassification.message}
+                    </p>
+                  )}
 
                   {conversionCurrencies && (
                     <div className="space-y-4 rounded-xl border border-white/10 bg-white/[0.02] p-4">

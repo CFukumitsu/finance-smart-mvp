@@ -130,6 +130,38 @@ body {
   border-color: var(--border);
 }
 
+/* Atalhos de contas em Lançamentos: grade que acompanha a largura real do
+   conteúdo (sidebar aberta ou recolhida), sem rolagem horizontal.
+   --shortcut-cols = max(favoritos, 4), definido no componente. */
+.account-shortcuts {
+  container-type: inline-size;
+}
+
+.account-shortcut-grid {
+  display: grid;
+  gap: 0.5rem;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+@container (min-width: 22rem) {
+  .account-shortcut-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@container (min-width: 30rem) {
+  .account-shortcut-grid {
+    grid-template-columns: repeat(
+      auto-fill,
+      minmax(
+        /* -1px: evita perder uma coluna por arredondamento */
+        max(13.5rem, calc((100% - (var(--shortcut-cols, 4) - 1) * 0.5rem) / var(--shortcut-cols, 4) - 1px)),
+        1fr
+      )
+    );
+  }
+}
+
 .transactions-page [class~="bg-slate-950/60"],
 .transactions-page [class~="bg-slate-950"],
 .transactions-page [class~="bg-slate-900"] {

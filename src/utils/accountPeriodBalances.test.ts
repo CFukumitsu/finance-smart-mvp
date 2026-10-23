@@ -4,10 +4,11 @@ import {
   calculateAccountPeriodBalances,
   getAccountPeriodBalanceReferences,
   getCompetenceStartReference,
+  resolveAccountPeriodBalancesView,
   // @ts-expect-error Node's native TypeScript test runner requires the extension.
 } from "./accountPeriodBalances.ts";
 // @ts-expect-error Node's native TypeScript test runner requires the extension.
-import { calculateAccountBalanceAt } from "./financialOverview.ts";
+import { calculateAccountBalanceAt, isValidIsoDate } from "./financialOverview.ts";
 
 const TODAY = "2026-10-23";
 const competences = [
@@ -50,12 +51,134 @@ const transactions = [
   tx("c-10", "2026-10-10", "Despesa", 999, "Pago", "outra-conta"),
 ];
 
-test("referência de início de mês fica antes de qualquer data do mês", () => {
-  assert.equal(getCompetenceStartReference(2026, 1), "2026-01-00");
-  assert.ok("2025-12-31" < getCompetenceStartReference(2026, 1));
-  assert.ok("2026-01-01" > getCompetenceStartReference(2026, 1));
-  assert.deepEqual(getAccountPeriodBalanceReferences(2026, 10, TODAY), ["2026-10-00", "2026-11-00", TODAY]);
-  assert.deepEqual(getAccountPeriodBalanceReferences(2026, 9, TODAY), ["2026-09-00", "2026-10-00"]);
+// Regressão: a referência de início de mês era "YYYY-MM-00". Ela ia para
+// .lte("due_date", ...) e o Postgres (coluna date) respondia
+// "22008: date/time field value out of range" → resumo "Indisponível".
+test("referências de saldo são sempre datas válidas para a coluna date", () => {
+  assert.deepEqual(getCompetenceStartReference(2026, 1), { asOf: "2026-01-01", exclusive: true });
+  assert.deepEqual(getAccountPeriodBalanceReferences(2026, 10, TODAY), [
+    { asOf: "2026-10-01", exclusive: true },
+    { asOf: "2026-11-01", exclusive: true },
+    { asOf: TODAY, exclusive: false },
+  ]);
+  // Virada de ano: fim de dezembro = antes de 01/01 do ano seguinte.
+  assert.deepEqual(getAccountPeriodBalanceReferences(2026, 12, TODAY), [
+    { asOf: "2026-12-01", exclusive: true },
+    { asOf: "2027-01-01", exclusive: true },
+  ]);
+  // Todos os meses de uma década, incluindo fevereiro e anos bissextos.
+  for (let year = 2020; year <= 2030; year += 1) {
+    for (let month = 1; month <= 12; month += 1) {
+      for (const reference of getAccountPeriodBalanceReferences(year, month, `${year}-${String(month).padStart(2, "0")}-15`)) {
+        assert.ok(isValidIsoDate(reference.asOf), `${year}-${month}: ${reference.asOf}`);
+      }
+    }
+  }
+});
+
+test("isValidIsoDate rejeita o que o Postgres rejeita", () => {
+  for (const value of ["2026-10-00", "2026-02-29", "2026-02-30", "2026-13-01", "2026-04-31", "2026-1-01", ""]) {
+    assert.equal(isValidIsoDate(value), false, value);
+  }
+  for (const value of ["2024-02-29", "2026-02-28", "2026-12-31", "2027-01-01"]) {
+    assert.equal(isValidIsoDate(value), true, value);
+  }
+});
+
+test("limites do mês: último dia entra no fim; dia 1 seguinte não entra", () => {
+  const limits = [
+    tx("c-10", "2026-09-30", "Receita", 7, "Recebido"),
+    tx("c-10", "2026-10-01", "Receita", 10, "Recebido"),
+    tx("c-10", "2026-10-31", "Receita", 100, "Recebido"),
+    tx("c-11", "2026-11-01", "Receita", 1000, "Recebido"),
+  ];
+  const balances = calculateAccountPeriodBalances({
+    account: account(0), year: 2026, month: 10, today: "2026-10-01", competences, closures: [], transactions: limits,
+  });
+  // Início de out: só o que tem data em setembro (mesmo de competência outubro).
+  assert.equal(balances.openingBalance, 7);
+  // Hoje (dia 1): inclui o próprio dia 1.
+  assert.equal(balances.currentBalance, 17);
+  // Fim de out: inclui 31/10, exclui 01/11.
+  assert.equal(balances.closingBalance, 117);
+});
+
+test("fevereiro e virada de ano", () => {
+  const yearCompetences = [
+    { id: "c-2026-12", year: 2026, month: 12 },
+    { id: "c-2027-01", year: 2027, month: 1 },
+    { id: "c-2027-02", year: 2027, month: 2 },
+    { id: "c-2027-03", year: 2027, month: 3 },
+  ];
+  const history = [
+    tx("c-2026-12", "2026-12-31", "Receita", 1, "Recebido"),
+    tx("c-2027-01", "2027-01-01", "Receita", 10, "Recebido"),
+    tx("c-2027-02", "2027-02-28", "Receita", 100, "Recebido"),
+    tx("c-2027-03", "2027-03-01", "Receita", 1000, "Recebido"),
+  ];
+  const january = calculateAccountPeriodBalances({
+    account: account(0), year: 2027, month: 1, today: "2026-10-23", competences: yearCompetences, closures: [], transactions: history,
+  });
+  assert.equal(january.temporal, "future");
+  assert.equal(january.openingBalance, 1);
+  assert.equal(january.closingBalance, 11);
+  const february = calculateAccountPeriodBalances({
+    account: account(0), year: 2027, month: 2, today: "2027-02-28", competences: yearCompetences, closures: [], transactions: history,
+  });
+  assert.equal(february.openingBalance, 11);
+  assert.equal(february.currentBalance, 111);
+  assert.equal(february.closingBalance, 111);
+  // Fechamento de dezembro vale a partir de janeiro.
+  const closed = calculateAccountPeriodBalances({
+    account: account(0), year: 2027, month: 1, today: "2026-10-23", competences: yearCompetences,
+    closures: [{ account_id: "acc", competence_id: "c-2026-12", closing_balance: 500 }], transactions: history,
+  });
+  assert.equal(closed.openingBalance, 500);
+  assert.equal(closed.closingBalance, 510);
+});
+
+test("conta em EUR/GBP: valores na moeda da conta, sem conversão", () => {
+  for (const currency of ["EUR", "GBP"]) {
+    const balances = calculateAccountPeriodBalances({
+      account: { ...account(250), currency }, year: 2026, month: 10, today: TODAY, competences, closures: [],
+      transactions: [tx("c-10", "2026-10-02", "Despesa", 40)],
+    });
+    assert.deepEqual(
+      [balances.openingBalance, balances.currentBalance, balances.closingBalance],
+      [250, 210, 210],
+    );
+  }
+});
+
+test("resumo só mostra o resultado da seleção atual", () => {
+  const balances = calculateAccountPeriodBalances({
+    account: account(1000), year: 2026, month: 10, today: TODAY, competences, closures: [], transactions,
+  });
+  const conta = { id: "acc", type: "Conta" as const };
+  const ready = { accountId: "acc", competenceId: "c-10", status: "ready" as const, balances };
+
+  assert.deepEqual(resolveAccountPeriodBalancesView({ selectedAccount: conta, competenceId: "c-10", request: ready }), {
+    status: "ready", balances,
+  });
+  // Troca rápida de conta ou de mês: resultado anterior não aparece.
+  assert.deepEqual(
+    resolveAccountPeriodBalancesView({ selectedAccount: { id: "outra", type: "Conta" }, competenceId: "c-10", request: ready }),
+    { status: "loading", balances: null },
+  );
+  assert.deepEqual(
+    resolveAccountPeriodBalancesView({ selectedAccount: conta, competenceId: "c-09", request: ready }),
+    { status: "loading", balances: null },
+  );
+  // Erro da seleção anterior também não vaza para a nova.
+  const failed = { accountId: "acc", competenceId: "c-10", status: "error" as const, balances: null };
+  assert.equal(resolveAccountPeriodBalancesView({ selectedAccount: conta, competenceId: "c-10", request: failed }).status, "error");
+  assert.equal(
+    resolveAccountPeriodBalancesView({ selectedAccount: { id: "outra", type: "Conta" }, competenceId: "c-10", request: failed }).status,
+    "loading",
+  );
+  // Cartão (ou nenhuma conta) não usa estes saldos.
+  assert.equal(resolveAccountPeriodBalancesView({ selectedAccount: { id: "acc", type: "Cartão" }, competenceId: "c-10", request: ready }).status, "none");
+  assert.equal(resolveAccountPeriodBalancesView({ selectedAccount: null, competenceId: "c-10", request: ready }).status, "none");
 });
 
 test("sem fechamento: saldo inicial do cadastro entra no saldo (antes o resumo usava zero)", () => {

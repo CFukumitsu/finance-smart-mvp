@@ -208,7 +208,8 @@ export async function loadAccountPeriodBalances(params: {
       fetchAccountBalanceTransactions({
         ownerId,
         accountId: params.account.id,
-        asOf: reference,
+        asOf: reference.asOf,
+        exclusive: reference.exclusive,
         closures,
         competences,
       }),

@@ -122,6 +122,19 @@ Lançamentos financeiros.
 | `installment_number` | Número da parcela |
 | `installment_count` | Total de parcelas |
 
+#### Aporte e resgate com corretora (migration `202610240001`)
+
+Transferências vinculadas (`create_transfer`, `update_transfer`, `delete_transfer`) aceitam uma corretora de ativos numa das pontas: Conta com `show_on_investments_dashboard = true` e `investment_account_kind IS NULL`, a mesma conta usada nas operações de compra/venda.
+
+- **Aporte:** conta financeira → corretora. **Resgate:** corretora → conta financeira. A validação fica em `resolve_transfer_accounts`.
+- As duas pontas precisam estar na mesma moeda; não há conversão neste fluxo.
+- Continuam bloqueados: cartões, contas por saldo (`BALANCE`, só pelo módulo Investimentos) e corretora → corretora.
+- A ponta da conta financeira debita ou credita uma vez. O Guardado segue o papel de planejamento da corretora (automático: reserva).
+- A ponta da corretora não entra em saldo operacional, fechamento nem patrimônio. O patrimônio da corretora é o valor das posições.
+- Compras e vendas (`investment_operations`) não geram lançamento.
+
+Não há colunas novas nem backfill.
+
 ## Planejamento e recorrência
 
 ### `financial_targets`

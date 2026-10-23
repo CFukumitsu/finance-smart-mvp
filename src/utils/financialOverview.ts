@@ -195,16 +195,29 @@ const isIncomingTransfer = (transaction: OverviewTransaction) =>
 // Saldo atual de uma conta
 // ---------------------------------------------------------------------------
 
+/** YYYY-MM-DD que existe no calendário (o Postgres rejeita "2026-10-00" ou "2026-02-30"). */
+export function isValidIsoDate(value: string) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) return false;
+  const [year, month, day] = match.slice(1).map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day;
+}
+
 /**
  * Saldo até `asOf`: último fechamento de conta ANTERIOR ao mês de `asOf`
  * (closing_balance, que pode ter sido conferido com o banco) + lançamentos
  * das competências seguintes com data até `asOf`. Sem fechamento: saldo
  * inicial do cadastro (current_balance) + todos os lançamentos até `asOf`.
  * Débitos/créditos seguem calculateAccountFinalBalance (mesma regra do app).
+ * `exclusive`: só lançamentos com data ANTERIOR a `asOf` (saldo "antes do
+ * dia"); com asOf = dia 1, é o saldo no início do mês, ainda com o mês de
+ * `asOf` como referência dos fechamentos.
  */
 export function calculateAccountBalanceAt(params: {
   account: OverviewAccount;
   asOf: string;
+  exclusive?: boolean;
   competences: OverviewCompetence[];
   closures: OverviewClosure[];
   transactions: OverviewTransaction[];
@@ -221,7 +234,9 @@ export function calculateAccountBalanceAt(params: {
 
   const movements = params.transactions.filter((transaction) => {
     if (transaction.account_id !== params.account.id) return false;
-    if (transaction.due_date > params.asOf) return false;
+    if (params.exclusive ? transaction.due_date >= params.asOf : transaction.due_date > params.asOf) {
+      return false;
+    }
     if (!latestClosure) return true;
     const transactionOrder = order.get(transaction.competence_id);
     return transactionOrder !== undefined && transactionOrder > latestClosure.order;

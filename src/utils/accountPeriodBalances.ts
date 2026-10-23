@@ -9,12 +9,18 @@ import { calculateAccountBalanceAt, getTemporal, shiftMonth, type OverviewAccoun
 const pad = (value: number) => String(value).padStart(2, "0");
 
 /**
- * Data de referência "antes do dia 1" da competência. Na regra canônica ela
- * usa o último fechamento ANTERIOR ao mês e nenhum lançamento do próprio mês
- * ("YYYY-MM-00" é menor que qualquer data do mês na comparação de texto).
+ * Data de referência de um saldo. Sempre uma data válida (vai para a
+ * consulta de due_date, coluna date). `exclusive` = antes de `asOf`.
  */
-export function getCompetenceStartReference(year: number, month: number) {
-  return `${year}-${pad(month)}-00`;
+export type BalanceReference = { asOf: string; exclusive: boolean };
+
+/**
+ * Saldo "antes do dia 1" da competência: lançamentos com data < dia 1 e o
+ * último fechamento ANTERIOR ao mês. (Antes era "YYYY-MM-00", data
+ * inexistente que o Postgres rejeitava, e o resumo mostrava "Indisponível".)
+ */
+export function getCompetenceStartReference(year: number, month: number): BalanceReference {
+  return { asOf: `${year}-${pad(month)}-01`, exclusive: true };
 }
 
 export type AccountPeriodBalances = {
@@ -38,10 +44,11 @@ export function calculateAccountPeriodBalances(params: {
   transactions: OverviewTransaction[];
 }): AccountPeriodBalances {
   const next = shiftMonth(params.year, params.month, 1);
-  const balanceAt = (asOf: string) =>
+  const balanceAt = (reference: BalanceReference) =>
     calculateAccountBalanceAt({
       account: params.account,
-      asOf,
+      asOf: reference.asOf,
+      exclusive: reference.exclusive,
       competences: params.competences,
       closures: params.closures,
       transactions: params.transactions,
@@ -51,21 +58,58 @@ export function calculateAccountPeriodBalances(params: {
   return {
     temporal,
     openingBalance: balanceAt(getCompetenceStartReference(params.year, params.month)),
-    currentBalance: temporal === "current" ? balanceAt(params.today) : null,
-    // Fim do mês = início do mês seguinte: usa o fechamento do próprio mês,
-    // quando existir, como a Visão Financeira faz no mês seguinte.
+    currentBalance:
+      temporal === "current" ? balanceAt({ asOf: params.today, exclusive: false }) : null,
+    // Fim do mês = início do mês seguinte (data < dia 1 seguinte, sem o
+    // próprio dia 1): usa o fechamento do próprio mês, quando existir, como a
+    // Visão Financeira faz no mês seguinte.
     closingBalance: balanceAt(getCompetenceStartReference(next.year, next.month)),
   };
 }
 
 /** Datas de referência cujos lançamentos o cálculo acima precisa. */
-export function getAccountPeriodBalanceReferences(year: number, month: number, today: string) {
+export function getAccountPeriodBalanceReferences(
+  year: number,
+  month: number,
+  today: string,
+): BalanceReference[] {
   const next = shiftMonth(year, month, 1);
-  return Array.from(
-    new Set([
-      getCompetenceStartReference(year, month),
-      getCompetenceStartReference(next.year, next.month),
-      ...(getTemporal(year, month, today) === "current" ? [today] : []),
-    ]),
-  );
+  return [
+    getCompetenceStartReference(year, month),
+    getCompetenceStartReference(next.year, next.month),
+    ...(getTemporal(year, month, today) === "current"
+      ? [{ asOf: today, exclusive: false }]
+      : []),
+  ];
+}
+
+/** Último carregamento de saldos, sempre identificado pela seleção que o pediu. */
+export type AccountPeriodBalancesRequest = {
+  accountId: string;
+  competenceId: string;
+  status: "loading" | "ready" | "error";
+  balances: AccountPeriodBalances | null;
+};
+
+/**
+ * O que o resumo deve mostrar para a seleção atual. O carregamento guardado
+ * só vale para a mesma conta e competência: troca rápida nunca exibe saldo
+ * nem erro da seleção anterior. Cartão ou nenhuma conta → nada. Busca e
+ * filtros não entram.
+ */
+export function resolveAccountPeriodBalancesView(params: {
+  selectedAccount: { id: string; type: "Conta" | "Cartão" } | null | undefined;
+  competenceId: string;
+  request: AccountPeriodBalancesRequest | null;
+}): { status: "none" | "loading" | "ready" | "error"; balances: AccountPeriodBalances | null } {
+  if (params.selectedAccount?.type !== "Conta") return { status: "none", balances: null };
+  const request = params.request;
+  if (
+    !request ||
+    request.accountId !== params.selectedAccount.id ||
+    request.competenceId !== params.competenceId
+  ) {
+    return { status: "loading", balances: null };
+  }
+  return { status: request.status, balances: request.status === "ready" ? request.balances : null };
 }

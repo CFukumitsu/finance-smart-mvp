@@ -3,6 +3,7 @@ import { ensureCompetenceExists } from "@/src/services/competenceService";
 import {
   DEFAULT_RESERVE_PROJECTION_SETTINGS,
   isReserveProjectionModel,
+  isValidIsoDate,
   monthEnd,
   monthStart,
   planReserveProjection,
@@ -41,14 +42,20 @@ export async function fetchAllPages<T>(buildQuery: (from: number, to: number) =>
  * Lançamentos que formam o saldo de uma conta em `asOf` (calculateAccountBalanceAt):
  * os posteriores ao último fechamento anterior ao mês de `asOf`, com data
  * até `asOf`; todos até `asOf`, se a conta nunca foi fechada.
+ * `exclusive`: data ANTES de `asOf` (mesma opção de calculateAccountBalanceAt).
  */
 export async function fetchAccountBalanceTransactions(params: {
   ownerId: string;
   accountId: string;
   asOf: string;
+  exclusive?: boolean;
   closures: OverviewClosure[];
   competences: OverviewCompetence[];
 }) {
+  // due_date é date no banco: uma data inexistente faria a consulta falhar.
+  if (!isValidIsoDate(params.asOf)) {
+    throw new Error(`Data de referência inválida para o saldo: ${params.asOf}`);
+  }
   const order = new Map(params.competences.map((item) => [item.id, item.year * 100 + item.month]));
   const asOfOrder = Number(params.asOf.slice(0, 4)) * 100 + Number(params.asOf.slice(5, 7));
   const latestClosureOrder = params.closures
@@ -62,9 +69,9 @@ export async function fetchAccountBalanceTransactions(params: {
   if (competenceIds && competenceIds.length === 0) return [];
 
   return fetchAllPages<OverviewTransaction>((from, to) => {
-    let query = supabase.from("transactions").select(TRANSACTION_FIELDS)
-      .eq("owner_id", params.ownerId).eq("account_id", params.accountId)
-      .lte("due_date", params.asOf);
+    const base = supabase.from("transactions").select(TRANSACTION_FIELDS)
+      .eq("owner_id", params.ownerId).eq("account_id", params.accountId);
+    let query = params.exclusive ? base.lt("due_date", params.asOf) : base.lte("due_date", params.asOf);
     if (competenceIds) query = query.in("competence_id", competenceIds);
     return query.order("id").range(from, to);
   });

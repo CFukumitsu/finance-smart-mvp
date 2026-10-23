@@ -79,6 +79,11 @@ insert into public.accounts(id, owner_id, name, type, currency, current_balance,
   ('af100000-0000-0000-0000-000000000013', 'af000000-0000-0000-0000-000000000001', 'USD', 'Conta', 'USD', 0, true, false),
   ('af100000-0000-0000-0000-000000000021', 'af000000-0000-0000-0000-000000000002', 'CONTA B', 'Conta', 'BRL', 0, true, false);
 
+-- Desde 202610240001 uma conta só marcada para Investimentos é corretora e
+-- aceita aporte/resgate; o caso bloqueado passa a ser a conta por saldo.
+update public.accounts set investment_account_kind = 'BALANCE'
+ where id = 'af100000-0000-0000-0000-000000000009';
+
 insert into public.competences(owner_id, year, month, name, status, start_date, end_date)
 select owner_id, year, month, format('%s-%s', year, lpad(month::text, 2, '0')), 'ABERTA',
        make_date(year, month, 1), (make_date(year, month, 1) + interval '1 month - 1 day')::date
