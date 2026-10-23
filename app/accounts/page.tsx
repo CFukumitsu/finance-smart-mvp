@@ -28,6 +28,24 @@ import {
 import ViewModeToggle from "@/src/components/ui/viewMode/ViewModeToggle";
 import { useViewMode } from "@/src/components/ui/viewMode/useViewMode";
 import { confirmAction, notify } from "@/src/components/ui/feedback/feedbackStore";
+import AccountIcon from "@/src/components/accounts/AccountIcon";
+import AccountIconPicker from "@/src/components/accounts/AccountIconPicker";
+import AccountImageField, {
+  type AccountImageDraft,
+} from "@/src/components/accounts/AccountImageField";
+import { useAccountImageUrls } from "@/src/hooks/useAccountImageUrls";
+import {
+  removeAccountImageFiles,
+  uploadAccountImage,
+} from "@/src/services/accountImageService";
+import {
+  findAccountIconOption,
+  getNextTransactionShortcutOrder,
+  selectWithOptionalAccountColumns,
+  parseTransactionShortcutOrder,
+  resolveAccountIcon,
+} from "@/src/utils/accountShortcuts";
+import { isFinancialLedgerAccount } from "@/src/utils/closingAccounts";
 
 type Competence = {
   id: string;
@@ -50,7 +68,16 @@ type Account = {
   spending_history_start_date: string | null;
   has_financial_history: boolean;
   active: boolean;
+  // Ausentes enquanto a migration 202610230001 não for aplicada.
+  icon_key?: string | null;
+  show_in_transaction_shortcuts?: boolean;
+  transaction_shortcut_order?: number | null;
+  // Ausente enquanto a migration 202610230002 não for aplicada.
+  image_path?: string | null;
 };
+
+const ACCOUNT_COLUMNS =
+  "id, name, type, closing_day, due_day, limit_amount, current_balance, currency, show_on_investments_dashboard, investment_account_kind, planning_role, use_spending_history, spending_history_start_date, active";
 
 const initialForm = {
   name: "",
@@ -67,6 +94,10 @@ const initialForm = {
   use_spending_history: true,
   spending_history_start_date: "",
   active: true,
+  // Aparência e atalhos de Lançamentos (somente visual). "" = ícone automático.
+  icon_key: "",
+  show_in_transaction_shortcuts: false,
+  transaction_shortcut_order: "",
 };
 
 export default function AccountsPage() {
@@ -83,6 +114,14 @@ export default function AccountsPage() {
   const [plannedValue, setPlannedValue] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [loadError, setLoadError] = useState("");
+  // false = banco ainda sem as colunas de ícone/atalhos (migration pendente).
+  const [shortcutsAvailable, setShortcutsAvailable] = useState(true);
+  // false = banco ainda sem a coluna/bucket de imagem (migration pendente).
+  const [imagesAvailable, setImagesAvailable] = useState(true);
+  // Imagem escolhida no formulário: só é enviada ao salvar. removeImage marca
+  // a remoção da imagem atual, também confirmada só ao salvar.
+  const [imageDraft, setImageDraft] = useState<AccountImageDraft | null>(null);
+  const [removeImage, setRemoveImage] = useState(false);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [editingAccountId, setEditingAccountId] = useState<string | null>(null);
   const [planningAccount, setPlanningAccount] = useState<Account | null>(null);
@@ -96,6 +135,9 @@ export default function AccountsPage() {
     currentDate.getMonth() + 1,
   ).padStart(2, "0")}`;
   const [form, setForm] = useState(initialForm);
+  const imageUrls = useAccountImageUrls(
+    accounts.map((item) => item.image_path),
+  );
 
   async function loadAccounts() {
     setIsLoading(true);
@@ -103,18 +145,23 @@ export default function AccountsPage() {
 
     try {
       const ownerId = await getCurrentUserId();
-      const [accountsResponse, historyResponse] = await Promise.all([
+      const selectAccounts = (columns: string) =>
         supabase
           .from("accounts")
-          .select(
-            "id, name, type, closing_day, due_day, limit_amount, current_balance, currency, show_on_investments_dashboard, investment_account_kind, planning_role, use_spending_history, spending_history_start_date, active",
-          )
+          .select(columns)
           .eq("owner_id", ownerId)
           .order("active", { ascending: false })
           .order("type", { ascending: true })
-          .order("name", { ascending: true }),
-        supabase.rpc("get_account_currency_history_flags"),
-      ]);
+          .order("name", { ascending: true });
+      const [{ response: accountsResponse, available }, historyResponse] =
+        await Promise.all([
+          selectWithOptionalAccountColumns((optionalColumns) =>
+            selectAccounts(`${ACCOUNT_COLUMNS}${optionalColumns}`),
+          ),
+          supabase.rpc("get_account_currency_history_flags"),
+        ]);
+      setShortcutsAvailable(available.shortcuts);
+      setImagesAvailable(available.image);
 
       if (accountsResponse.error) {
         throw new Error(accountsResponse.error.message);
@@ -130,10 +177,12 @@ export default function AccountsPage() {
         ),
       );
       setAccounts(
-        (accountsResponse.data ?? []).map((account) => ({
-          ...account,
-          has_financial_history: accountsWithHistory.has(account.id),
-        })) as Account[],
+        ((accountsResponse.data ?? []) as unknown as Omit<Account, "has_financial_history">[]).map(
+          (account) => ({
+            ...account,
+            has_financial_history: accountsWithHistory.has(account.id),
+          }),
+        ),
       );
     } catch (error) {
       const message =
@@ -163,9 +212,20 @@ export default function AccountsPage() {
     loadCompetences();
   }, []);
 
+  function changeImageDraft(draft: AccountImageDraft | null) {
+    setImageDraft((current) => {
+      if (current && current.previewUrl !== draft?.previewUrl) {
+        URL.revokeObjectURL(current.previewUrl);
+      }
+      return draft;
+    });
+  }
+
   function resetForm() {
     setEditingAccountId(null);
     setForm(initialForm);
+    changeImageDraft(null);
+    setRemoveImage(false);
 
     setSelectedCompetenceId("");
     setPlannedValue("");
@@ -178,6 +238,8 @@ export default function AccountsPage() {
 
   function openEditDrawer(account: Account) {
     setEditingAccountId(account.id);
+    changeImageDraft(null);
+    setRemoveImage(false);
     const isCard = account.type === "Cartão";
     setForm({
       name: account.name ?? "",
@@ -197,8 +259,24 @@ export default function AccountsPage() {
       use_spending_history: account.use_spending_history ?? true,
       spending_history_start_date: account.spending_history_start_date ?? "",
       active: account.active,
+      icon_key: account.icon_key ?? "",
+      show_in_transaction_shortcuts: account.show_in_transaction_shortcuts ?? false,
+      transaction_shortcut_order: account.transaction_shortcut_order
+        ? String(account.transaction_shortcut_order)
+        : "",
     });
     setIsDrawerOpen(true);
+  }
+
+  function handleShortcutToggle(checked: boolean) {
+    setForm((current) => ({
+      ...current,
+      show_in_transaction_shortcuts: checked,
+      transaction_shortcut_order:
+        checked && !current.transaction_shortcut_order
+          ? String(getNextTransactionShortcutOrder(accounts, editingAccountId))
+          : current.transaction_shortcut_order,
+    }));
   }
 
   async function openPlanningModal(account: Account) {
@@ -298,6 +376,19 @@ export default function AccountsPage() {
   const effectivePlanningRole: PlanningRole =
     form.planning_role || automaticPlanningRole;
 
+  // Ícone automático e elegibilidade aos atalhos seguem o cadastro atual do
+  // formulário. Lançamentos lista só contas/cartões movimentáveis por ele.
+  const formAccountClassification = {
+    id: editingAccountId ?? "new",
+    type: form.type,
+    currency: form.currency,
+    show_on_investments_dashboard:
+      form.investment_account_kind === "BALANCE" || form.show_on_investments_dashboard,
+    investment_account_kind: form.investment_account_kind,
+  };
+  const automaticIconOption = resolveAccountIcon(formAccountClassification);
+  const canShowInShortcuts = isFinancialLedgerAccount(formAccountClassification);
+
   function closeDrawer() {
     resetForm();
     setIsDrawerOpen(false);
@@ -332,6 +423,28 @@ export default function AccountsPage() {
       form.closing_day,
       form.due_day,
     );
+    const shortcutOrder = parseTransactionShortcutOrder(
+      form.transaction_shortcut_order,
+    );
+    const showInShortcuts =
+      form.show_in_transaction_shortcuts && canShowInShortcuts;
+    if (showInShortcuts && shortcutOrder === null) {
+      notify.warning("Informe a ordem do atalho com um número de 1 a 999.");
+      return;
+    }
+    // Só visual; omitido enquanto o banco não tiver as colunas (migration).
+    const shortcutFields: Partial<
+      Pick<
+        Account,
+        "icon_key" | "show_in_transaction_shortcuts" | "transaction_shortcut_order"
+      >
+    > = shortcutsAvailable
+      ? {
+          icon_key: form.icon_key || null,
+          show_in_transaction_shortcuts: showInShortcuts,
+          transaction_shortcut_order: showInShortcuts ? shortcutOrder : null,
+        }
+      : {};
     const payload = {
       owner_id: ownerId,
       name: form.name.trim(),
@@ -354,12 +467,37 @@ export default function AccountsPage() {
       use_spending_history: form.use_spending_history,
       spending_history_start_date: form.spending_history_start_date || null,
       active: form.active,
+      ...shortcutFields,
       updated_at: new Date().toISOString(),
     };
+
+    // Imagem (só visual). Na edição, a nova imagem é enviada ANTES de salvar
+    // o cadastro, num arquivo novo; a anterior só é apagada depois que o
+    // cadastro apontar para a nova. Se o cadastro falhar, o arquivo novo sai.
+    const previousImagePath = editingAccount?.image_path ?? null;
+    let uploadedImagePath: string | null = null;
+    if (editingAccountId && imagesAvailable && imageDraft) {
+      try {
+        uploadedImagePath = await uploadAccountImage(editingAccountId, imageDraft.file);
+      } catch (uploadError) {
+        console.error("Erro ao enviar imagem da conta:", uploadError);
+        notify.error(
+          `Não foi possível enviar a imagem. Nada foi alterado. ${
+            uploadError instanceof Error ? uploadError.message : ""
+          }`.trim(),
+        );
+        return;
+      }
+    }
+    const imageFields =
+      editingAccountId && imagesAvailable && (uploadedImagePath || removeImage)
+        ? { image_path: uploadedImagePath }
+        : {};
+
     const { data: savedAccount, error } = editingAccountId
       ? await supabase
           .from("accounts")
-          .update(payload)
+          .update({ ...payload, ...imageFields })
           .eq("id", editingAccountId)
           .eq("owner_id", ownerId)
           .select("id")
@@ -368,8 +506,48 @@ export default function AccountsPage() {
 
     if (error) {
       console.error("Erro ao salvar conta/cartão:", error);
+      if (uploadedImagePath) {
+        await removeAccountImageFiles([uploadedImagePath], editingAccountId ?? undefined).catch(
+          (cleanupError) => console.error("Erro ao descartar imagem não usada:", cleanupError),
+        );
+      }
       notify.error(error.message);
       return;
+    }
+
+    if (
+      editingAccountId &&
+      "image_path" in imageFields &&
+      previousImagePath &&
+      previousImagePath !== uploadedImagePath
+    ) {
+      // Cadastro já aponta para a nova imagem (ou para nenhuma): a antiga sai.
+      await removeAccountImageFiles([previousImagePath], editingAccountId).catch(
+        (cleanupError) => console.error("Erro ao remover imagem anterior:", cleanupError),
+      );
+    }
+
+    // Conta nova: o arquivo só pode ser enviado com a conta já criada (a
+    // política do Storage confere o dono da conta).
+    if (!editingAccountId && imagesAvailable && imageDraft) {
+      let newPath: string | null = null;
+      try {
+        newPath = await uploadAccountImage(savedAccount.id, imageDraft.file);
+        const { error: imageError } = await supabase
+          .from("accounts")
+          .update({ image_path: newPath })
+          .eq("id", savedAccount.id)
+          .eq("owner_id", ownerId);
+        if (imageError) throw new Error(imageError.message);
+      } catch (imageError) {
+        console.error("Erro ao salvar imagem da nova conta:", imageError);
+        if (newPath) {
+          await removeAccountImageFiles([newPath], savedAccount.id).catch(() => undefined);
+        }
+        notify.warning(
+          "Conta/cartão salvo, mas a imagem não foi enviada. Edite o cadastro para tentar de novo.",
+        );
+      }
     }
 
     if (selectedCompetenceId && plannedValue) {
@@ -451,6 +629,13 @@ export default function AccountsPage() {
         "Não foi possível excluir. Use Inativar se já houver lançamentos vinculados.",
       );
       return;
+    }
+
+    // Conta excluída: a imagem dela (só da pasta do usuário/conta) sai junto.
+    if (account.image_path) {
+      await removeAccountImageFiles([account.image_path], account.id).catch(
+        (cleanupError) => console.error("Erro ao remover imagem da conta excluída:", cleanupError),
+      );
     }
 
     await loadAccounts();
@@ -551,39 +736,50 @@ export default function AccountsPage() {
                 className="rounded-2xl border border-white/10 bg-slate-950/60 p-4"
               >
                 <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <h3 className="break-words font-semibold text-white">{account.name}</h3>
+                  <div className="flex min-w-0 items-start gap-3">
+                    <AccountIcon
+                      option={resolveAccountIcon(account)}
+                      imageUrl={account.image_path ? imageUrls[account.image_path] : null}
+                    />
+                    <div className="min-w-0">
+                      <h3 className="break-words font-semibold text-white">{account.name}</h3>
 
-                    <div className="mt-2 flex flex-wrap gap-2">
-                      <span
-                        className={`rounded-full px-3 py-1 text-xs font-bold ${
-                          account.type === "Conta"
-                            ? "bg-blue-500/10 text-blue-300"
-                            : "bg-purple-500/10 text-purple-300"
-                        }`}
-                      >
-                        {account.type}
-                      </span>
-
-                      <span
-                        className={`rounded-full px-3 py-1 text-xs font-bold ${
-                          account.active
-                            ? "bg-emerald-500/10 text-emerald-300"
-                            : "bg-slate-500/10 text-slate-400"
-                        }`}
-                      >
-                        {account.active ? "Ativa" : "Inativa"}
-                      </span>
-                      <span
-                        className={`rounded-full px-3 py-1 text-xs font-bold ${account.currency ? "bg-cyan-500/10 text-cyan-300" : "bg-amber-500/10 text-amber-200"}`}
-                      >
-                        {account.currency ?? "Moeda não confirmada"}
-                      </span>
-                      {account.investment_account_kind === "BALANCE" && (
-                        <span className="rounded-full bg-cyan-500/10 px-3 py-1 text-xs font-bold text-cyan-300">
-                          Investimento por saldo
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        <span
+                          className={`rounded-full px-3 py-1 text-xs font-bold ${
+                            account.type === "Conta"
+                              ? "bg-blue-500/10 text-blue-300"
+                              : "bg-purple-500/10 text-purple-300"
+                          }`}
+                        >
+                          {account.type}
                         </span>
-                      )}
+
+                        <span
+                          className={`rounded-full px-3 py-1 text-xs font-bold ${
+                            account.active
+                              ? "bg-emerald-500/10 text-emerald-300"
+                              : "bg-slate-500/10 text-slate-400"
+                          }`}
+                        >
+                          {account.active ? "Ativa" : "Inativa"}
+                        </span>
+                        <span
+                          className={`rounded-full px-3 py-1 text-xs font-bold ${account.currency ? "bg-cyan-500/10 text-cyan-300" : "bg-amber-500/10 text-amber-200"}`}
+                        >
+                          {account.currency ?? "Moeda não confirmada"}
+                        </span>
+                        {account.investment_account_kind === "BALANCE" && (
+                          <span className="rounded-full bg-cyan-500/10 px-3 py-1 text-xs font-bold text-cyan-300">
+                            Investimento por saldo
+                          </span>
+                        )}
+                        {account.show_in_transaction_shortcuts && (
+                          <span className="rounded-full bg-blue-500/10 px-3 py-1 text-xs font-bold text-blue-300">
+                            Atalho{account.transaction_shortcut_order ? ` ${account.transaction_shortcut_order}` : ""}
+                          </span>
+                        )}
+                      </div>
                     </div>
                   </div>
 
@@ -686,7 +882,19 @@ export default function AccountsPage() {
                 accounts.map((account) => (
                   <tr key={account.id} className="hover:bg-white/[0.03]">
                     <td className="px-5 py-4 font-medium text-white">
-                      {account.name}
+                      <div className="flex items-center gap-3">
+                        <AccountIcon
+                          option={resolveAccountIcon(account)}
+                          size="sm"
+                          imageUrl={account.image_path ? imageUrls[account.image_path] : null}
+                        />
+                        <span className="min-w-0">{account.name}</span>
+                        {account.show_in_transaction_shortcuts && (
+                          <span className="shrink-0 rounded-full bg-blue-500/10 px-2 py-0.5 text-[10px] font-bold text-blue-300">
+                            Atalho{account.transaction_shortcut_order ? ` ${account.transaction_shortcut_order}` : ""}
+                          </span>
+                        )}
+                      </div>
                     </td>
                     <td className="px-5 py-4 text-slate-300">
                       <div>{account.type}</div>
@@ -904,6 +1112,102 @@ export default function AccountsPage() {
                   </span>
                 )}
               </label>
+
+              <div className="space-y-3 rounded-2xl border border-blue-400/20 bg-blue-500/5 p-4">
+                <div>
+                  <p className="text-sm font-semibold text-white">
+                    Aparência e atalhos
+                  </p>
+                  <p className="mt-1 text-xs text-slate-400">
+                    Escolha apenas visual: não altera tipo, moeda ou cálculos.
+                  </p>
+                </div>
+
+                {!shortcutsAvailable && (
+                  <p
+                    role="status"
+                    className="rounded-xl border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-xs text-amber-200"
+                  >
+                    Ícone e atalhos ficam disponíveis depois que a atualização
+                    do banco (migration 202610230001) for aplicada.
+                  </p>
+                )}
+
+                {imagesAvailable ? (
+                  <AccountImageField
+                    savedImageUrl={
+                      editingAccount?.image_path
+                        ? (imageUrls[editingAccount.image_path] ?? null)
+                        : null
+                    }
+                    hasSavedImage={Boolean(editingAccount?.image_path)}
+                    draft={imageDraft}
+                    onDraftChange={changeImageDraft}
+                    removeSaved={removeImage}
+                    onRemoveSavedChange={setRemoveImage}
+                    iconOption={
+                      findAccountIconOption(form.icon_key) ?? automaticIconOption
+                    }
+                  />
+                ) : (
+                  <p className="rounded-xl border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+                    O envio de imagem fica disponível depois que a atualização
+                    do banco e do Storage (migration 202610230002) for aplicada.
+                  </p>
+                )}
+
+                <AccountIconPicker
+                  value={form.icon_key}
+                  automaticOption={automaticIconOption}
+                  onChange={(iconKey) => setForm({ ...form, icon_key: iconKey })}
+                  disabled={!shortcutsAvailable}
+                />
+
+                <label className="flex items-start gap-3 rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-sm text-slate-300">
+                  <input
+                    type="checkbox"
+                    checked={form.show_in_transaction_shortcuts && canShowInShortcuts}
+                    disabled={!shortcutsAvailable || !canShowInShortcuts}
+                    onChange={(event) => handleShortcutToggle(event.target.checked)}
+                    className="mt-0.5"
+                  />
+                  <span>
+                    <span className="block font-semibold text-white">
+                      Exibir nos atalhos de Lançamentos
+                    </span>
+                    <span className="mt-1 block text-xs text-slate-400">
+                      {canShowInShortcuts
+                        ? "Mostra o card desta conta/cartão acima da lista de lançamentos, como filtro rápido."
+                        : "Contas de investimento são movimentadas pelo módulo Investimentos e não aparecem em Lançamentos."}
+                    </span>
+                  </span>
+                </label>
+
+                {form.show_in_transaction_shortcuts && canShowInShortcuts && (
+                  <label className="block space-y-1 text-sm text-slate-300">
+                    <span>Ordem de exibição</span>
+                    <input
+                      type="number"
+                      inputMode="numeric"
+                      min={1}
+                      max={999}
+                      step={1}
+                      value={form.transaction_shortcut_order}
+                      disabled={!shortcutsAvailable}
+                      onChange={(event) =>
+                        setForm({
+                          ...form,
+                          transaction_shortcut_order: event.target.value,
+                        })
+                      }
+                      className="w-full rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-white outline-none"
+                    />
+                    <span className="block text-xs text-slate-400">
+                      1 aparece primeiro. Números iguais seguem o nome.
+                    </span>
+                  </label>
+                )}
+              </div>
 
               {form.type === "Conta" && (
                 <label className="flex items-start gap-3 rounded-2xl border border-cyan-400/20 bg-cyan-500/5 p-4 text-sm text-slate-300">

@@ -62,6 +62,10 @@ Contas bancárias e cartões do usuário.
 | `limit_amount` | Limite do cartão |
 | `current_balance` | Saldo atual informado |
 | `active` | Estado ativo/inativo |
+| `icon_key` | Visual (migration `202610230001`): chave do ícone do catálogo da aplicação; `NULL` = ícone genérico pelo cadastro |
+| `show_in_transaction_shortcuts` | Visual (migration `202610230001`): exibir nos atalhos de Lançamentos; padrão `false` |
+| `transaction_shortcut_order` | Visual (migration `202610230001`): posição do atalho (1–999) |
+| `image_path` | Visual (migration `202610230002`): caminho da imagem no bucket privado `account-images` (`<owner_id>/<account_id>/<arquivo>`); `NULL` = ícone |
 
 ### `categories`
 

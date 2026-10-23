@@ -90,8 +90,7 @@ import {
   toCompetenceKey,
 } from "@/src/services/competenceService";
 import {
-  calculateAccountFinalBalance,
-  filterTransactionsUntilDate,
+  calculateAccountMovement,
 } from "@/src/utils/balanceCalculations";
 import {
   sortLatestTransactionsForDisplay,
@@ -129,6 +128,19 @@ import {
 } from "@/src/utils/paymentConfirmation";
 import { ensureCompetenceIsOpen } from "@/src/utils/competenceLock";
 import ConfirmPaymentDialog from "../components/transactions/ConfirmPaymentDialog";
+import AccountShortcutStrip from "../components/transactions/AccountShortcutStrip";
+import {
+  loadAccountPeriodBalances,
+  loadTransactionShortcutSummaries,
+  type TransactionShortcutSummary,
+} from "@/src/services/transactionShortcutService";
+import type { AccountPeriodBalances } from "@/src/utils/accountPeriodBalances";
+import { getTemporal } from "@/src/utils/financialOverview";
+import { useAccountImageUrls } from "@/src/hooks/useAccountImageUrls";
+import {
+  selectWithOptionalAccountColumns,
+  sortTransactionShortcuts,
+} from "@/src/utils/accountShortcuts";
 import ViewModeToggle from "@/src/components/ui/viewMode/ViewModeToggle";
 import { useViewMode } from "@/src/components/ui/viewMode/useViewMode";
 import {
@@ -149,7 +161,21 @@ type Account = {
   currency: string | null;
   show_on_investments_dashboard: boolean;
   investment_account_kind: "BALANCE" | null;
+  // Visuais; ausentes enquanto a migration 202610230001 não for aplicada.
+  icon_key?: string | null;
+  show_in_transaction_shortcuts?: boolean;
+  transaction_shortcut_order?: number | null;
+  image_path?: string | null;
 };
+
+const ACCOUNT_COLUMNS =
+  "id, name, type, closing_day, due_day, limit_amount, current_balance, currency, show_on_investments_dashboard, investment_account_kind";
+
+/** Hoje pela data local, como na Visão Financeira (saldo atual dos atalhos). */
+function getLocalTodayIsoDate() {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+}
 
 type Category = {
   id: string;
@@ -249,7 +275,7 @@ function SummaryCard({
 
   return (
     <div
-      className={`min-w-0 rounded-2xl border border-white/10 bg-slate-950/60 p-5 shadow-sm ${
+      className={`min-w-0 rounded-2xl border border-white/10 bg-slate-950/60 px-4 py-3.5 shadow-sm ${
         primary
           ? "ring-1 ring-inset ring-blue-500/25 sm:col-span-3 lg:col-span-2"
           : ""
@@ -264,14 +290,14 @@ function SummaryCard({
       </p>
       {primary ? (
         <div
-          className={`mt-1.5 truncate text-3xl font-semibold tabular-nums tracking-tight ${toneClasses.value}`}
+          className={`mt-1 truncate text-2xl font-semibold tabular-nums tracking-tight ${toneClasses.value}`}
           title={value}
         >
           {value}
         </div>
       ) : (
         <p
-          className={`mt-2 truncate font-semibold tabular-nums tracking-tight ${toneClasses.value}`}
+          className={`mt-1.5 truncate font-semibold tabular-nums tracking-tight ${toneClasses.value}`}
           title={value}
         >
           {value}
@@ -446,6 +472,24 @@ function TransactionsPageContent() {
     hasException: viewModeHasException,
     defaultMode: defaultViewMode,
   } = useViewMode("transactions");
+  // Atalhos de contas: situação atual, independente dos filtros da listagem.
+  const [shortcutsAvailable, setShortcutsAvailable] = useState(true);
+  const [shortcutSummaries, setShortcutSummaries] = useState<
+    Record<string, TransactionShortcutSummary>
+  >({});
+  const [shortcutSummariesState, setShortcutSummariesState] = useState<
+    "loading" | "ready" | "error"
+  >("loading");
+  // Incrementado depois de gravações, para os atalhos refletirem o novo saldo.
+  const [shortcutRefreshToken, setShortcutRefreshToken] = useState(0);
+  const [accountPeriodBalances, setAccountPeriodBalances] = useState<{
+    accountId: string;
+    competenceId: string;
+    balances: AccountPeriodBalances;
+  } | null>(null);
+  const [accountPeriodBalancesState, setAccountPeriodBalancesState] = useState<
+    "idle" | "loading" | "ready" | "error"
+  >("idle");
   const [plannedCardLimit, setPlannedCardLimit] = useState(0);
   const [accountClosures, setAccountClosures] = useState<AccountClosure[]>([]);
   const loadTransactionsRequestIdRef = useRef(0);
@@ -539,6 +583,9 @@ function TransactionsPageContent() {
   });
   const financialAccounts = accounts.filter(isFinancialAccount);
   const financialLedgerAccounts = accounts.filter(isFinancialLedgerAccount);
+  const accountImageUrls = useAccountImageUrls(
+    financialLedgerAccounts.map((account) => account.image_path),
+  );
   // Pagamento de fatura sai de conta bancária; um registro legado gravado num
   // cartão continua visível para que a troca seja explícita.
   const invoicePaymentAccountOptions = [
@@ -900,6 +947,25 @@ function TransactionsPageContent() {
     setIsLoading(false);
   }
 
+  // Contas ativas com ícone/atalhos/imagem. Sem alguma migration visual,
+  // repete a leitura sem aquelas colunas e a tela segue funcionando.
+  async function loadActiveAccounts(ownerId: string) {
+    const selectAccounts = (columns: string) =>
+      supabase
+        .from("accounts")
+        .select(columns)
+        .eq("owner_id", ownerId)
+        .eq("active", true)
+        .order("name", { ascending: true });
+
+    const { response, available } = await selectWithOptionalAccountColumns(
+      (optionalColumns) => selectAccounts(`${ACCOUNT_COLUMNS}${optionalColumns}`),
+    );
+    setShortcutsAvailable(available.shortcuts);
+
+    return response;
+  }
+
   async function loadReferenceData() {
     setIsLoading(true);
 
@@ -922,14 +988,7 @@ function TransactionsPageContent() {
           "id, account_id, competence_id, payment_transaction_id, payment_account_id, statement_total",
         )
         .eq("owner_id", ownerId),
-      supabase
-        .from("accounts")
-        .select(
-          "id, name, type, closing_day, due_day, limit_amount, current_balance, currency, show_on_investments_dashboard, investment_account_kind",
-        )
-        .eq("owner_id", ownerId)
-        .eq("active", true)
-        .order("name", { ascending: true }),
+      loadActiveAccounts(ownerId),
       supabase
         .from("categories")
         .select("id, name, type, special_type")
@@ -954,7 +1013,7 @@ function TransactionsPageContent() {
     setAccountClosures(accountClosuresResponse.data ?? []);
     setCardStatements(cardStatementsResponse.data ?? []);
 
-    const loadedAccounts = (accountsResponse.data ?? []) as Account[];
+    const loadedAccounts = (accountsResponse.data ?? []) as unknown as Account[];
     setAccounts(loadedAccounts);
     if (categoriesResponse.data) setCategories(categoriesResponse.data);
     setConversionProviders(conversionProviders);
@@ -1068,6 +1127,77 @@ function TransactionsPageContent() {
 
     setPlannedCardLimit(0);
   }, [accountFilter, competenceFilter, accounts]);
+
+  // Os atalhos dependem só das contas favoritas e de gravações; nunca da
+  // busca, do período ou dos demais filtros da listagem.
+  useEffect(() => {
+    const favorites = sortTransactionShortcuts(
+      accounts.filter(isFinancialLedgerAccount),
+    );
+    let cancelled = false;
+
+    setShortcutSummariesState("loading");
+    loadTransactionShortcutSummaries({
+      accounts: favorites,
+      today: getLocalTodayIsoDate(),
+    })
+      .then((summaries) => {
+        if (cancelled) return;
+        setShortcutSummaries(summaries);
+        setShortcutSummariesState("ready");
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        console.error("Erro ao carregar atalhos de contas:", error);
+        setShortcutSummariesState("error");
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [accounts, shortcutRefreshToken]);
+
+  // Saldos canônicos da conta selecionada na competência do resumo. Também
+  // não dependem da busca nem de tipo/status/categoria.
+  useEffect(() => {
+    const account = accounts.find((item) => item.id === accountFilter);
+    const competence = competences.find((item) => item.id === competenceFilter);
+    if (account?.type !== "Conta" || !competence) {
+      setAccountPeriodBalancesState("idle");
+      return;
+    }
+
+    let cancelled = false;
+    setAccountPeriodBalancesState("loading");
+    loadAccountPeriodBalances({
+      account,
+      year: competence.year,
+      month: competence.month,
+      today: getLocalTodayIsoDate(),
+    })
+      .then((balances) => {
+        if (cancelled) return;
+        setAccountPeriodBalances({
+          accountId: account.id,
+          competenceId: competence.id,
+          balances,
+        });
+        setAccountPeriodBalancesState("ready");
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        console.error("Erro ao carregar saldos da conta:", error);
+        setAccountPeriodBalancesState("error");
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [accountFilter, competenceFilter, accounts, competences, shortcutRefreshToken]);
+
+  function refreshShortcutSummaries() {
+    setShortcutRefreshToken((token) => token + 1);
+  }
 
   useEffect(() => {
     if (!competenceFilter) return;
@@ -1602,6 +1732,7 @@ function TransactionsPageContent() {
             throw new Error(fuelRecordError.message);
           }
           closeDrawer();
+          refreshShortcutSummaries();
           await loadTransactions({
             competenceId: competenceFilter,
             accountId: accountFilter,
@@ -1672,6 +1803,7 @@ function TransactionsPageContent() {
 
           closeDrawer();
 
+          refreshShortcutSummaries();
           await loadTransactions({
             competenceId: competenceFilter,
             accountId: accountFilter,
@@ -1837,6 +1969,7 @@ function TransactionsPageContent() {
 
         closeDrawer();
 
+        refreshShortcutSummaries();
         await loadTransactions({
           competenceId: competenceFilter,
           accountId: accountFilter,
@@ -1893,6 +2026,7 @@ function TransactionsPageContent() {
             return;
           }
 
+          refreshShortcutSummaries();
           await loadTransactions({
             competenceId: competenceFilter,
             accountId: accountFilter,
@@ -2095,6 +2229,7 @@ function TransactionsPageContent() {
         setConfirmingPayment(null);
 
         if (wasUpdated) {
+          refreshShortcutSummaries();
           showToast(
             "success",
             "Pagamento confirmado",
@@ -2159,6 +2294,7 @@ function TransactionsPageContent() {
     try {
       await deleteLinkedTransfer(transaction.transfer_group_id ?? "");
 
+      refreshShortcutSummaries();
       await loadTransactions({
         competenceId: competenceFilter,
         accountId: accountFilter,
@@ -2453,75 +2589,48 @@ function TransactionsPageContent() {
     (transaction) => transaction.due_date <= today,
   );
 
-  const openingBalance = selectedAccount
-    ? (() => {
-        const selectedCompetenceOrder = selectedCompetence
-          ? selectedCompetence.year * 100 + selectedCompetence.month
-          : 0;
-
-        const previousClosure = accountClosures
-          .map((closure) => {
-            const closureCompetence = competences.find(
-              (competence) => competence.id === closure.competence_id,
-            );
-
-            return {
-              closure,
-              competence: closureCompetence,
-            };
-          })
-          .filter((item) => {
-            if (item.closure.account_id !== selectedAccount.id) return false;
-            if (!item.competence) return false;
-
-            const closureOrder =
-              item.competence.year * 100 + item.competence.month;
-
-            return closureOrder < selectedCompetenceOrder;
-          })
-          .sort((a, b) => {
-            if (!a.competence || !b.competence) return 0;
-
-            const orderA = a.competence.year * 100 + a.competence.month;
-            const orderB = b.competence.year * 100 + b.competence.month;
-
-            return orderB - orderA;
-          })[0];
-
-        return Number(previousClosure?.closure.closing_balance ?? 0);
-      })()
+  // Saldos da conta selecionada: regra canônica (mesma dos atalhos), sem
+  // depender de busca/tipo/status/categoria. Só a movimentação acompanha os
+  // filtros da listagem.
+  const periodBalances =
+    selectedAccount?.type === "Conta" &&
+    accountPeriodBalances?.accountId === selectedAccount.id &&
+    accountPeriodBalances.competenceId === competenceFilter
+      ? accountPeriodBalances.balances
+      : null;
+  const periodMovement = selectedAccount
+    ? calculateAccountMovement(selectedAccount.id, transactions)
     : 0;
-
-  const selectedAccountTransactions = selectedAccount
-    ? transactions.filter(
-        (transaction) =>
-          transaction.account_id === selectedAccount.id ||
-          transaction.destination_account_id === selectedAccount.id,
+  const hasListFilters = Boolean(
+    debouncedSearchTerm || typeFilter || statusFilter || categoryFilter,
+  );
+  const periodTemporal = selectedCompetence
+    ? getTemporal(
+        selectedCompetence.year,
+        selectedCompetence.month,
+        getLocalTodayIsoDate(),
       )
-    : [];
+    : "current";
 
-  const currentBalance = selectedAccount
-    ? calculateAccountFinalBalance({
-        accountId: selectedAccount.id,
-        openingBalance,
-        transactions: filterTransactionsUntilDate(
-          selectedAccountTransactions,
-          today,
-        ),
-      })
-    : 0;
+  function formatPeriodBalance(value: number | null | undefined) {
+    if (value === null || value === undefined) {
+      return accountPeriodBalancesState === "error" ? "Indisponível" : "…";
+    }
+    return formatSummaryCurrency(value);
+  }
 
-  const futureBalance = selectedAccount
-    ? calculateAccountFinalBalance({
-        accountId: selectedAccount.id,
-        openingBalance,
-        transactions,
-      })
-    : 0;
+  function balanceTone(
+    value: number | null | undefined,
+    positiveTone: SummaryTone,
+  ): SummaryTone {
+    if (value === null || value === undefined) return "neutral";
+    return value >= 0 ? positiveTone : "negative";
+  }
 
-  // Sem conta selecionada, os cards mostram somente a moeda principal (BRL);
-  // as demais moedas são listadas à parte e nunca somadas aos cards.
-  const [primaryCurrencyTotals, ...otherCurrencyTotals] =
+  // Sem conta selecionada, o resumo mostra somente a moeda principal (BRL);
+  // as demais moedas nunca são somadas a ele. Os valores de uma conta em
+  // outra moeda aparecem ao selecioná-la (atalho ou "Outras contas").
+  const [primaryCurrencyTotals] =
     summarizeTransactionTotalsByCurrency(transactions);
   const {
     income: totalIncome,
@@ -2566,20 +2675,43 @@ function TransactionsPageContent() {
     setStatusFilter("");
   }
 
-  const quickTypeFilters = [
-    { value: "", label: "Todos" },
-    { value: "Receita", label: "Receitas" },
-    { value: "Despesa", label: "Despesas" },
-    { value: "Transferência", label: "Transferências" },
-    { value: "Pagamento de Fatura", label: "Faturas" },
-  ];
+  // Etiquetas removíveis dos filtros de "Mais filtros". O filtro de conta já
+  // aparece nos atalhos e não é repetido aqui.
+  const activeAdvancedFilters = [
+    typeFilter && {
+      key: "type",
+      label: `Tipo: ${typeFilter}`,
+      clear: () => setTypeFilter(""),
+    },
+    statusFilter && {
+      key: "status",
+      label: `Status: ${statusFilter}`,
+      clear: () => setStatusFilter(""),
+    },
+    categoryFilter && {
+      key: "category",
+      label: `Categoria: ${
+        categories.find((category) => category.id === categoryFilter)?.name ??
+        "selecionada"
+      }`,
+      clear: () => setCategoryFilter(""),
+    },
+  ].filter((item): item is { key: string; label: string; clear: () => void } =>
+    Boolean(item),
+  );
 
-  const quickStatusFilters = [
-    { value: "", label: "Todos" },
-    { value: "Pendente", label: "Pendente" },
-    { value: "Pago", label: "Pago" },
-    { value: "Recebido", label: "Recebido" },
-  ];
+  // Sem conta: movimentações do período/listagem. Com conta: saldos da conta
+  // no mês (regra canônica) + movimentação filtrada. Atalhos = situação atual.
+  const summaryPeriodLabel = selectedCompetence
+    ? formatCompetenceLabel(selectedCompetence.name)
+    : "período selecionado";
+  const summaryTitle = selectedAccount
+    ? `${selectedAccount.type === "Cartão" ? "Fatura" : "Resumo"} de ${summaryPeriodLabel} · ${selectedAccount.name}${
+        listMode === "latest" ? " · lista: últimos 20 cadastrados" : ""
+      }`
+    : listMode === "latest"
+      ? "Resumo dos últimos 20 cadastrados"
+      : `Movimentações de ${summaryPeriodLabel}`;
 
   // Derived from the loaded list so the panel reflects reloads and closes
   // itself when the transaction leaves the current result set.
@@ -2835,9 +2967,19 @@ function TransactionsPageContent() {
           </div>
         </div>
 
+        <AccountShortcutStrip
+          accounts={financialLedgerAccounts}
+          selectedAccountId={accountFilter}
+          onSelectAccount={setAccountFilter}
+          summaries={shortcutSummaries}
+          summariesState={shortcutSummariesState}
+          shortcutsAvailable={shortcutsAvailable}
+          imageUrls={accountImageUrls}
+        />
+
         <div className="transactions-surface rounded-2xl border p-2 shadow-sm">
-          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-[minmax(220px,1fr)_minmax(180px,260px)_minmax(180px,240px)_auto_auto]">
-            <label className="relative">
+          <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2 md:grid-cols-[minmax(0,1fr)_minmax(160px,230px)_auto_auto]">
+            <label className="relative col-span-2 md:col-span-1">
               <span className="sr-only">Buscar lançamento</span>
               <Search
                 className="theme-muted pointer-events-none absolute left-3 top-1/2 -translate-y-1/2"
@@ -2851,20 +2993,6 @@ function TransactionsPageContent() {
                 className="theme-field h-10 w-full rounded-xl border py-2 pl-9 pr-3 text-sm outline-none transition-shadow"
               />
             </label>
-
-            <select
-              aria-label="Conta ou cartão"
-              value={accountFilter}
-              onChange={(event) => setAccountFilter(event.target.value)}
-              className="theme-field h-10 min-w-0 cursor-pointer rounded-xl border px-3 text-sm outline-none transition-shadow"
-            >
-              <option value="">Todas as contas</option>
-              {financialLedgerAccounts.map((account) => (
-                <option key={account.id} value={account.id}>
-                  {account.name}
-                </option>
-              ))}
-            </select>
 
             <select
               aria-label="Ordenação"
@@ -2882,12 +3010,20 @@ function TransactionsPageContent() {
               type="button"
               onClick={() => setShowFilters(true)}
               aria-expanded={showFilters}
-              className="theme-field theme-hover flex h-10 items-center justify-center gap-2 whitespace-nowrap rounded-xl border px-3.5 text-sm font-medium transition-colors"
+              aria-label={
+                advancedFilterCount > 0
+                  ? `Mais filtros, ${advancedFilterCount} ${advancedFilterCount === 1 ? "ativo" : "ativos"}`
+                  : "Mais filtros"
+              }
+              className="theme-field theme-hover flex h-10 items-center justify-center gap-2 whitespace-nowrap rounded-xl border px-3.5 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/50"
             >
               <SlidersHorizontal size={16} aria-hidden="true" />
               Mais filtros
               {advancedFilterCount > 0 && (
-                <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-blue-600 px-1.5 text-[11px] font-semibold leading-none text-white">
+                <span
+                  aria-hidden="true"
+                  className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-blue-600 px-1.5 text-[11px] font-semibold leading-none text-white"
+                >
                   {advancedFilterCount}
                 </span>
               )}
@@ -2898,105 +3034,55 @@ function TransactionsPageContent() {
               onChange={changeViewMode}
               hasException={viewModeHasException}
               defaultMode={defaultViewMode}
+              className="col-span-2 md:col-span-1"
             />
           </div>
 
-          <div className="theme-divider mt-2 flex flex-wrap items-center gap-x-4 gap-y-2 border-t px-1 pt-2">
+          {activeAdvancedFilters.length > 0 && (
             <div
               role="group"
-              aria-label="Filtro rápido por tipo"
-              className="flex min-w-0 items-center gap-1 overflow-x-auto"
+              aria-label="Filtros adicionais aplicados"
+              className="theme-divider mt-2 flex flex-wrap items-center gap-1.5 border-t px-1 pt-2"
             >
-              <span className="mr-1 shrink-0 text-[11px] font-semibold uppercase tracking-wider text-slate-400">
-                Tipo
-              </span>
-              {quickTypeFilters.map((option) => {
-                const active = typeFilter === option.value;
-
-                return (
-                  <button
-                    key={option.value || "all"}
-                    type="button"
-                    aria-pressed={active}
-                    onClick={() => setTypeFilter(option.value)}
-                    className={`h-8 shrink-0 whitespace-nowrap rounded-lg px-3 text-xs transition-colors ${
-                      active
-                        ? "bg-blue-500/10 font-semibold text-blue-300 ring-1 ring-inset ring-blue-500/30"
-                        : "theme-muted theme-hover font-medium"
-                    }`}
-                  >
-                    {option.label}
-                  </button>
-                );
-              })}
+              {activeAdvancedFilters.map((filter) => (
+                <button
+                  key={filter.key}
+                  type="button"
+                  onClick={filter.clear}
+                  aria-label={`Remover filtro ${filter.label}`}
+                  className="inline-flex h-7 max-w-full items-center gap-1 rounded-lg bg-blue-500/10 px-2.5 text-xs font-medium text-blue-300 ring-1 ring-inset ring-blue-500/30 transition-colors hover:bg-blue-500/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/60"
+                >
+                  <span className="truncate">{filter.label}</span>
+                  <X size={12} aria-hidden="true" className="shrink-0" />
+                </button>
+              ))}
+              {activeAdvancedFilters.length > 1 && (
+                <button
+                  type="button"
+                  onClick={clearAdvancedFilters}
+                  className="ml-auto inline-flex h-7 shrink-0 items-center gap-1 rounded-lg px-2.5 text-xs font-medium text-blue-300 transition-colors hover:bg-blue-500/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/60"
+                >
+                  Limpar filtros
+                </button>
+              )}
             </div>
-
-            <div
-              role="group"
-              aria-label="Filtro rápido por status"
-              className="flex min-w-0 items-center gap-1 overflow-x-auto"
-            >
-              <span className="mr-1 shrink-0 text-[11px] font-semibold uppercase tracking-wider text-slate-400">
-                Status
-              </span>
-              {quickStatusFilters.map((option) => {
-                const active = statusFilter === option.value;
-
-                return (
-                  <button
-                    key={option.value || "all"}
-                    type="button"
-                    aria-pressed={active}
-                    onClick={() => setStatusFilter(option.value)}
-                    className={`h-8 shrink-0 whitespace-nowrap rounded-lg px-3 text-xs transition-colors ${
-                      active
-                        ? "bg-blue-500/10 font-semibold text-blue-300 ring-1 ring-inset ring-blue-500/30"
-                        : "theme-muted theme-hover font-medium"
-                    }`}
-                  >
-                    {option.label}
-                  </button>
-                );
-              })}
-            </div>
-
-            <div className="flex min-w-0 items-center gap-2">
-              <span className="shrink-0 text-[11px] font-semibold uppercase tracking-wider text-slate-400">
-                Categoria
-              </span>
-              <select
-                aria-label="Filtro rápido por categoria"
-                value={categoryFilter}
-                onChange={(event) => setCategoryFilter(event.target.value)}
-                className="theme-field h-8 min-w-0 max-w-[220px] cursor-pointer rounded-lg border px-2.5 text-xs outline-none transition-shadow"
-              >
-                <option value="">Todas</option>
-                {categories.map((category) => (
-                  <option key={category.id} value={category.id}>
-                    {category.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {advancedFilterCount > 0 && (
-              <button
-                type="button"
-                onClick={clearAdvancedFilters}
-                className="ml-auto inline-flex h-8 shrink-0 items-center gap-1 rounded-lg px-2.5 text-xs font-medium text-blue-300 transition-colors hover:bg-blue-500/10"
-              >
-                <X size={13} aria-hidden="true" />
-                Limpar filtros
-              </button>
-            )}
-          </div>
+          )}
         </div>
 
+        <section aria-labelledby="transactions-summary-title" className="space-y-2">
+        <h2
+          id="transactions-summary-title"
+          className="theme-muted px-1 text-[11px] font-semibold uppercase tracking-wider"
+        >
+          {summaryTitle}
+        </h2>
         <div
           className={`transactions-summary grid gap-3 ${
-            selectedAccount
-              ? "sm:grid-cols-2 lg:grid-cols-4"
-              : "sm:grid-cols-3 lg:grid-cols-5"
+            selectedAccount?.type === "Conta" && periodTemporal !== "current"
+              ? "sm:grid-cols-3"
+              : selectedAccount
+                ? "sm:grid-cols-2 lg:grid-cols-4"
+                : "sm:grid-cols-3 lg:grid-cols-5"
           }`}
         >
           {!selectedAccount && (
@@ -3029,24 +3115,49 @@ function TransactionsPageContent() {
           {selectedAccount?.type === "Conta" && (
             <>
               <SummaryCard
-                label="Conta selecionada"
-                value={selectedAccount.name}
-                tone="neutral"
+                label={
+                  periodTemporal === "future"
+                    ? "Saldo previsto no início do mês"
+                    : "Saldo no início do mês"
+                }
+                value={formatPeriodBalance(periodBalances?.openingBalance)}
+                tone={balanceTone(periodBalances?.openingBalance, "info")}
+              />
+              {periodTemporal === "current" && (
+                <SummaryCard
+                  label="Saldo atual"
+                  value={formatPeriodBalance(periodBalances?.currentBalance)}
+                  tone={balanceTone(periodBalances?.currentBalance, "positive")}
+                  hint="Hoje, igual ao atalho da conta"
+                />
+              )}
+              <SummaryCard
+                label={
+                  periodTemporal === "past"
+                    ? "Saldo no fim do mês"
+                    : "Saldo previsto no fim do mês"
+                }
+                value={formatPeriodBalance(periodBalances?.closingBalance)}
+                tone={balanceTone(periodBalances?.closingBalance, "positive")}
+                hint={
+                  periodTemporal === "past"
+                    ? undefined
+                    : "Inclui lançamentos futuros do mês"
+                }
               />
               <SummaryCard
-                label="Saldo anterior"
-                value={formatSummaryCurrency(openingBalance)}
-                tone={openingBalance >= 0 ? "info" : "negative"}
-              />
-              <SummaryCard
-                label="Saldo atual"
-                value={formatSummaryCurrency(currentBalance)}
-                tone={currentBalance >= 0 ? "positive" : "negative"}
-              />
-              <SummaryCard
-                label="Futuro"
-                value={formatSummaryCurrency(futureBalance)}
-                tone={futureBalance >= 0 ? "positive" : "negative"}
+                label={
+                  listMode === "latest"
+                    ? "Movimentação na lista"
+                    : "Movimentação no período"
+                }
+                value={formatSummaryCurrency(periodMovement)}
+                tone={periodMovement >= 0 ? "positive" : "negative"}
+                hint={
+                  hasListFilters
+                    ? "Considera a busca e os filtros aplicados"
+                    : "Entradas − saídas da conta"
+                }
               />
             </>
           )}
@@ -3063,10 +3174,32 @@ function TransactionsPageContent() {
                 value={formatSummaryCurrency(cardUsedLimit)}
                 tone="negative"
               />
+              {/* Planejamento mensal do cartão (financial_targets), não limite bancário. */}
               <SummaryCard
-                label="Limite disponível"
-                value={formatSummaryCurrency(cardAvailableLimit)}
-                tone={cardAvailableLimit >= 0 ? "positive" : "negative"}
+                label={
+                  cardLimit <= 0
+                    ? "Disponível no planejamento"
+                    : cardAvailableLimit < 0
+                      ? "Excedido no planejamento"
+                      : "Disponível no planejamento"
+                }
+                value={
+                  cardLimit <= 0
+                    ? "Planejamento não definido"
+                    : formatSummaryCurrency(Math.abs(cardAvailableLimit))
+                }
+                tone={
+                  cardLimit <= 0
+                    ? "neutral"
+                    : cardAvailableLimit < 0
+                      ? "negative"
+                      : "positive"
+                }
+                hint={
+                  cardLimit > 0
+                    ? `Planejado para ${summaryPeriodLabel}: ${formatSummaryCurrency(cardLimit)}`
+                    : undefined
+                }
               />
               <SummaryCard
                 label="Fechamento / Vencimento"
@@ -3085,25 +3218,7 @@ function TransactionsPageContent() {
             </>
           )}
         </div>
-
-        {!selectedAccount && otherCurrencyTotals.length > 0 && (
-          <div className="theme-muted -mt-1 rounded-xl border border-white/10 px-4 py-3 text-xs">
-            <p>
-              Totais acima somente em {primaryCurrencyTotals.currency}. Outras
-              moedas, não somadas:
-            </p>
-            <ul className="mt-1 space-y-0.5">
-              {otherCurrencyTotals.map(({ currency, totals }) => (
-                <li key={currency} className="tabular-nums">
-                  <span className="font-semibold">{currency}</span>: receitas{" "}
-                  {formatMoney(totals.income, currency)} · despesas diretas{" "}
-                  {formatMoney(totals.directExpenses, currency)} · pagamentos de
-                  fatura {formatMoney(totals.invoicePayments, currency)}
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
+        </section>
 
         <div
           className={

@@ -37,6 +37,44 @@ export async function fetchAllPages<T>(buildQuery: (from: number, to: number) =>
   }
 }
 
+/**
+ * Lançamentos que formam o saldo de uma conta em `asOf` (calculateAccountBalanceAt):
+ * os posteriores ao último fechamento anterior ao mês de `asOf`, com data
+ * até `asOf`; todos até `asOf`, se a conta nunca foi fechada.
+ */
+export async function fetchAccountBalanceTransactions(params: {
+  ownerId: string;
+  accountId: string;
+  asOf: string;
+  closures: OverviewClosure[];
+  competences: OverviewCompetence[];
+}) {
+  const order = new Map(params.competences.map((item) => [item.id, item.year * 100 + item.month]));
+  const asOfOrder = Number(params.asOf.slice(0, 4)) * 100 + Number(params.asOf.slice(5, 7));
+  const latestClosureOrder = params.closures
+    .filter((closure) => closure.account_id === params.accountId)
+    .map((closure) => order.get(closure.competence_id))
+    .filter((value): value is number => value !== undefined && value < asOfOrder)
+    .sort((left, right) => right - left)[0];
+  const competenceIds = latestClosureOrder === undefined
+    ? null
+    : params.competences.filter((item) => item.year * 100 + item.month > latestClosureOrder).map((item) => item.id);
+  if (competenceIds && competenceIds.length === 0) return [];
+
+  return fetchAllPages<OverviewTransaction>((from, to) => {
+    let query = supabase.from("transactions").select(TRANSACTION_FIELDS)
+      .eq("owner_id", params.ownerId).eq("account_id", params.accountId)
+      .lte("due_date", params.asOf);
+    if (competenceIds) query = query.in("competence_id", competenceIds);
+    return query.order("id").range(from, to);
+  });
+}
+
+/** Fechamentos de conta válidos: reabrir apaga o registro; outro status é ignorado. */
+export function filterClosedAccountClosures<T extends OverviewClosure & { status: string | null }>(closures: T[]) {
+  return closures.filter((closure) => closure.status === null || closure.status === "Fechada");
+}
+
 function throwIfError<T>(response: { data: T | null; error: { message: string } | null }) {
   if (response.error) throw new Error(response.error.message);
   return response.data;
@@ -77,8 +115,9 @@ export async function loadFinancialOverviewInput(params: {
   const competences = (throwIfError(competencesResponse) ?? []) as OverviewCompetence[];
   // Reabrir um fechamento apaga o registro; qualquer status diferente de
   // "Fechada" é ignorado por segurança.
-  const closures = ((throwIfError(closuresResponse) ?? []) as (OverviewClosure & { status: string | null })[])
-    .filter((closure) => closure.status === null || closure.status === "Fechada");
+  const closures = filterClosedAccountClosures(
+    (throwIfError(closuresResponse) ?? []) as (OverviewClosure & { status: string | null })[],
+  );
   const recurring = (throwIfError(recurringResponse) ?? []) as OverviewRecurring[];
   const categoryNames = Object.fromEntries(
     ((throwIfError(categoriesResponse) ?? []) as { id: string; name: string }[]).map((item) => [item.id, item.name]),
@@ -86,8 +125,6 @@ export async function loadFinancialOverviewInput(params: {
 
   const competence = competences.find((item) => item.year === params.year && item.month === params.month);
   const previousCompetence = competences.find((item) => item.year === previous.year && item.month === previous.month);
-  const order = new Map(competences.map((item) => [item.id, item.year * 100 + item.month]));
-
   const role = (account: OverviewAccount): PlanningRole => resolvePlanningRole(account);
   const operationalCash = accounts.filter((account) => account.active && account.type === "Conta" && role(account) === "operational");
   const operationalCards = accounts.filter((account) => account.active && account.type === "Cartão" && role(account) === "operational");
@@ -136,22 +173,12 @@ export async function loadFinancialOverviewInput(params: {
   const isCurrentMonth = params.year * 100 + params.month === currentOrder;
   if (isCurrentMonth) {
     for (const account of operationalCash) {
-      const latestClosureOrder = closures
-        .filter((closure) => closure.account_id === account.id)
-        .map((closure) => order.get(closure.competence_id))
-        .filter((value): value is number => value !== undefined && value < currentOrder)
-        .sort((left, right) => right - left)[0];
-      const competenceIds = latestClosureOrder === undefined
-        ? null
-        : competences.filter((item) => item.year * 100 + item.month > latestClosureOrder).map((item) => item.id);
-      if (competenceIds && competenceIds.length === 0) continue;
-
-      tasks.push(fetchAllPages<OverviewTransaction>((from, to) => {
-        let query = supabase.from("transactions").select(TRANSACTION_FIELDS)
-          .eq("owner_id", ownerId).eq("account_id", account.id)
-          .lte("due_date", params.today);
-        if (competenceIds) query = query.in("competence_id", competenceIds);
-        return query.order("id").range(from, to);
+      tasks.push(fetchAccountBalanceTransactions({
+        ownerId,
+        accountId: account.id,
+        asOf: params.today,
+        closures,
+        competences,
       }).then(addAll));
     }
   }
