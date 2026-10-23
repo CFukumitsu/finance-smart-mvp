@@ -303,3 +303,26 @@ export function summarizeCardShortcut(params: {
     exceededAmount: Math.max(0, invoiceTotal - plannedLimit),
   };
 }
+
+/** Último carregamento dos atalhos, identificado pela competência que o pediu. */
+export type ShortcutSummariesRequest<T> = {
+  competenceId: string;
+  status: "loading" | "ready" | "error";
+  summaries: Record<string, T>;
+};
+
+/**
+ * O que os atalhos mostram para a competência selecionada. Um carregamento de
+ * outra competência nunca aparece (troca rápida de mês não exibe a fatura ou o
+ * saldo do mês anterior); até a resposta certa chegar, os cards ficam em
+ * carregamento.
+ */
+export function resolveShortcutSummariesView<T>(
+  request: ShortcutSummariesRequest<T> | null,
+  competenceId: string,
+): { status: "loading" | "ready" | "error"; summaries: Record<string, T> } {
+  if (!request || !competenceId || request.competenceId !== competenceId) {
+    return { status: "loading", summaries: {} };
+  }
+  return { status: request.status, summaries: request.summaries };
+}

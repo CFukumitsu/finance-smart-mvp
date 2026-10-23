@@ -4,6 +4,7 @@ import {
   calculateAccountPeriodBalances,
   getAccountPeriodBalanceReferences,
   getCompetenceStartReference,
+  getShortcutAccountBalanceReference,
   resolveAccountPeriodBalancesView,
   // @ts-expect-error Node's native TypeScript test runner requires the extension.
 } from "./accountPeriodBalances.ts";
@@ -239,4 +240,23 @@ test("período futuro: previsões a partir do fim do mês atual", () => {
   assert.equal(balances.openingBalance, 3870);
   assert.equal(balances.closingBalance, 3830);
   assert.equal(balances.currentBalance, null);
+});
+
+test("atalho da conta acompanha a competência: hoje no mês atual, fim do mês nas demais", () => {
+  assert.deepEqual(getShortcutAccountBalanceReference(2026, 10, TODAY), { asOf: TODAY, exclusive: false });
+  assert.deepEqual(getShortcutAccountBalanceReference(2026, 9, TODAY), { asOf: "2026-10-01", exclusive: true });
+  assert.deepEqual(getShortcutAccountBalanceReference(2026, 11, TODAY), { asOf: "2026-12-01", exclusive: true });
+  assert.deepEqual(getShortcutAccountBalanceReference(2026, 12, TODAY), { asOf: "2027-01-01", exclusive: true });
+
+  // Mesmo valor que o resumo inferior da conta na mesma competência.
+  for (const month of [9, 10, 11]) {
+    const balances = calculateAccountPeriodBalances({
+      account: account(1000), year: 2026, month, today: TODAY, competences, closures: [], transactions,
+    });
+    const reference = getShortcutAccountBalanceReference(2026, month, TODAY);
+    const shortcut = calculateAccountBalanceAt({
+      account: account(1000), asOf: reference.asOf, exclusive: reference.exclusive, competences, closures: [], transactions,
+    });
+    assert.equal(shortcut, month === 10 ? balances.currentBalance : balances.closingBalance);
+  }
 });

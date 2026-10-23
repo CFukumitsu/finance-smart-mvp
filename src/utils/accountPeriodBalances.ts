@@ -67,6 +67,21 @@ export function calculateAccountPeriodBalances(params: {
   };
 }
 
+/**
+ * Data do saldo do atalho da conta em Lançamentos. Competência atual: hoje
+ * (= currentBalance). Passada ou futura: fim da competência (= closingBalance,
+ * realizado no passado e previsto no futuro).
+ */
+export function getShortcutAccountBalanceReference(
+  year: number,
+  month: number,
+  today: string,
+): BalanceReference {
+  if (getTemporal(year, month, today) === "current") return { asOf: today, exclusive: false };
+  const next = shiftMonth(year, month, 1);
+  return getCompetenceStartReference(next.year, next.month);
+}
+
 /** Datas de referência cujos lançamentos o cálculo acima precisa. */
 export function getAccountPeriodBalanceReferences(
   year: number,

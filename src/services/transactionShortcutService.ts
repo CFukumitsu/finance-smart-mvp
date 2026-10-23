@@ -6,13 +6,16 @@ import {
 } from "@/src/services/financialOverviewService";
 import {
   calculateAccountBalanceAt,
+  getTemporal,
   type OverviewClosure,
   type OverviewCompetence,
   type OverviewTransaction,
+  type Temporal,
 } from "@/src/utils/financialOverview";
 import {
   calculateAccountPeriodBalances,
   getAccountPeriodBalanceReferences,
+  getShortcutAccountBalanceReference,
   type AccountPeriodBalances,
 } from "@/src/utils/accountPeriodBalances";
 import {
@@ -31,28 +34,43 @@ export type ShortcutAccount = {
 };
 
 export type TransactionShortcutSummary =
-  | { kind: "account"; balance: number }
-  | ({
-      kind: "card";
-      /** Competência da fatura exibida (a do mês de hoje). */
+  | {
+      kind: "account";
+      /** Competência a que o saldo se refere. */
       year: number;
       month: number;
+      /** current = saldo de hoje; past/future = saldo no fim da competência. */
+      temporal: Temporal;
+      balance: number;
+    }
+  | ({
+      kind: "card";
+      /** Competência da fatura exibida (a selecionada em Lançamentos). */
+      year: number;
+      month: number;
+      temporal: Temporal;
       dueDate: string | null;
     } & CardShortcutSummary);
 
 type CardTransactionRow = { account_id: string; type: string; value: number };
 
 /**
- * Situação atual das contas/cartões dos atalhos de Lançamentos. Não depende
- * de nenhum filtro da listagem (busca, período, tipo, status ou categoria).
- * - Conta: saldo de hoje pela mesma regra da Visão Financeira
- *   (calculateAccountBalanceAt).
- * - Cartão: fatura da competência do mês de hoje (compras − estornos), limite
- *   planejado (financial_targets) dessa competência e vencimento.
+ * Contas/cartões dos atalhos de Lançamentos na competência selecionada no
+ * navegador de meses. Não depende dos demais filtros da listagem (busca,
+ * tipo, status ou categoria).
+ * - Conta: na competência atual, saldo de hoje; nas demais, saldo no fim da
+ *   competência. Mesma regra (calculateAccountBalanceAt) e mesmas datas do
+ *   resumo da conta (calculateAccountPeriodBalances).
+ * - Cartão: fatura da competência (lançamentos com esse competence_id,
+ *   compras − estornos), planejamento (financial_targets) dessa competência e
+ *   vencimento da fatura. Mesma regra do resumo inferior "Fatura de …".
  * Valores sempre na moeda da própria conta/cartão, sem conversão.
  */
 export async function loadTransactionShortcutSummaries(params: {
   accounts: ShortcutAccount[];
+  /** Competência selecionada no navegador de meses. */
+  year: number;
+  month: number;
   /** Hoje, YYYY-MM-DD (data local). */
   today: string;
 }): Promise<Record<string, TransactionShortcutSummary>> {
@@ -61,8 +79,9 @@ export async function loadTransactionShortcutSummaries(params: {
   const ownerId = await getCurrentUserId();
   const cashAccounts = params.accounts.filter((account) => account.type === "Conta");
   const cards = params.accounts.filter((account) => account.type === "Cartão");
-  const year = Number(params.today.slice(0, 4));
-  const month = Number(params.today.slice(5, 7));
+  const { year, month } = params;
+  const temporal = getTemporal(year, month, params.today);
+  const balanceReference = getShortcutAccountBalanceReference(year, month, params.today);
 
   const [competencesResponse, closuresResponse] = await Promise.all([
     supabase.from("competences").select("id, month, year").eq("owner_id", ownerId),
@@ -82,22 +101,27 @@ export async function loadTransactionShortcutSummaries(params: {
   const closures = filterClosedAccountClosures(
     (closuresResponse.data ?? []) as (OverviewClosure & { status: string | null })[],
   );
-  const currentCompetence = competences.find((item) => item.year === year && item.month === month);
+  const selectedCompetence = competences.find((item) => item.year === year && item.month === month);
   const summaries: Record<string, TransactionShortcutSummary> = {};
 
   const balanceTasks = cashAccounts.map(async (account) => {
     const transactions = await fetchAccountBalanceTransactions({
       ownerId,
       accountId: account.id,
-      asOf: params.today,
+      asOf: balanceReference.asOf,
+      exclusive: balanceReference.exclusive,
       closures,
       competences,
     });
     summaries[account.id] = {
       kind: "account",
+      year,
+      month,
+      temporal,
       balance: calculateAccountBalanceAt({
         account: { ...account, active: true },
-        asOf: params.today,
+        asOf: balanceReference.asOf,
+        exclusive: balanceReference.exclusive,
         competences,
         closures,
         transactions,
@@ -109,14 +133,14 @@ export async function loadTransactionShortcutSummaries(params: {
     if (cards.length === 0) return;
     const cardIds = cards.map((account) => account.id);
 
-    const [cardTransactions, statementsResponse, targetsResponse] = currentCompetence
+    const [cardTransactions, statementsResponse, targetsResponse] = selectedCompetence
       ? await Promise.all([
           fetchAllPages<CardTransactionRow>((from, to) =>
             supabase
               .from("transactions")
               .select("account_id, type, value")
               .eq("owner_id", ownerId)
-              .eq("competence_id", currentCompetence.id)
+              .eq("competence_id", selectedCompetence.id)
               .in("account_id", cardIds)
               .order("id")
               .range(from, to),
@@ -125,13 +149,13 @@ export async function loadTransactionShortcutSummaries(params: {
             .from("credit_card_statements")
             .select("account_id, payment_due_date")
             .eq("owner_id", ownerId)
-            .eq("competence_id", currentCompetence.id)
+            .eq("competence_id", selectedCompetence.id)
             .in("account_id", cardIds),
           supabase
             .from("financial_targets")
             .select("target_id, planned_value")
             .eq("owner_id", ownerId)
-            .eq("competence_id", currentCompetence.id)
+            .eq("competence_id", selectedCompetence.id)
             .eq("target_type", "account")
             .in("target_id", cardIds),
         ])
@@ -153,6 +177,7 @@ export async function loadTransactionShortcutSummaries(params: {
         kind: "card",
         year,
         month,
+        temporal,
         dueDate: getCardInvoiceDueDate({
           year,
           month,

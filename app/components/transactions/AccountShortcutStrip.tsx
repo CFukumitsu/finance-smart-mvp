@@ -106,7 +106,13 @@ function ShortcutCard({
   onToggle: () => void;
 }) {
   const card = summary?.kind === "card" ? summary : null;
+  const cash = summary?.kind === "account" ? summary : null;
   const monthLabel = card ? formatShortcutMonthLabel(card.year, card.month) : null;
+  // Competência atual: saldo de hoje; demais: saldo no fim da competência.
+  const balanceLabel =
+    !cash || cash.temporal === "current"
+      ? "Saldo atual"
+      : `${cash.temporal === "future" ? "Saldo previsto" : "Saldo"} · fim de ${formatShortcutMonthLabel(cash.year, cash.month)}`;
 
   return (
     <button
@@ -131,9 +137,9 @@ function ShortcutCard({
 
       {account.type === "Conta" ? (
         <>
-          <span className="theme-muted mt-1 text-[11px] font-medium leading-tight">Saldo atual</span>
+          <span className="theme-muted mt-1 text-[11px] font-medium leading-tight">{balanceLabel}</span>
           <ShortcutValue
-            value={summary?.kind === "account" ? summary.balance : null}
+            value={cash?.balance}
             currency={account.currency}
             state={summariesState}
             negativeTone
@@ -142,7 +148,10 @@ function ShortcutCard({
       ) : (
         <>
           <span className="theme-muted mt-1 flex flex-wrap items-baseline justify-between gap-x-2 text-[11px] font-medium leading-tight">
-            <span>Fatura atual{monthLabel ? ` · ${monthLabel}` : ""}</span>
+            <span>
+              {!card || card.temporal === "current" ? "Fatura atual" : "Fatura"}
+              {monthLabel ? ` · ${monthLabel}` : ""}
+            </span>
             {card?.dueDate && (
               <span className="whitespace-nowrap">
                 Vence {formatShortcutDueDate(card.dueDate)}
@@ -392,8 +401,8 @@ function normalize(value: string) {
 }
 
 /**
- * Atalhos de contas/cartões de Lançamentos. Mostram a situação atual (não
- * dependem dos filtros) e funcionam como filtro de conta: clicar seleciona;
+ * Atalhos de contas/cartões de Lançamentos. Acompanham a competência
+ * selecionada (não dependem dos demais filtros) e funcionam como filtro de conta: clicar seleciona;
  * clicar de novo, ou em "Todas", remove só o filtro de conta.
  */
 export default function AccountShortcutStrip({

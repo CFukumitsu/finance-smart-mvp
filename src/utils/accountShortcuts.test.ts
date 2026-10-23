@@ -7,6 +7,7 @@ import {
   formatShortcutDueDate,
   formatShortcutMonthLabel,
   getCardInvoiceDueDate,
+  resolveShortcutSummariesView,
   getNextTransactionShortcutOrder,
   buildOptionalAccountColumns,
   resolveMissingAccountColumns,
@@ -170,4 +171,39 @@ test("planejamento do cartão: abaixo, igual, acima, sem planejamento e estornos
     [credit.invoiceTotal, credit.availableLimit, credit.usageRatio, credit.isOverLimit],
     [-200, 1200, 0, false],
   );
+});
+
+test("atalhos só exibem o carregamento da competência selecionada", () => {
+  const november = { competenceId: "c-11", status: "ready" as const, summaries: { card: { invoiceTotal: 4679.14 } } };
+  assert.deepEqual(resolveShortcutSummariesView(november, "c-11"), {
+    status: "ready",
+    summaries: { card: { invoiceTotal: 4679.14 } },
+  });
+  // Troca para dezembro antes da resposta: nada de novembro aparece.
+  assert.deepEqual(resolveShortcutSummariesView(november, "c-12"), { status: "loading", summaries: {} });
+  assert.deepEqual(resolveShortcutSummariesView(null, "c-11"), { status: "loading", summaries: {} });
+  assert.deepEqual(resolveShortcutSummariesView(november, ""), { status: "loading", summaries: {} });
+  // Erro da competência atual é exibido como erro, não como carregamento.
+  assert.deepEqual(
+    resolveShortcutSummariesView({ competenceId: "c-11", status: "error", summaries: {} }, "c-11"),
+    { status: "error", summaries: {} },
+  );
+});
+
+test("fatura do atalho = resumo inferior (Despesa − Receita da competência)", () => {
+  const november = [
+    { account_id: "card", type: "Despesa", value: 4000 },
+    { account_id: "card", type: "Despesa", value: 779.14 },
+    { account_id: "card", type: "Receita", value: 100 },
+    { account_id: "card", type: "Pagamento de Fatura", value: 999 },
+    { account_id: "card", type: "Transferência", value: 50 },
+  ];
+  const bottomSummary = november.reduce(
+    (sum, t) => (t.type === "Despesa" ? sum + t.value : t.type === "Receita" ? sum - t.value : sum),
+    0,
+  );
+  const shortcut = summarizeCardShortcut({ transactions: november, plannedLimit: 5000 });
+  assert.equal(Math.round(shortcut.invoiceTotal * 100), Math.round(bottomSummary * 100));
+  assert.equal(Math.round(shortcut.invoiceTotal * 100), 467914);
+  assert.equal(summarizeCardShortcut({ transactions: [], plannedLimit: null }).invoiceTotal, 0);
 });

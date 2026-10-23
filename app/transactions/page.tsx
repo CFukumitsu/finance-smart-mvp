@@ -149,8 +149,10 @@ import {
 import { getTemporal } from "@/src/utils/financialOverview";
 import { useAccountImageUrls } from "@/src/hooks/useAccountImageUrls";
 import {
+  resolveShortcutSummariesView,
   selectWithOptionalAccountColumns,
   sortTransactionShortcuts,
+  type ShortcutSummariesRequest,
 } from "@/src/utils/accountShortcuts";
 import ViewModeToggle from "@/src/components/ui/viewMode/ViewModeToggle";
 import { useViewMode } from "@/src/components/ui/viewMode/useViewMode";
@@ -489,14 +491,11 @@ function TransactionsPageContent() {
     hasException: viewModeHasException,
     defaultMode: defaultViewMode,
   } = useViewMode("transactions");
-  // Atalhos de contas: situação atual, independente dos filtros da listagem.
+  // Atalhos de contas: competência selecionada, independente dos demais
+  // filtros da listagem. Cada resultado guarda a competência que o pediu.
   const [shortcutsAvailable, setShortcutsAvailable] = useState(true);
-  const [shortcutSummaries, setShortcutSummaries] = useState<
-    Record<string, TransactionShortcutSummary>
-  >({});
-  const [shortcutSummariesState, setShortcutSummariesState] = useState<
-    "loading" | "ready" | "error"
-  >("loading");
+  const [shortcutSummariesRequest, setShortcutSummariesRequest] =
+    useState<ShortcutSummariesRequest<TransactionShortcutSummary> | null>(null);
   // Incrementado depois de gravações, para os atalhos refletirem o novo saldo.
   const [shortcutRefreshToken, setShortcutRefreshToken] = useState(0);
   const [accountPeriodBalancesRequest, setAccountPeriodBalancesRequest] =
@@ -1163,34 +1162,44 @@ function TransactionsPageContent() {
     setPlannedCardLimit(0);
   }, [accountFilter, competenceFilter, accounts]);
 
-  // Os atalhos dependem só das contas favoritas e de gravações; nunca da
-  // busca, do período ou dos demais filtros da listagem.
+  // Os atalhos dependem das contas favoritas, da competência selecionada e de
+  // gravações; nunca da busca nem dos demais filtros da listagem.
   useEffect(() => {
+    const competence = competences.find((item) => item.id === competenceFilter);
+    if (!competence) return;
     const favorites = sortTransactionShortcuts(
       accounts.filter(isFinancialLedgerAccount),
     );
+    const competenceId = competence.id;
     let cancelled = false;
 
-    setShortcutSummariesState("loading");
+    // Na mesma competência (recarga após gravação) os valores continuam
+    // visíveis até a resposta; em outra, a guarda do render os esconde.
+    setShortcutSummariesRequest((current) => ({
+      competenceId,
+      status: "loading",
+      summaries: current?.competenceId === competenceId ? current.summaries : {},
+    }));
     loadTransactionShortcutSummaries({
       accounts: favorites,
+      year: competence.year,
+      month: competence.month,
       today: getLocalTodayIsoDate(),
     })
       .then((summaries) => {
         if (cancelled) return;
-        setShortcutSummaries(summaries);
-        setShortcutSummariesState("ready");
+        setShortcutSummariesRequest({ competenceId, status: "ready", summaries });
       })
       .catch((error) => {
         if (cancelled) return;
         console.error("Erro ao carregar atalhos de contas:", error);
-        setShortcutSummariesState("error");
+        setShortcutSummariesRequest({ competenceId, status: "error", summaries: {} });
       });
 
     return () => {
       cancelled = true;
     };
-  }, [accounts, shortcutRefreshToken]);
+  }, [accounts, competences, competenceFilter, shortcutRefreshToken]);
 
   // Saldos canônicos da conta selecionada na competência do resumo. Também
   // não dependem da busca nem de tipo/status/categoria.
@@ -2665,6 +2674,11 @@ function TransactionsPageContent() {
     request: accountPeriodBalancesRequest,
   });
   const periodBalances = periodBalancesView.balances;
+  // Atalhos: só o resultado da competência selecionada.
+  const shortcutSummariesView = resolveShortcutSummariesView(
+    shortcutSummariesRequest,
+    competenceFilter,
+  );
   const periodMovement = selectedAccount
     ? calculateAccountMovement(selectedAccount.id, transactions)
     : 0;
@@ -2768,7 +2782,7 @@ function TransactionsPageContent() {
   );
 
   // Sem conta: movimentações do período/listagem. Com conta: saldos da conta
-  // no mês (regra canônica) + movimentação filtrada. Atalhos = situação atual.
+  // no mês (regra canônica) + movimentação filtrada. Atalhos = mesma competência.
   const summaryPeriodLabel = selectedCompetence
     ? formatCompetenceLabel(selectedCompetence.name)
     : "período selecionado";
@@ -3046,8 +3060,8 @@ function TransactionsPageContent() {
           accounts={financialLedgerAccounts}
           selectedAccountId={accountFilter}
           onSelectAccount={setAccountFilter}
-          summaries={shortcutSummaries}
-          summariesState={shortcutSummariesState}
+          summaries={shortcutSummariesView.summaries}
+          summariesState={shortcutSummariesView.status}
           shortcutsAvailable={shortcutsAvailable}
           imageUrls={accountImageUrls}
         />
